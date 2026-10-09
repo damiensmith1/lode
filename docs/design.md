@@ -330,7 +330,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
     line without scrolling. A focus the code asked for doesn't scroll the
     code back.
 - Declarations record their **end line** (`loc.endLine`) for ranges.
-- **Standalone host** (`hosts/app`): code on the left with ◇ annotations,
+- **Standalone host** (`hosts/app`): code on the left with syntax colours
+  (highlight.js, Clance's palette; a host concern, so not in views) and ◇
+  annotations,
   lode views in tabs on the right, file tree, symbol search, deep links
   (`#focus=<id>&file=<path>&line=<n>`). `lode open <project>` builds it
   with esbuild and opens it.

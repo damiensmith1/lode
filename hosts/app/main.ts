@@ -3,6 +3,7 @@
 // clicking in the graph opens and jumps the code. Nothing moves on its own. It's one host among many;
 // everything lode-specific comes from ../../views through LodeHost.
 import type { FileEntry, FileView, NodeRef, ProjectInfo } from "../../src/query/types.js";
+import { highlightLines } from "./highlight.js";
 import { createView, LodeClient, TITLE_EVENT, type LodeHost, type SourceHighlight, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -42,8 +43,9 @@ function renderSource(view: FileView) {
   const notesByLine = new Map<number, typeof view.annotations>();
   for (const a of view.annotations) notesByLine.set(a.line, [...(notesByLine.get(a.line) ?? []), a]);
 
+  const highlighted = highlightLines(view.text, view.file);
   $("code").replaceChildren(
-    ...view.text.split("\n").map((text, i) => {
+    ...view.text.split("\n").map((_text, i) => {
       const n = i + 1;
       const symbol = symbolsByLine.get(n)?.find((s) => s.kind === "callable") ?? symbolsByLine.get(n)?.[0];
       const gutter = el("span", { className: "gut" });
@@ -52,7 +54,9 @@ function renderSource(view: FileView) {
       for (const a of (notesByLine.get(n) ?? []).slice(0, 3)) {
         notes.append(el("button", { className: `note k-${a.kind}`, onclick: () => focusLinked(a.target) }, `◇ ${a.text}`));
       }
-      const row = el("div", { className: "ln", id: `L${n}` }, el("span", { className: "no" }, String(n)), gutter, el("span", { className: "src" }, text || " "), notes);
+      const src = el("span", { className: "src hljs" });
+      src.innerHTML = highlighted[i] || " "; // highlight.js output: source text is escaped
+      const row = el("div", { className: "ln", id: `L${n}` }, el("span", { className: "no" }, String(n)), gutter, src, notes);
       row.dataset.line = String(n);
       return row;
     }),

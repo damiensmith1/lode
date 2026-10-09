@@ -51,6 +51,16 @@ body.no-tree #tree { display: none; }
 .ln .gut { flex: none; width: 18px; text-align: center; }
 .ln .gut button { color: var(--signal); font-size: 11px; }
 .ln .src { white-space: pre; }
+/* Syntax colours, from Clance's theme tokens. */
+.hljs-keyword, .hljs-literal, .hljs-meta .hljs-keyword { color: #8a3b6b; }
+.hljs-string, .hljs-regexp, .hljs-template-tag, .hljs-subst { color: #7a5320; }
+.hljs-number { color: #2f5fa8; }
+.hljs-title.function_, .hljs-title.class_, .hljs-title { color: #3a5a7a; }
+.hljs-built_in, .hljs-type { color: #2f6b5e; }
+.hljs-comment, .hljs-doctag { color: #75726b; font-style: italic; }
+.hljs-attr, .hljs-property { color: #5f5d57; }
+.hljs-variable.language_, .hljs-params { color: #34322e; }
+.hljs-meta { color: #75726b; }
 .ln .notes { margin-left: auto; padding-left: 16px; display: flex; gap: 10px; white-space: nowrap; }
 .note { font-size: 10.5px; }
 .note:hover { text-decoration: underline; }
