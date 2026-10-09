@@ -67,6 +67,21 @@ export interface GraphData {
 
 export interface LanguagePlugin {
   name: string;
+  // Bumped when the plugin's output changes shape, invalidating caches.
+  version: number;
   // Index a project and return it in lode's schema.
   index(projectPath: string): GraphData;
+  // A long-lived session for incremental updates. `state` is what an earlier
+  // session's `state()` returned, so a restart can pick up where it left off.
+  open(projectPath: string, state?: unknown): PluginSession;
+}
+
+export interface PluginSession {
+  // Every source file in the project (relative path) and its content hash.
+  files(): Record<string, string>;
+  // Re-index the given files (and whatever depends on them) and return the
+  // whole project's graph data. With no argument, index everything.
+  update(changed?: string[]): GraphData;
+  // JSON-serializable state for resuming later.
+  state(): unknown;
 }

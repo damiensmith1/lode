@@ -100,6 +100,38 @@ Indexing is slow; opening a file must be instant. The current graph is held
 in memory, saved to disk so a restart doesn't trigger a full re-index, and
 patched when a file changes. No database in v1.
 
+**Core** (`src/graph/store.ts`, `GraphStore`): knows nothing about languages.
+
+- Saves one JSON file: plugin output (not derived edges, which are
+  recomputed on load), a content hash per source file, and an opaque
+  `pluginState` blob. Written atomically (temp file + rename).
+- Lives in `~/.cache/lode/<project hash>/` by default, **never inside the
+  indexed project**.
+- `open()` loads the cache, re-hashes the project's files, and re-indexes
+  only what changed, was added or was removed. No changes means the plugin
+  never runs. `refresh()` does the same at any time; `rebuild()` is a full
+  re-index.
+- Invalidated by a change in cache format, plugin name or plugin `version`.
+- Watching files is left to the consumer: it calls `refresh()`.
+
+**Plugin side** (`LanguagePlugin.open` → `PluginSession`): `files()` returns
+hashes, `update(changed)` re-indexes, `state()` returns what to persist. The
+TS session (`src/ingest/ts/session.ts`) keeps per-file facts and the
+program between updates:
+
+- Re-extracts the changed files **plus the files that directly import
+  them**, since their callee ids and argument types can change. Transitive
+  effects of inferred types aren't followed; `rebuild()` catches those.
+- A caching compiler host re-parses a file only when its text changed, so
+  library `.d.ts` files (most of a program) are parsed once per session.
+- Cross-file steps (channel wrapper resolution, external nodes) re-run over
+  all cached facts on every update; they're cheap.
+
+On glance: full index 1.2s; reopen with no changes **24ms**; one changed
+file ~300ms warm (~0.9s for the first update after a cold start, which
+builds the program). The remaining cost is TS's type checker, which is
+rebuilt per program.
+
 ### 4. Derive
 
 Deterministic analysis over the whole graph:

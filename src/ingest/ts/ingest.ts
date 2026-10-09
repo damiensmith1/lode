@@ -1,6 +1,6 @@
 import path from "node:path";
 import ts from "typescript";
-import type { CallFact, DeclFact, Location, TsFacts } from "./facts.js";
+import type { CallFact, DeclFact, FileFacts, Location, TsFacts } from "./facts.js";
 import { channelFactOf, type ChannelFact, keyParamOf, resolveEndpoints } from "./channels.js";
 import { type Registration, registrationOf } from "./registrations.js";
 
@@ -22,14 +22,44 @@ const DECL_KINDS = new Set([
   ts.SyntaxKind.VariableDeclaration,
 ]);
 
-export function ingestTsProject(tsconfigPath: string): TsFacts {
+export interface Project {
+  root: string;
+  options: ts.CompilerOptions;
+  files: string[]; // absolute paths of the project's own source files
+}
+
+export function loadProject(tsconfigPath: string): Project {
   const root = path.dirname(path.resolve(tsconfigPath));
   const config = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
   if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
   const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
-  const program = ts.createProgram(parsed.fileNames, parsed.options);
+  return { root, options: parsed.options, files: parsed.fileNames.map((f) => path.resolve(f)) };
+}
+
+// Whole project in one pass. Sessions (session.ts) use the pieces below to
+// re-extract only what changed.
+export function ingestTsProject(tsconfigPath: string): TsFacts {
+  const project = loadProject(tsconfigPath);
+  const program = ts.createProgram(project.files, project.options);
+  const extract = createExtractor(program, project);
+  return mergeFacts(project.files.map((f) => extract(program.getSourceFile(f)!)));
+}
+
+export function mergeFacts(files: FileFacts[]): TsFacts {
+  const calls = files.flatMap((f) => f.calls);
+  return {
+    decls: files.flatMap((f) => f.decls),
+    calls,
+    channels: resolveEndpoints(files.flatMap((f) => f.channelFacts), calls),
+  };
+}
+
+// Facts for one file. Needs the whole program, since resolving names and
+// types reaches into other files.
+export function createExtractor(program: ts.Program, project: Project): (sf: ts.SourceFile) => FileFacts {
+  const { root } = project;
   const checker = program.getTypeChecker();
-  const projectFiles = new Set(parsed.fileNames.map((f) => path.resolve(f)));
+  const projectFiles = new Set(project.files);
 
   const rel = (fileName: string) => path.relative(root, fileName).split(path.sep).join("/");
   const isProjectFile = (sf: ts.SourceFile) => projectFiles.has(path.resolve(sf.fileName));
@@ -105,13 +135,12 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
   const nodeIdOf = (node: ts.Node) => (isDecl(node) ? declId(node) : null);
   const channelCtx = { checker, nodeIdOf, enclosingId, locOf };
 
-  const decls: DeclFact[] = [];
-  const calls: CallFact[] = [];
-  const channelFacts: ChannelFact[] = [];
-  const seen = new Set<string>();
+  return (sf: ts.SourceFile): FileFacts => {
+    const decls: DeclFact[] = [];
+    const calls: CallFact[] = [];
+    const channelFacts: ChannelFact[] = [];
+    const seen = new Set<string>();
 
-  for (const sf of program.getSourceFiles()) {
-    if (!isProjectFile(sf)) continue;
     decls.push({ id: rel(sf.fileName), name: path.basename(sf.fileName), tsKind: "SourceFile", containerId: null, loc: { file: rel(sf.fileName), line: 1 } });
 
     const visit = (node: ts.Node) => {
@@ -151,9 +180,8 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
-  }
-
-  return { decls, calls, channels: resolveEndpoints(channelFacts, calls) };
+    return { file: rel(sf.fileName), decls, calls, channelFacts };
+  };
 
   // Arguments that are the caller's own parameters, so wrappers of wrappers
   // can be followed. Omitted when there are none.

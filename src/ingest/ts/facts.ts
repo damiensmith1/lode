@@ -1,4 +1,5 @@
 import type { ChannelEndpoint } from "../../schema/index.js";
+import type { ChannelFact } from "./channels.js";
 
 // Raw facts emitted by the TypeScript plugin, before normalization.
 
@@ -35,4 +36,12 @@ export interface TsFacts {
   decls: DeclFact[];
   calls: CallFact[];
   channels: ChannelEndpoint[];
+}
+
+// One file's facts, before cross-file resolution (channel wrappers).
+export interface FileFacts {
+  file: string;
+  decls: DeclFact[];
+  calls: CallFact[];
+  channelFacts: ChannelFact[];
 }
