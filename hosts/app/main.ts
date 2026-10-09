@@ -11,7 +11,9 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
   return node;
 };
 
-const client = new LodeClient(`ws://${location.host}/rpc`);
+// The server puts its session token in the fragment (never sent over HTTP).
+const link = new URLSearchParams(location.hash.slice(1));
+const client = new LodeClient(`ws://${location.host}/rpc?token=${encodeURIComponent(link.get("token") ?? "")}`);
 
 // --- Source pane --------------------------------------------------------
 
@@ -182,8 +184,7 @@ async function start() {
   setupSearch();
   openView({ kind: "map", lens: "runtime" });
 
-  // Deep links: #focus=<node id>&file=<path>&line=<n>
-  const link = new URLSearchParams(location.hash.slice(1));
+  // Deep links: #token=…&focus=<node id>&file=<path>&line=<n>
   if (link.get("file")) void showSource(link.get("file")!, Number(link.get("line")) || undefined);
   if (link.get("focus")) openView({ kind: "focus", id: link.get("focus")! });
 

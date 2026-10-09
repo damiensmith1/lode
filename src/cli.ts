@@ -60,7 +60,7 @@ if (command === "serve" || command === "open") {
   }
   const server = await startServer({ store, port, staticDir, watch: true });
   console.log(`lode · ${graph.size.nodes} nodes, ${graph.size.edges} edges (${ms}ms) · ${store.root}`);
-  console.log(command === "open" ? `open ${server.url}` : `serving ws://127.0.0.1:${server.port}/rpc`);
+  console.log(command === "open" ? `open ${server.url}` : `serving ${server.rpcUrl}`);
   if (command === "open") spawn(process.platform === "darwin" ? "open" : "xdg-open", [server.url], { stdio: "ignore", detached: true }).unref();
 } else if (command === "index") {
   const data = graph.toData();

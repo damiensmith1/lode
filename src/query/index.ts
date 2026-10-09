@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { Graph } from "../graph/graph.js";
 import type { Edge, Node, NodeId } from "../schema/index.js";
@@ -157,10 +157,12 @@ export class Queries {
 
   // A source file with lode's inline annotations and the symbols in it.
   source(file: string): FileView | null {
-    const absolute = path.resolve(this.root, file);
-    if (!absolute.startsWith(this.root + path.sep)) return null; // stay inside the project
     let text: string;
     try {
+      // Real paths on both sides, so neither `..` nor a symlink leaves the project.
+      const root = realpathSync(this.root);
+      const absolute = realpathSync(path.resolve(this.root, file));
+      if (!absolute.startsWith(root + path.sep)) return null;
       text = readFileSync(absolute, "utf8");
     } catch {
       return null;

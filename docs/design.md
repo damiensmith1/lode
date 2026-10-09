@@ -300,7 +300,12 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   JSON (`src/query/types.ts`), the only thing views depend on.
 - **Server** (`src/server`): JSON-RPC over a WebSocket at `/rpc`, localhost
   only; watches the project and pushes `changed` after re-indexing.
-  Optionally serves a host's static files.
+  Optionally serves a host's static files. Since it serves source code, a
+  WebSocket must carry the session's random token (`/rpc?token=…`), come
+  from an allowed Origin (none for non-browser hosts; hosts can add theirs),
+  and name a localhost Host (blocks DNS rebinding). The standalone app gets
+  the token in the URL fragment, which never goes over HTTP. `source` checks
+  real paths, so symlinks can't escape the project.
 - **Views** (`views/`): framework-free web components with shadow DOM,
   themed by `--lode-*` CSS custom properties from the host.
   `<lode-focus node=…>` refocuses in place with back history; `<lode-map

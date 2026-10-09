@@ -52,7 +52,7 @@ describe("queries", () => {
 describe("server", () => {
   it("answers JSON-RPC over a WebSocket", async () => {
     const server = await startServer({ store, port: 0 });
-    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/rpc`);
+    const socket = new WebSocket(server.rpcUrl);
     await new Promise((resolve) => socket.once("open", resolve));
     const call = (id: number, method: string, params = {}) =>
       new Promise<Record<string, unknown>>((resolve) => {
@@ -68,6 +68,21 @@ describe("server", () => {
     expect(focus.result).toMatchObject({ node: { name: "stamp" } });
     expect((await call(3, "nope")).error).toMatch(/unknown method/);
     socket.close();
+    await server.close();
+  });
+
+  it("refuses connections without the token or from other origins", async () => {
+    const server = await startServer({ store, port: 0 });
+    const refused = (url: string, headers: Record<string, string> = {}) =>
+      new Promise<boolean>((resolve) => {
+        const s = new WebSocket(url, { headers });
+        s.once("open", () => (s.close(), resolve(false)));
+        s.once("error", () => resolve(true));
+      });
+    expect(await refused(`ws://127.0.0.1:${server.port}/rpc`)).toBe(true);
+    expect(await refused(`ws://127.0.0.1:${server.port}/rpc?token=wrong`)).toBe(true);
+    expect(await refused(server.rpcUrl, { Origin: "https://evil.example" })).toBe(true);
+    expect(await refused(server.rpcUrl, { Origin: `http://127.0.0.1:${server.port}` })).toBe(false);
     await server.close();
   });
 });
