@@ -43,6 +43,12 @@ the view:
 what it feeds. For a diff, this shows the impact of a change: what it
 touches upstream and downstream.
 
+**A standalone, open-source library.** lode is its own package, not a
+Clance feature. The core graph, query layers and views are separate pieces;
+views are embeddable panels that open as tabs in any host (an IDE, Clance)
+through a thin adapter. If it works well it gets embedded in Clance, which
+should be easy if the package boundaries are right.
+
 **A query layer decides what to show.** How far a trace goes, and which
 neighbours are expanded or collapsed, depends on relevance to the focus,
 not a fixed depth. This is likely an LLM or a fast classification model
