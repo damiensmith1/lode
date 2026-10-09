@@ -281,6 +281,52 @@ Bridge calls (`window.api.x()`) also seed `renderer`, and imports include
 On glance: 40 files in `main`, 41 in `renderer`, 3 in `preload`, none
 untagged.
 
+## Views and hosts (exploring)
+
+Not built yet. Mockups, using real data from the glance index:
+[lode UX mockups](https://claude.ai/artifact/HtcZBCmXu8LkFT9yNSQ9tq).
+
+lode runs as a plugin inside an IDE-like host. The host owns its chrome
+(activity bar, explorer, source control, editor tabs, status bar); lode
+contributes views through four integration points:
+
+- **Tabs**: each view opens as its own editor tab with its own toolbar
+  (view switch, lens, ask box), so it is self-contained and portable.
+- **Inline annotations** in the host's editor, CodeLens-style:
+  `⟶ sendToHud`, `9 readers`, `ipc ⇢ onStart`.
+- **A sidebar panel**: ask box, recent questions, open views.
+- **Source control action**: "show impact" on a changed file.
+
+The four views:
+
+1. **Focus**: one symbol expanded (its steps and local flows), what feeds it
+   above, what it feeds below (IPC, shared state, helpers), collapsed by
+   default. Opened beside the source file.
+2. **Trace**: a question's answer as a path across runtime lanes
+   (renderer → preload → main), requests down, replies back up with their
+   types; off-path nodes collapsed but one click away.
+3. **Impact**: a change fanned out to its callers grouped by file, plus hops
+   across process boundaries the typechecker can't see.
+4. **Map**: zoomed out to a lens (runtimes), edges merged between groups and
+   labelled with counts.
+
+Visual encoding, one per edge kind: calls solid grey, local flow blue, IPC /
+bridge orange dashed, shared state purple dotted. Collapsed nodes are dashed
+outlines; library code is hidden behind a toggle.
+
+### Package layout (idea)
+
+```
+lode-core      graph, plugins, derive, cache (this repo today)
+lode-query     query layers: deterministic cut + model-scored (Jev / LLM)
+lode-views     framework-free view components (focus, trace, impact, map)
+lode-<host>    thin adapters: VS Code first, Clance later
+```
+
+Views depend on core and query only through their public APIs; an adapter
+only maps host concepts (open tab, editor decorations, sidebar, SCM action)
+onto view mounts.
+
 ## Build vs buy: existing code graphs
 
 Joern (code property graph) and CodeQL were considered as the core and
