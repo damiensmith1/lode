@@ -174,6 +174,27 @@ function send(msg, bus) {
 On glance: 1691 tier 1 flow edges, 424 of them between project nodes (the
 rest touch library code: `Map.set`, `Promise.then`, …).
 
+### References and shared-state flows (tier 2)
+
+- **The plugin emits `references` edges** (`src/ingest/ts/refs.ts`): a node
+  using a value or a type without calling it. Each carries an `access`:
+  - `write`: assignment, `++`/`--`, `delete`, assigning into it
+    (`x.a = 1`, `x[k] = 1`), or a mutating method (`set`, `push`, `delete`, …)
+  - `read`: any other use, including a function passed by reference
+    (`register(setCurrent)`)
+  - `type`: used in a type position (`(m: Message) => …`, `extends Base`)
+
+  Targets are project code only; library use shows up as calls.
+- **Module-level initializers flow into their variable**:
+  `const cfg = readConfig()` is a tier 1 edge `readConfig → cfg`.
+- **The core derives tier 2** (`src/derive/state.ts`): for every `value`
+  node, each writer flows to each other reader, as a `flows` edge with
+  `through: <value>`. This is generic: it only reads `references` edges.
+
+On glance: 575 references (303 read, 103 write, 169 type) and 178 tier 2
+flows. The busiest value is dictation's `state` (26 flows), so the
+writers × readers product hasn't been a problem.
+
 ### Channel flows (tier 3)
 
 Split between plugin and core:

@@ -6,7 +6,7 @@ import { toGraph } from "./toGraph.js";
 // projectPath: the project's tsconfig.json.
 export const tsPlugin: LanguagePlugin = {
   name: "typescript",
-  version: 2,
+  version: 3,
   index: (projectPath) => toGraph(ingestTsProject(projectPath)),
   open: openTsSession,
 };

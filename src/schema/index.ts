@@ -44,6 +44,8 @@ export interface Edge {
   type?: string; // flows/references: the type carried
   via?: { family: string; key: string }; // flows: the channel it crossed
   within?: NodeId; // flows: the node where it happens (local data flow)
+  through?: NodeId; // flows: the shared state it passes through (tier 2)
+  access?: "read" | "write" | "type"; // references: how the target is used
 }
 
 // One side of a string-keyed channel (IPC, events, queues). Plugins say

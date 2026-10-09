@@ -1,7 +1,8 @@
 import path from "node:path";
 import ts from "typescript";
-import type { CallFact, DeclFact, FileFacts, FlowFact, Location, TsFacts } from "./facts.js";
+import type { CallFact, DeclFact, FileFacts, FlowFact, Location, RefFact, TsFacts } from "./facts.js";
 import { returningFunction, sourceCalls } from "./flows.js";
+import { referenceOf } from "./refs.js";
 import { channelFactOf, type ChannelFact, keyParamOf, resolveEndpoints } from "./channels.js";
 import { type Registration, registrationOf } from "./registrations.js";
 
@@ -52,6 +53,7 @@ export function mergeFacts(files: FileFacts[]): TsFacts {
     decls: files.flatMap((f) => f.decls),
     calls,
     flows: files.flatMap((f) => f.flows),
+    refs: files.flatMap((f) => f.refs),
     channels: resolveEndpoints(files.flatMap((f) => f.channelFacts), calls),
   };
 }
@@ -167,6 +169,7 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
     const calls: CallFact[] = [];
     const channelFacts: ChannelFact[] = [];
     const flows: FlowFact[] = [];
+    const refs = new Map<string, RefFact>(); // one per from/to/access, first location wins
     const seen = new Set<string>();
 
     const flowOut = (expr: ts.Expression, owner: string | null) => {
@@ -226,12 +229,23 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
           }
         }
       }
+      if (ts.isIdentifier(node)) {
+        const ref = referenceOf(node, channelCtx);
+        const key = ref && `${ref.from}|${ref.to}|${ref.access}`;
+        if (ref && !refs.has(key!)) refs.set(key!, ref);
+      }
+      // A module-level variable holds its initializer's result: `const cfg = readConfig()`.
+      if (ts.isVariableDeclaration(node) && node.initializer && isDecl(node) && !isFunctionValue(node)) {
+        for (const from of producers(node.initializer)) {
+          flows.push({ from, to: declId(node), within: enclosingId(node), type: checker.typeToString(checker.getTypeAtLocation(node)), loc: locOf(node) });
+        }
+      }
       if (ts.isReturnStatement(node) && node.expression) flowOut(node.expression, ownerOf(returningFunction(node)));
       if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) flowOut(node.body, ownerOf(node));
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
-    return { file: rel(sf.fileName), decls, calls, channelFacts, flows };
+    return { file: rel(sf.fileName), decls, calls, channelFacts, flows, refs: [...refs.values()] };
   };
 
   // Arguments that are the caller's own parameters, so wrappers of wrappers

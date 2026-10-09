@@ -21,7 +21,8 @@ export class Graph {
       push(graph.children, node.parent, node.id);
     }
     for (const edge of data.edges) {
-      for (const end of [edge.from, edge.to, ...(edge.within ? [edge.within] : [])]) {
+      for (const end of [edge.from, edge.to, edge.within, edge.through]) {
+        if (end === undefined) continue;
         if (!graph.nodes.has(end)) throw new Error(`${edge.kind} edge references unknown node ${end}`);
       }
       push(graph.outgoing, edge.from, edge);

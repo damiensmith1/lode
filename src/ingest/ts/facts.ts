@@ -42,10 +42,20 @@ export interface FlowFact {
   loc: Location;
 }
 
+// A node using a value (read or write) or a type, other than by calling it.
+export interface RefFact {
+  from: string;
+  to: string;
+  access: "read" | "write" | "type";
+  type?: string; // value refs: the value's type
+  loc: Location;
+}
+
 export interface TsFacts {
   decls: DeclFact[];
   calls: CallFact[];
   flows: FlowFact[];
+  refs: RefFact[];
   channels: ChannelEndpoint[];
 }
 
@@ -56,4 +66,5 @@ export interface FileFacts {
   calls: CallFact[];
   channelFacts: ChannelFact[];
   flows: FlowFact[];
+  refs: RefFact[];
 }

@@ -63,6 +63,10 @@ export function toGraph(facts: TsFacts): GraphData {
     edges.push({ kind: "flows", from: flow.from, to: flow.to, confidence: "exact", loc: flow.loc, type: flow.type, within: flow.within });
   }
 
+  for (const ref of facts.refs) {
+    edges.push({ kind: "references", from: ref.from, to: ref.to, confidence: "exact", loc: ref.loc, access: ref.access, type: ref.type });
+  }
+
   return { nodes: [...nodes.values()], edges, channels: facts.channels };
 }
 
