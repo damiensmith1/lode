@@ -6,7 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "dump": "tsx scripts/dump.ts"
+    "lode": "tsx src/cli.ts"
   },
   "dependencies": {
     "typescript": "5.9.3"

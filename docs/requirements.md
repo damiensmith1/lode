@@ -44,3 +44,27 @@ later.
 - Exports (e.g. Mermaid)
 - Languages other than TypeScript
 - Inferred concept hierarchy
+
+## Status (core MVP)
+
+Done, tested on fixtures and on glance (43 files: 1799 nodes, 5490 edges,
+~1.3s full index, 24ms cached reopen):
+
+- TS ingest with cross-file name resolution and source locations
+- Schema with node kinds, containment, calls / references / flows edges
+- Flow edges: tier 1 (local), tier 2 (shared state), tier 3 (channels, with
+  wrapper following); confidence on derived edges
+- Lenses: containment, folder, runtime
+- One-hop traversal up and down
+- Persistent cache with incremental per-file updates
+- CLI: `index`, `node`
+
+Known gaps:
+
+- **JavaScript files** aren't indexed (glance's renderer is plain JS), so
+  calls from renderer code into the preload bridge are missing. TS can
+  analyze JS (`allowJs`); worth doing next.
+- Channel keys passed through *local* wrappers inside functions.
+- Node `EventEmitter` `emit`/`on` channels.
+- Reassignment-based local flows (`let x; x = load()`).
+- Importer-based invalidation is one level deep; `rebuild()` catches the rest.
