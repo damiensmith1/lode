@@ -109,6 +109,34 @@ Deterministic analysis over the whole graph:
   2. *shared state*: written to and read from the same symbol
   3. *channels*: linked by a string key (IPC, events). Literal keys match
      exactly; computed keys are resolved to patterns (`topic:*:update`).
+
+### Channel flows (tier 3)
+
+Split between plugin and core:
+
+- **The plugin knows frameworks.** It says which calls send and which
+  receive, and emits `ChannelEndpoint`s: node, role, family, key, payload
+  type. Families keep directions apart (Electron: `to-main`, `invoke`,
+  `to-renderer`), so `ipcMain.on("x")` never matches `webContents.send("x")`.
+  The table lives in `src/ingest/ts/channels.ts`.
+- **The core only matches** (`src/derive/channels.ts`): same family and key
+  gives a `flows` edge, `exact` for literals and `pattern` when either side
+  is a pattern. When the sender awaits a reply (`invoke`), a second edge
+  carries the handler's return type back.
+- **Keys** are read from the checker's type for the key argument: literals,
+  unions of literals (one endpoint each), template literals (patterns).
+- **Wrappers are followed.** When the key is a parameter of the enclosing
+  function (`sendToHud(channel, payload)`), the endpoint moves to each caller
+  of the wrapper, keyed by the argument it passed, up to 3 levels deep.
+- **Preload bridges are nodes.** Objects passed to
+  `contextBridge.exposeInMainWorld` become containers, and their function
+  members become callables, so `clance.onTerminalData` is a real endpoint.
+
+On glance: 321 endpoints, 286 flow edges, every send matched a receiver.
+The 5 receivers with no sender: 3 truly have none in TS, and 2 are sent
+through a *local* wrapper (`const send = …` inside a function), which isn't a
+node, so its key can't be followed. Known gap. Node `EventEmitter`
+`emit`/`on` isn't modelled yet: it needs the emitter instance, not just a key.
 - **Confidence** on every derived edge: literal match, pattern match, or
   model guess (model guesses come later and are tagged as such).
 - **Hierarchies (lenses)**: variable-depth containment trees over the same
@@ -130,7 +158,5 @@ against.
 
 ## Open decisions
 
-- **Where channel matching lives.** IPC conventions are framework-specific,
-  not language-specific: core derive, or plugins?
 - **Edge type labels for untyped code.** When callers pass different types
   into an unannotated parameter, what does the edge carry?

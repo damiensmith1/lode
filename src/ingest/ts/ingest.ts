@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
 import type { CallFact, DeclFact, Location, TsFacts } from "./facts.js";
+import { channelFactOf, type ChannelFact, keyParamOf, resolveEndpoints } from "./channels.js";
 import { type Registration, registrationOf } from "./registrations.js";
 
 // Declarations that become nodes. Anything else nested inside them is
@@ -49,11 +50,23 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
   const nameOf = (node: ts.Node): string | null => {
     const reg = registration(node);
     if (reg) return reg.key ? `${reg.call}:${reg.key}` : `${reg.call}@L${locOf(node).line}`;
+    if (ts.isPropertyAssignment(node)) return isObjectMember(node) ? declName(node) : null;
     if (!DECL_KINDS.has(node.kind) || isLocalVariable(node)) return null;
     return declName(node as ts.NamedDeclaration);
   };
 
   const isDecl = (node: ts.Node) => nameOf(node) !== null;
+
+  // `{ hide: () => … }` members are nodes when their object is one: a
+  // module-level variable, or an object handed to a registration
+  // (contextBridge.exposeInMainWorld). Elsewhere they stay inside their parent.
+  const isObjectMember = (node: ts.PropertyAssignment): boolean => {
+    const init = node.initializer;
+    if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return false;
+    const object = node.parent;
+    if (registration(object)) return true;
+    return ts.isVariableDeclaration(object.parent) && object.parent.initializer === object && isDecl(object.parent);
+  };
 
   // "<file>#<Outer.Inner>" for project code; "ext:<package>#<name>" otherwise.
   const declId = (decl: ts.Node): string => {
@@ -89,15 +102,23 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
     return declId(decl);
   };
 
+  const nodeIdOf = (node: ts.Node) => (isDecl(node) ? declId(node) : null);
+  const channelCtx = { checker, nodeIdOf, enclosingId, locOf };
+
   const decls: DeclFact[] = [];
   const calls: CallFact[] = [];
+  const channelFacts: ChannelFact[] = [];
+  const seen = new Set<string>();
 
   for (const sf of program.getSourceFiles()) {
     if (!isProjectFile(sf)) continue;
     decls.push({ id: rel(sf.fileName), name: path.basename(sf.fileName), tsKind: "SourceFile", containerId: null, loc: { file: rel(sf.fileName), line: 1 } });
 
     const visit = (node: ts.Node) => {
-      if (isDecl(node)) {
+      if (isDecl(node) && !seen.has(declId(node))) {
+        // Same id twice (e.g. two `on("x", …)` in one function): the first
+        // wins, and calls into either resolve to it.
+        seen.add(declId(node));
         const reg = registration(node);
         decls.push({
           id: declId(node),
@@ -118,16 +139,28 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
           ...(callee === "local" && { localCallee: true as const }),
           calleeText: calleeText(node.expression),
           argTypes: (node.arguments ?? []).map((a) => checker.typeToString(checker.getTypeAtLocation(a))),
+          ...argParams(node.arguments ?? []),
           returnType: signature ? checker.typeToString(checker.getReturnTypeOfSignature(signature)) : "unknown",
           loc: locOf(node),
         });
+        if (ts.isCallExpression(node)) {
+          const channel = channelFactOf(node, callee === "local" ? null : callee, channelCtx);
+          if (channel) channelFacts.push(channel);
+        }
       }
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
   }
 
-  return { decls, calls };
+  return { decls, calls, channels: resolveEndpoints(channelFacts, calls) };
+
+  // Arguments that are the caller's own parameters, so wrappers of wrappers
+  // can be followed. Omitted when there are none.
+  function argParams(args: readonly ts.Expression[]) {
+    const params = args.map((a) => keyParamOf(a, channelCtx));
+    return params.some(Boolean) ? { argParams: params } : {};
+  }
 }
 
 function isFunctionValue(node: ts.Node): boolean {

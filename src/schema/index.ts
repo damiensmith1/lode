@@ -42,11 +42,27 @@ export interface Edge {
   args?: string[]; // calls: types passed in
   returns?: string; // calls: type passed back
   type?: string; // flows/references: the type carried
+  via?: { family: string; key: string }; // flows: the channel it crossed
+}
+
+// One side of a string-keyed channel (IPC, events, queues). Plugins say
+// which calls send and receive; derive matches them into flow edges.
+export interface ChannelEndpoint {
+  node: NodeId;
+  role: "send" | "receive";
+  family: string; // only endpoints of the same family can match
+  key: string; // the channel name; "*" is a wildcard when pattern is true
+  pattern: boolean;
+  payload?: string; // send: the types passed
+  awaitsReply?: boolean; // send: the receiver's return value comes back
+  returns?: string; // receive: what the handler returns
+  loc: Location;
 }
 
 export interface GraphData {
   nodes: Node[];
   edges: Edge[];
+  channels?: ChannelEndpoint[];
 }
 
 export interface LanguagePlugin {

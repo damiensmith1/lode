@@ -4,6 +4,8 @@ import type { DeclFact, TsFacts } from "./facts.js";
 const KIND_BY_TS: Record<string, NodeKind> = {
   SourceFile: "container",
   ClassDeclaration: "container",
+  ObjectLiteralExpression: "container",
+  PropertyAssignment: "callable",
   FunctionDeclaration: "callable",
   MethodDeclaration: "callable",
   MethodSignature: "callable",
@@ -56,7 +58,7 @@ export function toGraph(facts: TsFacts): GraphData {
     });
   }
 
-  return { nodes: [...nodes.values()], edges };
+  return { nodes: [...nodes.values()], edges, channels: facts.channels };
 }
 
 function declNode(decl: DeclFact): Node {

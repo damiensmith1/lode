@@ -1,12 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { buildGraph } from "../src/derive/index.js";
+import type { Graph } from "../src/graph/graph.js";
 import { ingestTsProject } from "../src/ingest/ts/ingest.js";
+import type { TsFacts } from "../src/ingest/ts/facts.js";
+import { tsPlugin } from "../src/ingest/ts/index.js";
 
 // Real-codebase checks against glance (read-only).
 // Run with: LODE_GLANCE_TSCONFIG=<path to glance/tsconfig.json> npm test
 const tsconfig = process.env.LODE_GLANCE_TSCONFIG;
 
 describe.skipIf(!tsconfig)("glance", () => {
-  const facts = ingestTsProject(tsconfig!);
+  let facts: TsFacts;
+  let graph: Graph;
+  beforeAll(() => {
+    facts = ingestTsProject(tsconfig!);
+    graph = buildGraph(tsPlugin.index(tsconfig!));
+  });
 
   it("resolves calls between modules", () => {
     expect(facts.calls).toContainEqual(
@@ -33,14 +42,22 @@ describe.skipIf(!tsconfig)("glance", () => {
     const unresolved = facts.calls.filter((c) => !c.calleeId && !c.localCallee).length;
     expect(unresolved / facts.calls.length).toBeLessThan(0.02);
   });
-});
 
-describe.skipIf(!tsconfig)("glance graph", () => {
-  it("builds a valid graph", async () => {
-    const { Graph } = await import("../src/graph/graph.js");
-    const { tsPlugin } = await import("../src/ingest/ts/index.js");
-    const graph = Graph.from(tsPlugin.index(tsconfig!));
+  it("builds a valid graph", () => {
     expect(graph.size.nodes).toBeGreaterThan(1000);
     expect(graph.size.edges).toBeGreaterThan(2000);
+  });
+
+  it("links IPC senders to handlers, through wrappers", () => {
+    const flows = graph.toData().edges.filter((e) => e.kind === "flows");
+    expect(flows.length).toBeGreaterThan(250);
+    // startRecording -> sendToHud(...) -> webContents.send("dictation:start")
+    expect(flows).toContainEqual(
+      expect.objectContaining({
+        from: "src/main/dictation.ts#startRecording",
+        to: "src/preload/dictationHud.ts#exposeInMainWorld:clanceDictation.onStart",
+        via: { family: "electron-ipc:to-renderer", key: "dictation:start" },
+      }),
+    );
   });
 });

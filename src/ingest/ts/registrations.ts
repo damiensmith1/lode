@@ -57,6 +57,10 @@ const REGISTRATION_CONSTRUCTORS = new Set([
   "ReportingObserver", "Worker", "EventSource", "BroadcastChannel",
 ]);
 
+// Calls that take an object of callbacks; the object becomes a node and its
+// function members become nodes inside it.
+const OBJECT_REGISTRATIONS = new Set(["exposeInMainWorld", "exposeInIsolatedWorld"]);
+
 // Assigned handlers: `worker.onmessage = (e) => …`, `ws.onclose = …`.
 const ASSIGNED_HANDLER = /^on[a-z]+$/;
 
@@ -65,8 +69,10 @@ export interface Registration {
   key: string | null; // the channel/event/route, when it's a string literal
 }
 
-// If `node` is a function literal handed to a registration, describe it.
+// If `node` is a function literal (or object of them) handed to a
+// registration, describe it.
 export function registrationOf(node: ts.Node, checker: ts.TypeChecker): Registration | null {
+  if (ts.isObjectLiteralExpression(node)) return objectRegistrationOf(node, checker);
   if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null;
   const parent = node.parent;
 
@@ -87,6 +93,14 @@ export function registrationOf(node: ts.Node, checker: ts.TypeChecker): Registra
   if (!matches) return null;
 
   return { call, key: literalKey(args[0], node, checker) };
+}
+
+function objectRegistrationOf(node: ts.ObjectLiteralExpression, checker: ts.TypeChecker): Registration | null {
+  const parent = node.parent;
+  if (!ts.isCallExpression(parent) || !parent.arguments.includes(node)) return null;
+  const call = calleeName(parent.expression);
+  if (!call || !OBJECT_REGISTRATIONS.has(call)) return null;
+  return { call, key: literalKey(parent.arguments[0], node, checker) };
 }
 
 function calleeName(expr: ts.Expression): string | null {

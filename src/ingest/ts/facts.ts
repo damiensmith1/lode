@@ -1,3 +1,5 @@
+import type { ChannelEndpoint } from "../../schema/index.js";
+
 // Raw facts emitted by the TypeScript plugin, before normalization.
 
 export interface Location {
@@ -23,6 +25,8 @@ export interface CallFact {
   localCallee?: true; // callee is a local variable or parameter, e.g. a callback passed in
   calleeText: string; // the callee expression as written
   argTypes: string[];
+  // Per argument: set when it's a parameter of the caller (see channels.ts).
+  argParams?: ({ wrapperId: string; index: number } | null)[];
   returnType: string;
   loc: Location;
 }
@@ -30,4 +34,5 @@ export interface CallFact {
 export interface TsFacts {
   decls: DeclFact[];
   calls: CallFact[];
+  channels: ChannelEndpoint[];
 }
