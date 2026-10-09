@@ -46,6 +46,30 @@ inference) is bought, not built:
   channels like `ipc.send('topic:update', …)`.
 - **SCIP / LSP**: the route to other languages later.
 
+lode uses the `typescript` 5.x package for analysis. TypeScript 7 (the Go
+port) doesn't expose the classic JS compiler API, but 5.x reads TS 7
+projects fine (glance is one).
+
+**Status:** the TS plugin (`src/ingest/ts`) emits raw facts: declarations
+with stable ids (`<file>#<Outer.Inner>`, `ext:<package>#<name>` for
+libraries) and call sites with resolved callee, argument types and return
+type. On glance (43 files): 1224 declarations, 2823 calls, ~1.2s, under 1%
+unresolved (IIFEs, dynamic `import()`, calls on `any`).
+
+Findings that shape the next steps:
+
+- **Literal channel keys come free.** The checker types `"terminal:data"` as
+  a string literal, so tier 3 matching can read channel names from argument
+  types. glance has ~300 IPC call sites.
+- **Registered callbacks are nodes.** A function literal passed to a
+  registration call (`on`, `handle`, routes, timers, effects, `onX`,
+  `registerX`, …) becomes its own node, named after what it handles
+  (`on:popup:hide`, or `setTimeout@L42` with no literal key). Calls inside it
+  are credited to it, not to the code that registered it. Other callbacks
+  (`.map(x => …)`) stay inside their parent. The list of registration calls
+  lives in the TS plugin (`src/ingest/ts/registrations.ts`), not the core.
+  On glance: 189 handlers, 118 of them IPC `handle` with channel keys.
+
 ### 2. Normalize
 
 Maps plugin output into lode's language-agnostic schema. Every node and edge
