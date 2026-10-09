@@ -32,9 +32,20 @@ export interface CallFact {
   loc: Location;
 }
 
+// Tier 1: a call's result flowing into another call's argument, or out as
+// the return value of the function it's in.
+export interface FlowFact {
+  from: string; // the callee that produced the value
+  to: string; // the callee it's passed to, or the function returning it
+  within: string; // where it happens
+  type: string;
+  loc: Location;
+}
+
 export interface TsFacts {
   decls: DeclFact[];
   calls: CallFact[];
+  flows: FlowFact[];
   channels: ChannelEndpoint[];
 }
 
@@ -44,4 +55,5 @@ export interface FileFacts {
   decls: DeclFact[];
   calls: CallFact[];
   channelFacts: ChannelFact[];
+  flows: FlowFact[];
 }

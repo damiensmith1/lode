@@ -142,6 +142,38 @@ Deterministic analysis over the whole graph:
   3. *channels*: linked by a string key (IPC, events). Literal keys match
      exactly; computed keys are resolved to patterns (`topic:*:update`).
 
+### Direct flows (tier 1)
+
+A call's result flowing into another call, or out of the function:
+
+```ts
+function send(msg, bus) {
+  const env = enrich(msg);   // enrich ──Envelope──▶ Bus.dispatch   (within send)
+  bus.dispatch(env);
+  return format(env);        // format ──string──▶ send             (within send)
+}
+```
+
+- **Emitted by the plugin**, not derived in the core: it needs local def-use,
+  which is syntax-level and language-specific (`src/ingest/ts/flows.ts`).
+  The core only stores the edges.
+- **Every tier 1 edge has `within`**: the node where the flow happens. Without
+  it, `enrich → dispatch` would read as global when it only happens in `send`.
+- **Followed:** nested calls, `await`, local `const`/`let` initializers
+  (including destructuring and shorthand properties), property access,
+  object/array literals, `??`/`||`/`&&`, ternaries, and method receivers
+  (`env.save()` takes `env` as input). Returns include arrow expression
+  bodies; a `return` inside an anonymous inner callback isn't credited to
+  the enclosing function.
+- **Not followed yet:** reassignment after the initializer
+  (`let x; x = load()`), and values passing through parameters (that's what
+  call edges' `args` already describe).
+- One edge per producer per argument, so a value used in three properties of
+  one argument is one edge.
+
+On glance: 1691 tier 1 flow edges, 424 of them between project nodes (the
+rest touch library code: `Map.set`, `Promise.then`, …).
+
 ### Channel flows (tier 3)
 
 Split between plugin and core:

@@ -58,6 +58,11 @@ export function toGraph(facts: TsFacts): GraphData {
     });
   }
 
+  for (const flow of facts.flows) {
+    if (!nodes.has(flow.from) || !nodes.has(flow.to)) continue; // e.g. anonymous library code
+    edges.push({ kind: "flows", from: flow.from, to: flow.to, confidence: "exact", loc: flow.loc, type: flow.type, within: flow.within });
+  }
+
   return { nodes: [...nodes.values()], edges, channels: facts.channels };
 }
 

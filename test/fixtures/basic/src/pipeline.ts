@@ -29,3 +29,28 @@ export function withLocals(cb: () => void) {
   fmt(" x ");
   cb();
 }
+
+export function prepare(msg: Message): Envelope {
+  return enrich(msg);
+}
+
+export const relay = (msg: Message, bus: Bus) => bus.dispatch(enrich(msg));
+
+export async function load(): Promise<Message> {
+  return { text: "loaded" };
+}
+
+export async function fromStorage(bus: Bus) {
+  const { text } = await load();
+  bus.dispatch({ msg: { text }, ts: 0 });
+  [1].map((n) => enrich({ text: String(n) }));
+}
+
+export function makeBus(): Bus {
+  return new Bus();
+}
+
+export function viaReceiver(msg: Message) {
+  const bus = makeBus();
+  bus.dispatch(prepare(msg));
+}

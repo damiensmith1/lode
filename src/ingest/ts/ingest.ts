@@ -1,6 +1,7 @@
 import path from "node:path";
 import ts from "typescript";
-import type { CallFact, DeclFact, FileFacts, Location, TsFacts } from "./facts.js";
+import type { CallFact, DeclFact, FileFacts, FlowFact, Location, TsFacts } from "./facts.js";
+import { returningFunction, sourceCalls } from "./flows.js";
 import { channelFactOf, type ChannelFact, keyParamOf, resolveEndpoints } from "./channels.js";
 import { type Registration, registrationOf } from "./registrations.js";
 
@@ -50,6 +51,7 @@ export function mergeFacts(files: FileFacts[]): TsFacts {
   return {
     decls: files.flatMap((f) => f.decls),
     calls,
+    flows: files.flatMap((f) => f.flows),
     channels: resolveEndpoints(files.flatMap((f) => f.channelFacts), calls),
   };
 }
@@ -122,7 +124,13 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
 
   // "local" when the callee is a local variable or parameter inside a
   // function (a helper, a callback passed in): real, but not a node.
-  const resolveCallee = (call: ts.CallExpression | ts.NewExpression): string | "local" | null => {
+  const callees = new Map<ts.Node, string | "local" | null>();
+  const resolveCallee = (call: ts.CallLikeExpression): string | "local" | null => {
+    if (!callees.has(call)) callees.set(call, resolveCalleeUncached(call));
+    return callees.get(call)!;
+  };
+  const resolveCalleeUncached = (call: ts.CallLikeExpression): string | "local" | null => {
+    if (!ts.isCallExpression(call) && !ts.isNewExpression(call)) return null;
     const target = ts.isPropertyAccessExpression(call.expression) ? call.expression.name : call.expression;
     let symbol = checker.getSymbolAtLocation(target);
     if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
@@ -133,13 +141,39 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
   };
 
   const nodeIdOf = (node: ts.Node) => (isDecl(node) ? declId(node) : null);
+
+  // The node a function's return value belongs to: the function itself, or
+  // the variable/property it's assigned to. Null for anonymous inner functions.
+  const ownerOf = (fn: ts.Node | undefined): string | null => {
+    if (!fn) return null;
+    if (isDecl(fn)) return declId(fn);
+    const parent = fn.parent;
+    const holdsFn = (ts.isVariableDeclaration(parent) || ts.isPropertyDeclaration(parent) || ts.isPropertyAssignment(parent)) && parent.initializer === fn;
+    return holdsFn && isDecl(parent) ? declId(parent) : null;
+  };
+
+  // Calls whose results make up `expr`, as resolved node ids (each once).
+  const producers = (expr: ts.Expression): string[] => [
+    ...new Set(
+      sourceCalls(expr, checker)
+        .map(resolveCallee)
+        .filter((id): id is string => !!id && id !== "local"),
+    ),
+  ];
   const channelCtx = { checker, nodeIdOf, enclosingId, locOf };
 
   return (sf: ts.SourceFile): FileFacts => {
     const decls: DeclFact[] = [];
     const calls: CallFact[] = [];
     const channelFacts: ChannelFact[] = [];
+    const flows: FlowFact[] = [];
     const seen = new Set<string>();
+
+    const flowOut = (expr: ts.Expression, owner: string | null) => {
+      if (!owner) return;
+      const type = checker.typeToString(checker.getTypeAtLocation(expr));
+      for (const from of producers(expr)) flows.push({ from, to: owner, within: owner, type, loc: locOf(expr) });
+    };
 
     decls.push({ id: rel(sf.fileName), name: path.basename(sf.fileName), tsKind: "SourceFile", containerId: null, loc: { file: rel(sf.fileName), line: 1 } });
 
@@ -162,12 +196,13 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
       if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
         const signature = checker.getResolvedSignature(node);
         const callee = resolveCallee(node);
+        const argTypes = (node.arguments ?? []).map((a) => checker.typeToString(checker.getTypeAtLocation(a)));
         calls.push({
           callerId: enclosingId(node),
           calleeId: callee === "local" ? null : callee,
           ...(callee === "local" && { localCallee: true as const }),
           calleeText: calleeText(node.expression),
-          argTypes: (node.arguments ?? []).map((a) => checker.typeToString(checker.getTypeAtLocation(a))),
+          argTypes,
           ...argParams(node.arguments ?? []),
           returnType: signature ? checker.typeToString(checker.getReturnTypeOfSignature(signature)) : "unknown",
           loc: locOf(node),
@@ -176,11 +211,27 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
           const channel = channelFactOf(node, callee === "local" ? null : callee, channelCtx);
           if (channel) channelFacts.push(channel);
         }
+        if (callee && callee !== "local") {
+          const within = enclosingId(node);
+          (node.arguments ?? []).forEach((arg, i) => {
+            for (const from of producers(arg)) {
+              flows.push({ from, to: callee, within, type: argTypes[i], loc: locOf(arg) });
+            }
+          });
+          // The receiver of a method call is an input too: `env.save()`.
+          if (ts.isPropertyAccessExpression(node.expression)) {
+            const receiver = node.expression.expression;
+            const type = checker.typeToString(checker.getTypeAtLocation(receiver));
+            for (const from of producers(receiver)) flows.push({ from, to: callee, within, type, loc: locOf(receiver) });
+          }
+        }
       }
+      if (ts.isReturnStatement(node) && node.expression) flowOut(node.expression, ownerOf(returningFunction(node)));
+      if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) flowOut(node.body, ownerOf(node));
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
-    return { file: rel(sf.fileName), decls, calls, channelFacts };
+    return { file: rel(sf.fileName), decls, calls, channelFacts, flows };
   };
 
   // Arguments that are the caller's own parameters, so wrappers of wrappers
