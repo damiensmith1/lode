@@ -330,6 +330,18 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
     line without scrolling. A focus the code asked for doesn't scroll the
     code back.
 - Declarations record their **end line** (`loc.endLine`) for ranges.
+- **Graph view (experiment)** (`<lode-graph>`): the whole project as one
+  horizontal tree you zoom around, a different take from focus/map. Columns
+  are tree levels, highest on the left (runtimes › files › symbols ›
+  callbacks). Clicking a node selects it, opens its children to the right
+  and flies the camera there; only the path to the selection stays open
+  (an accordion) so columns stay short, and the camera never zooms out past
+  a readable level on its own. The selection's connections are drawn to
+  whatever's visible, rolled up to the nearest visible ancestor; "reveal
+  connections" opens their real endpoints. Same-column links bracket on
+  the left. ← → step through what you've selected; wheel zooms, drag pans.
+  Backed by one `graph` query (the lens tree plus edges merged per pair,
+  ~850KB for glance), with rollup done in the view.
 - **Standalone host** (`hosts/app`): code on the left with syntax colours
   (highlight.js, Clance's palette; a host concern, so not in views) and ◇
   annotations,

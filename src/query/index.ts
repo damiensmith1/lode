@@ -7,6 +7,9 @@ import type {
   FileEntry,
   FileView,
   FocusResult,
+  GraphDump,
+  GraphEdge,
+  GraphNode,
   Link,
   LinkKind,
   LocalFlow,
@@ -135,6 +138,44 @@ export class Queries {
     }
     best ??= this.graph().node(file);
     return best ? this.ref(best) : null;
+  }
+
+  // Every project node in a lens tree (library code left out) and the edges
+  // between them merged per pair, for views that lay out the whole graph.
+  tree(lensName = "runtime"): GraphDump {
+    const g = this.graph();
+    const lens = g.lens(lensName);
+    const nodes: GraphNode[] = [];
+    const included = new Set<NodeId>();
+    const visit = (id: NodeId, parent: NodeId | null, depth: number) => {
+      const n = lens.node(id);
+      if (!n || n.external) return;
+      included.add(id);
+      nodes.push({
+        id,
+        name: n.name,
+        kind: n.kind,
+        parent,
+        depth,
+        ...(n.loc && { file: n.loc.file, line: n.loc.line }),
+        ...(n.loc?.endLine && { endLine: n.loc.endLine }),
+      });
+      const children = lens.children(id).map((c) => lens.node(c)!).filter(Boolean);
+      children.sort((a, b) => (a.loc && b.loc ? a.loc.file.localeCompare(b.loc.file) || a.loc.line - b.loc.line : a.name.localeCompare(b.name)));
+      for (const c of children) visit(c.id, id, depth + 1);
+    };
+    for (const root of lens.roots()) visit(root, null, 0);
+
+    const merged = new Map<string, GraphEdge>();
+    for (const e of g.toData().edges) {
+      const kind = linkKind(e);
+      if (!kind || kind === "local" || !included.has(e.from) || !included.has(e.to) || e.from === e.to) continue;
+      const key = `${e.from}|${e.to}|${kind}`;
+      const m = merged.get(key);
+      if (m) m.count++;
+      else merged.set(key, { from: e.from, to: e.to, kind, count: 1 });
+    }
+    return { lens: lensName, nodes, edges: [...merged.values()] };
   }
 
   // Groups at one level of a lens, and the edges between them merged.

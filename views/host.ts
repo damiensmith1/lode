@@ -20,7 +20,8 @@ export interface SourceHighlight {
 
 export type ViewRequest =
   | { kind: "focus"; id: string }
-  | { kind: "map"; lens?: string; parent?: string };
+  | { kind: "map"; lens?: string; parent?: string }
+  | { kind: "graph"; lens?: string; select?: string };
 
 // Views dispatch this (bubbling, composed) when their title changes, so the
 // host can label the tab.

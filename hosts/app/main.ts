@@ -126,7 +126,7 @@ function openView(request: ViewRequest, options: { linked?: boolean } = {}): Tab
     return existing;
   }
 
-  const label = el("span", {}, request.kind === "focus" ? request.id.split("#").pop()! : "map");
+  const label = el("span", {}, request.kind === "focus" ? request.id.split("#").pop()! : request.kind);
   const close = el("span", { className: "close", title: "Close", role: "button" }, "×");
   const icon = el("span", { className: "diamond", ariaHidden: "true", title: options.linked ? "follows the code" : "" }, options.linked ? "⇄" : "◇");
   const button = el("button", { className: "tab", role: "tab" }, icon, label, close);
@@ -174,7 +174,10 @@ async function followCode(file: string, line: number) {
   const at = await client.call<NodeRef | null>("symbolAt", { file, line });
   if (!at) return;
   codeDriven = at.id;
-  focusLinked(at.id);
+  // The graph view, when it's showing, reveals the node in place.
+  const view = $("view").firstElementChild as (HTMLElement & { reveal?: (id: string) => void }) | null;
+  if (view?.tagName === "LODE-GRAPH" && view.reveal) view.reveal(at.id);
+  else focusLinked(at.id);
 }
 
 // --- File tree ------------------------------------------------------------
@@ -282,6 +285,7 @@ async function start() {
   if (link.get("focus")) focusLinked(link.get("focus")!);
   else if (link.get("file")) void openFile(link.get("file")!);
   openView({ kind: "map", lens: "runtime" });
+  openView({ kind: "graph", lens: "runtime" });
   if (linked) select(linked);
 
   client.onChanged(async (files) => {

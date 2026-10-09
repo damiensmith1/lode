@@ -99,3 +99,29 @@ export interface ProjectInfo {
   files: number;
   lenses: string[];
 }
+
+// The whole project as one tree (a lens) plus every edge between its nodes,
+// merged per pair. Views roll edges up to whatever is visible themselves.
+export interface GraphNode {
+  id: string;
+  name: string;
+  kind: NodeKind;
+  parent: string | null;
+  depth: number; // 0 = lens group (e.g. a runtime)
+  file?: string;
+  line?: number;
+  endLine?: number;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  kind: LinkKind;
+  count: number;
+}
+
+export interface GraphDump {
+  lens: string;
+  nodes: GraphNode[]; // parents before children, children in source order
+  edges: GraphEdge[];
+}

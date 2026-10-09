@@ -100,3 +100,17 @@ describe("server", () => {
     await server.close();
   });
 });
+
+describe("tree query", () => {
+  it("lists the lens tree parents-first with depths, and merged edges", () => {
+    const t = q.tree("runtime");
+    const seen = new Set<string>();
+    for (const n of t.nodes) {
+      if (n.parent) expect(seen.has(n.parent)).toBe(true);
+      seen.add(n.id);
+    }
+    expect(t.nodes.find((n) => n.id === "src/main.ts")).toMatchObject({ parent: "runtime:main", depth: 1 });
+    expect(t.nodes.some((n) => n.id.startsWith("ext:"))).toBe(false);
+    expect(t.edges).toContainEqual(expect.objectContaining({ kind: "channel", from: "src/preload.ts#exposeInMainWorld:notes.clear" }));
+  });
+});
