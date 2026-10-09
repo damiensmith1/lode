@@ -1,6 +1,6 @@
 import type { FocusResult, Link, NodeRef } from "../src/query/types.js";
 import type { LodeClient } from "./client.js";
-import { TITLE_EVENT, type LodeHost } from "./host.js";
+import { TITLE_EVENT, type LodeHost, type SourceHighlight } from "./host.js";
 import { ARROW_DEFS, BASE_CSS, escape, wire } from "./theme.js";
 
 const COLLAPSE_AFTER = 3; // links of one kind shown before "+N more"
@@ -45,6 +45,8 @@ export class LodeFocus extends HTMLElement {
 
   connectedCallback() {
     this.root.addEventListener("click", (e) => this.onClick(e));
+    this.root.addEventListener("mouseover", (e) => this.onHover(e));
+    this.root.addEventListener("mouseleave", () => this.highlight());
     this.unsubscribe = this.client?.onChanged(() => this.load());
     this.resize.observe(this);
     void this.load();
@@ -76,7 +78,35 @@ export class LodeFocus extends HTMLElement {
     if (!this.client || !this.nodeId) return;
     this.data = await this.client.call<FocusResult | null>("focus", { id: this.nodeId });
     this.render();
+    this.highlight();
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: this.data?.node.name ?? this.nodeId, bubbles: true, composed: true }));
+  }
+
+  // Tell the host which source lines this view is about.
+  private highlight(hover?: number) {
+    const d = this.data;
+    const file = d?.node.file;
+    if (!d || !file || !d.node.line) return void this.host?.highlight?.(null);
+    const h: SourceHighlight = {
+      node: d.node.id,
+      file,
+      ...(d.node.id !== file && { range: [d.node.line, d.node.endLine ?? d.node.line] as [number, number] }),
+      marks: d.steps.map((s) => s.line).filter((l) => l > 0),
+      ...(hover && { hover }),
+    };
+    this.host?.highlight?.(h);
+  }
+
+  // Hovering a step (or a card for something in the same file) points at
+  // its line in the source.
+  private onHover(event: Event) {
+    const el = (event.target as Element).closest<HTMLElement>("[data-step], .card[data-id]");
+    if (!el) return this.highlight();
+    const d = this.data;
+    if (!d) return;
+    if (el.dataset.step) return this.highlight(d.steps[Number(el.dataset.step)]?.line);
+    const link = [...d.up, ...d.down].find((l) => l.node.id === el.dataset.id);
+    this.highlight(link?.node.file === d.node.file ? link?.node.line : undefined);
   }
 
   private onClick(event: Event) {

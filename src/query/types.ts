@@ -9,6 +9,7 @@ export interface NodeRef {
   kind: NodeKind;
   file?: string;
   line?: number;
+  endLine?: number;
   external: boolean;
   runtime?: string; // e.g. "main", from the runtime lens
 }
@@ -23,6 +24,7 @@ export interface Step {
   target: NodeRef | null;
   line: number;
   callback?: boolean; // a callback defined here (`setTimeout(() => …)`)
+  member?: boolean; // for a file or class: something declared in it
 }
 
 // A value produced by one step and consumed by another, or returned.

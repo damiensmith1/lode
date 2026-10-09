@@ -19,6 +19,7 @@ export type Confidence = "exact" | "pattern" | "inferred";
 export interface Location {
   file: string; // relative to the project root
   line: number; // 1-based
+  endLine?: number; // declarations: the last line they span
 }
 
 export interface Node {

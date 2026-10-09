@@ -36,6 +36,20 @@ describe("queries", () => {
     expect(inner.groups.map((g) => g.node.id)).toEqual(expect.arrayContaining(["src/main.ts", "src/format.ts"]));
   });
 
+  it("symbolAt: the innermost declaration around a line, else the file", () => {
+    const save = q.symbolAt("src/main.ts", 9);
+    expect(save?.id).toBe("src/main.ts#saveNote");
+    expect(save?.endLine).toBeGreaterThan(save!.line!);
+    expect(q.symbolAt("src/main.ts", 17)?.id).toBe("src/main.ts#registerIpc.handle:notes:save");
+    expect(q.symbolAt("src/main.ts", 2)?.id).toBe("src/main.ts");
+  });
+
+  it("focus on a file lists what's declared in it", () => {
+    const f = q.focus("src/main.ts")!;
+    expect(f.steps.every((s) => s.member)).toBe(true);
+    expect(f.steps.map((s) => s.label)).toEqual(expect.arrayContaining(["saveNote()", "registerIpc()", "Note"]));
+  });
+
   it("search ranks exact and prefix matches first", () => {
     expect(q.search("save")[0].name).toBe("save");
   });

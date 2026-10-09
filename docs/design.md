@@ -312,10 +312,22 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   lens=… parent=…>` drills down a lens. Wires are measured from the laid-out
   DOM, so layout stays plain CSS.
 - **Host contract** (`views/host.ts`): a host passes a `LodeClient` and a
-  `LodeHost` (`openSource`, `openView`) and listens for `lode-title` to name
-  tabs. That's all an adapter (VS Code, Clance) has to implement.
-- **Standalone host** (`hosts/app`): file tree, source pane with ◇
-  annotations, lode views in tabs, symbol search, deep links
+  `LodeHost` (`openSource`, `openView`, optional `highlight`) and listens for
+  `lode-title` to name tabs. That's all an adapter (VS Code, Clance) has to
+  implement. `highlight` reports the lines a view is about (the focused
+  node's range, its step lines, the line under the pointer); the host
+  decides how to show them, which in an IDE maps to editor decorations.
+- **Code and graph stay in step** (the standalone app's behaviour, and the
+  pattern for other hosts):
+  - code → graph: clicking a line or scrolling moves a *linked* focus tab
+    (⇄) to the innermost declaration there (`symbolAt`); opening a file
+    shows its outline (focus on a file lists what's declared in it).
+  - graph → code: focusing a node opens its file, jumps to it, tints its
+    range and marks its step lines; hovering a step or card highlights its
+    line. Focus changes the code asked for don't scroll the code back.
+- Declarations record their **end line** (`loc.endLine`) for ranges.
+- **Standalone host** (`hosts/app`): code on the left with ◇ annotations,
+  lode views in tabs on the right, file tree, symbol search, deep links
   (`#focus=<id>&file=<path>&line=<n>`). `lode open <project>` builds it
   with esbuild and opens it.
 

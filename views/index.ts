@@ -5,7 +5,7 @@
 //   Object.assign(view, { client, host });
 //   view.setAttribute("node", "src/main.ts#run");
 export { LodeClient } from "./client.js";
-export { TITLE_EVENT, type LodeHost, type ViewRequest } from "./host.js";
+export { TITLE_EVENT, type LodeHost, type SourceHighlight, type ViewRequest } from "./host.js";
 export { LodeFocus } from "./focus.js";
 export { LodeMap } from "./map.js";
 export type * from "../src/query/types.js";

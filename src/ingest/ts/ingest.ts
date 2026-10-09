@@ -195,7 +195,7 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
       for (const from of producers(expr)) flows.push({ from, to: owner, within: owner, type, loc: locOf(expr) });
     };
 
-    decls.push({ id: rel(sf.fileName), name: path.basename(sf.fileName), tsKind: "SourceFile", containerId: null, loc: { file: rel(sf.fileName), line: 1 } });
+    decls.push({ id: rel(sf.fileName), name: path.basename(sf.fileName), tsKind: "SourceFile", containerId: null, loc: { file: rel(sf.fileName), line: 1, endLine: sf.getLineAndCharacterOfPosition(sf.getEnd()).line + 1 } });
 
     const visit = (node: ts.Node) => {
       if (isDecl(node) && !seen.has(declId(node))) {
@@ -208,7 +208,7 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
           name: nameOf(node)!,
           tsKind: ts.SyntaxKind[node.kind],
           containerId: enclosingId(node),
-          loc: locOf(node),
+          loc: { ...locOf(node), endLine: sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1 },
           ...(reg && { registration: reg }),
           ...(isFunctionValue(node) && { functionValue: true as const }),
           ...(ts.isBinaryExpression(node) && ts.isObjectLiteralExpression(node.right) && { objectValue: true as const }),

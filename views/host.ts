@@ -5,6 +5,17 @@ export interface LodeHost {
   openSource(file: string, line?: number): void;
   // Open another lode view, usually as a new tab.
   openView(view: ViewRequest): void;
+  // Optional: mark source lines in the host's editor for what the view
+  // shows (null clears). The host decides whether to open or scroll.
+  highlight?(highlight: SourceHighlight | null): void;
+}
+
+export interface SourceHighlight {
+  node: string; // the focused node
+  file: string;
+  range?: [number, number]; // its first and last line (not for whole files)
+  marks: number[]; // lines of its steps (calls, members)
+  hover?: number; // the line under the pointer, if in this file
 }
 
 export type ViewRequest =

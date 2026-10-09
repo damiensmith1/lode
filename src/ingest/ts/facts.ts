@@ -6,6 +6,7 @@ import type { ChannelFact } from "./channels.js";
 export interface Location {
   file: string; // relative to the project root
   line: number; // 1-based
+  endLine?: number; // declarations: the last line they span
 }
 
 export interface DeclFact {

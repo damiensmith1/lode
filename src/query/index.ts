@@ -62,9 +62,17 @@ export class Queries {
     if (!node) return null;
 
     // Steps: the project calls it makes, plus callbacks defined inside it.
-    const calls = g.neighbors(id, "down", ["calls"]);
+    // A file or class instead lists what's declared in it, as an outline.
+    const outline = node.kind === "container";
+    const calls = outline ? [] : g.neighbors(id, "down", ["calls"]);
     const steps: Step[] = [];
     let libraryCalls = 0;
+    if (outline) {
+      for (const child of g.childrenOf(id)) {
+        if (child.kind === "block") continue;
+        steps.push({ label: child.kind === "callable" ? `${child.name}()` : child.name, target: this.ref(child), line: child.loc?.line ?? 0, member: true });
+      }
+    }
     for (const e of calls) {
       const target = g.node(e.to);
       if (!target || target.external) {
@@ -73,7 +81,7 @@ export class Queries {
       }
       steps.push({ label: `${target.name}()`, target: this.ref(target), line: e.loc?.line ?? 0 });
     }
-    for (const child of g.childrenOf(id)) {
+    for (const child of outline ? [] : g.childrenOf(id)) {
       if (child.kind === "callable" && child.detail?.registration) {
         steps.push({ label: child.name, target: this.ref(child), line: child.loc?.line ?? 0, callback: true });
       }
@@ -112,6 +120,21 @@ export class Queries {
     }
 
     return { node: this.ref(node), path: this.pathOf(id), steps, flows, up: up.list(), down: down.list(), hidden: { libraryCalls } };
+  }
+
+  // The innermost node whose declaration spans `line` in `file`, or the file
+  // itself. What a code view is "in" at a cursor or scroll position.
+  symbolAt(file: string, line: number): NodeRef | null {
+    let best: Node | undefined;
+    for (const n of this.graph().allNodes()) {
+      const loc = n.loc;
+      if (n.external || !loc || loc.file !== file || loc.line > line || (loc.endLine ?? loc.line) < line) continue;
+      const span = (loc.endLine ?? loc.line) - loc.line;
+      const bestSpan = best ? (best.loc!.endLine ?? best.loc!.line) - best.loc!.line : Infinity;
+      if (span < bestSpan || (span === bestSpan && n.kind === "callable")) best = n;
+    }
+    best ??= this.graph().node(file);
+    return best ? this.ref(best) : null;
   }
 
   // Groups at one level of a lens, and the edges between them merged.
@@ -205,6 +228,7 @@ export class Queries {
       name: node.name,
       kind: node.kind,
       ...(node.loc && { file: node.loc.file, line: node.loc.line }),
+      ...(node.loc?.endLine && { endLine: node.loc.endLine }),
       external: node.external,
       ...(runtime?.startsWith("runtime:") && { runtime: runtime.slice("runtime:".length) }),
     };
