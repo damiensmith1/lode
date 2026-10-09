@@ -317,14 +317,18 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   implement. `highlight` reports the lines a view is about (the focused
   node's range, its step lines, the line under the pointer); the host
   decides how to show them, which in an IDE maps to editor decorations.
-- **Code and graph stay in step** (the standalone app's behaviour, and the
-  pattern for other hosts):
-  - code → graph: clicking a line or scrolling moves a *linked* focus tab
-    (⇄) to the innermost declaration there (`symbolAt`); opening a file
-    shows its outline (focus on a file lists what's declared in it).
-  - graph → code: focusing a node opens its file, jumps to it, tints its
+- **Code and graph stay in step, by clicks only** (the standalone app's
+  behaviour, and the pattern for other hosts). Following the cursor or the
+  scroll position automatically moved things around too much, so nothing
+  moves on its own:
+  - code → graph: clicking a line (not selecting text) or a ◇ moves a
+    *linked* focus tab (⇄) to the innermost declaration there (`symbolAt`).
+    Opening or scrolling a file changes nothing. Focusing a file shows its
+    outline (what's declared in it).
+  - graph → code: clicking a node opens its file, jumps to it, tints its
     range and marks its step lines; hovering a step or card highlights its
-    line. Focus changes the code asked for don't scroll the code back.
+    line without scrolling. A focus the code asked for doesn't scroll the
+    code back.
 - Declarations record their **end line** (`loc.endLine`) for ranges.
 - **Standalone host** (`hosts/app`): code on the left with ◇ annotations,
   lode views in tabs on the right, file tree, symbol search, deep links

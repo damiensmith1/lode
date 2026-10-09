@@ -1,6 +1,6 @@
 // The standalone host: the code on the left, lode views on the right, kept
-// in step. Moving through the code moves a linked focus view; moving through
-// the graph opens, scrolls and highlights the code. It's one host among many;
+// in step by clicks only. Clicking a line focuses the linked view there;
+// clicking in the graph opens and jumps the code. Nothing moves on its own. It's one host among many;
 // everything lode-specific comes from ../../views through LodeHost.
 import type { FileEntry, FileView, NodeRef, ProjectInfo } from "../../src/query/types.js";
 import { createView, LodeClient, TITLE_EVENT, type LodeHost, type SourceHighlight, type ViewRequest } from "../../views/index.js";
@@ -19,12 +19,8 @@ const client = new LodeClient(`ws://${location.host}/rpc?token=${encodeURICompon
 // --- Source pane --------------------------------------------------------
 
 let currentFile: string | null = null;
-let ignoreScrollUntil = 0; // our own scrolling shouldn't drive the graph
-
-// Jumps are instant; small moves (hovering nearby lines) glide.
-function scrollToLine(line: number, block: ScrollLogicalPosition = "center", smooth = false) {
-  ignoreScrollUntil = Date.now() + 600;
-  document.getElementById(`L${line}`)?.scrollIntoView({ block, behavior: smooth ? "smooth" : "auto" });
+function scrollToLine(line: number, block: ScrollLogicalPosition = "center") {
+  document.getElementById(`L${line}`)?.scrollIntoView({ block });
 }
 
 async function showSource(file: string, line?: number) {
@@ -66,28 +62,12 @@ function renderSource(view: FileView) {
   if (selectedTab?.highlight?.file === view.file) applyHighlight(selectedTab.highlight);
 }
 
-let scrollTimer: number | undefined;
-
 // Click a line: the linked view focuses on whatever's declared around it.
+// Selecting text isn't a click on a line.
 $("code").addEventListener("click", (e) => {
-  if ((e.target as Element).closest("button")) return;
+  if ((e.target as Element).closest("button") || String(window.getSelection() ?? "")) return;
   const row = (e.target as Element).closest<HTMLElement>(".ln");
-  if (!row || !currentFile) return;
-  // An explicit click wins over a scroll-follow that's still pending.
-  clearTimeout(scrollTimer);
-  ignoreScrollUntil = Date.now() + 400;
-  void followCode(currentFile, Number(row.dataset.line), true);
-});
-
-// Scroll: the linked view follows the symbol a third of the way down.
-$("code").addEventListener("scroll", () => {
-  clearTimeout(scrollTimer);
-  scrollTimer = window.setTimeout(() => {
-    if (Date.now() < ignoreScrollUntil || !currentFile) return;
-    const pane = $("code").getBoundingClientRect();
-    const probe = document.elementFromPoint(pane.left + 80, pane.top + pane.height / 3)?.closest<HTMLElement>(".ln");
-    if (probe) void followCode(currentFile, Number(probe.dataset.line), false);
-  }, 180);
+  if (row && currentFile) void followCode(currentFile, Number(row.dataset.line));
 });
 
 // --- Highlights from the selected view ----------------------------------
@@ -111,21 +91,10 @@ function applyHighlight(h: SourceHighlight | null) {
     for (const l of h?.marks ?? []) document.getElementById(`L${l}`)?.classList.add("mark");
   }
   code.querySelector(".hover")?.classList.remove("hover");
-  if (h?.hover) {
-    document.getElementById(`L${h.hover}`)?.classList.add("hover");
-    if (!isVisible(h.hover)) scrollToLine(h.hover, "nearest", true);
-  }
+  if (h?.hover) document.getElementById(`L${h.hover}`)?.classList.add("hover"); // marked, never scrolled to
   if (h?.range && newFocus && codeDriven !== h.node) scrollToLine(Math.max(1, h.range[0] - 2), "start");
   if (h && newFocus) codeDriven = null;
   applied = h;
-}
-
-function isVisible(line: number): boolean {
-  const row = document.getElementById(`L${line}`);
-  if (!row) return false;
-  const pane = $("code").getBoundingClientRect();
-  const r = row.getBoundingClientRect();
-  return r.top >= pane.top && r.bottom <= pane.bottom;
 }
 
 // --- Tabs of lode views ---------------------------------------------------
@@ -197,11 +166,11 @@ function focusLinked(id: string, selectIt = true) {
   if (selectIt) select(linked);
 }
 
-async function followCode(file: string, line: number, selectIt: boolean) {
+async function followCode(file: string, line: number) {
   const at = await client.call<NodeRef | null>("symbolAt", { file, line });
   if (!at) return;
   codeDriven = at.id;
-  focusLinked(at.id, selectIt || !tabs.length);
+  focusLinked(at.id);
 }
 
 // --- File tree ------------------------------------------------------------
@@ -244,12 +213,10 @@ function renderTree(files: FileEntry[]) {
   draw();
 }
 
-// Opening a file shows it, and its outline in the linked view.
+// Opening a file just shows it; click a line (or ◇) to bring the graph along.
 async function openFile(file: string) {
   await showSource(file);
   $("code").scrollTop = 0;
-  codeDriven = file;
-  focusLinked(file);
 }
 
 function indent<T extends HTMLElement>(node: T, depth: number): T {
@@ -300,7 +267,7 @@ async function start() {
   $("project").textContent = info.root;
   const status = $("status");
   const setStatus = (extra = "") => {
-    status.textContent = `◇ lode · ${info.files} files · ${info.nodes} nodes · ${info.edges} edges · click or scroll the code to follow it${extra}`;
+    status.textContent = `◇ lode · ${info.files} files · ${info.nodes} nodes · ${info.edges} edges · click a line to focus it${extra}`;
   };
   setStatus();
   renderTree(await client.call<FileEntry[]>("files"));
