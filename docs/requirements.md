@@ -10,7 +10,7 @@ later.
 - **Resolve names across files**, so every use of a symbol links to its one
   declaration.
 - **Normalize to a common schema** of node kinds (container, callable, type,
-  value, block) and edge kinds (contains, calls, references, flows).
+  value, block), containment, and edge kinds (calls, references, flows).
 - **Source location on every node and edge.**
 - **Flow edges labelled with the data type they carry**, where it's known.
   - tier 1: direct calls and returns

@@ -23,3 +23,9 @@ export function registerHandlers(bus: Bus) {
   setTimeout(() => bus.dispatch(enrich({ text: "tick" })), 10);
   [1, 2].map((n) => n * 2);
 }
+
+export function withLocals(cb: () => void) {
+  const fmt = (s: string) => s.trim();
+  fmt(" x ");
+  cb();
+}

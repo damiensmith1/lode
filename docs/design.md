@@ -17,7 +17,8 @@ else (query layer, views, MCP, exports) is a consumer of the graph.
 3. GRAPH CACHE   current graph in memory · saved to disk · patched per file
                                     ▲
 2. NORMALIZE     schema: nodes {container, callable, type, value, block}
-                         edges {contains, calls, references, flows}
+                         containment: node.parent (a tree)
+                         edges {calls, references, flows}
                          every edge: data type?, confidence, location
                                     ▲  raw facts
 1. INGEST        per-language plugin (bought + thin adapter)
@@ -72,8 +73,26 @@ Findings that shape the next steps:
 
 ### 2. Normalize
 
-Maps plugin output into lode's language-agnostic schema. Every node and edge
-keeps its source location so it can be traced back to the code.
+**Each plugin maps its own facts into the schema** (`src/schema`); the core
+validates and indexes what it receives (`src/graph`). Mapping (e.g. TS
+`MethodSignature` → `callable`) is language knowledge, so it lives in the
+plugin. A plugin keeps its raw facts too, so mapping can be fixed without
+re-parsing.
+
+- **Containment is `node.parent`,** not an edge. It's a strict tree, so an
+  edge kind would only duplicate it and risk the two disagreeing. Other
+  hierarchies (lenses) are separate trees built in derive.
+- **Library code is external nodes** (`ext:<package>#<name>`, no location),
+  grouped under one container per package, so calls into libraries keep
+  both ends.
+- **Calls to locals and parameters** (a helper `const` inside a function, a
+  callback passed in) aren't edges yet: the callee isn't a node. They're
+  flagged in the facts (`localCallee`); they matter later for data flow.
+- **`Graph.from` rejects** duplicate ids, unknown parents and dangling edges.
+- **Traversal** is `neighbors(id, "up" | "down", kinds?)`: one hop, callers
+  decide whether to keep going.
+
+On glance: 1622 nodes (287 external), 2720 call edges, ~1s end to end.
 
 ### 3. Graph cache
 
@@ -111,8 +130,6 @@ against.
 
 ## Open decisions
 
-- **Ingest/normalize boundary.** Do plugins emit lode's schema directly, or
-  raw facts (symbols, occurrences, types) that the core maps?
 - **Where channel matching lives.** IPC conventions are framework-specific,
   not language-specific: core derive, or plugins?
 - **Edge type labels for untyped code.** When callers pass different types

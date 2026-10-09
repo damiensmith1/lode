@@ -30,7 +30,17 @@ describe.skipIf(!tsconfig)("glance", () => {
   });
 
   it("resolves almost every call", () => {
-    const unresolved = facts.calls.filter((c) => !c.calleeId).length;
+    const unresolved = facts.calls.filter((c) => !c.calleeId && !c.localCallee).length;
     expect(unresolved / facts.calls.length).toBeLessThan(0.02);
+  });
+});
+
+describe.skipIf(!tsconfig)("glance graph", () => {
+  it("builds a valid graph", async () => {
+    const { Graph } = await import("../src/graph/graph.js");
+    const { tsPlugin } = await import("../src/ingest/ts/index.js");
+    const graph = Graph.from(tsPlugin.index(tsconfig!));
+    expect(graph.size.nodes).toBeGreaterThan(1000);
+    expect(graph.size.edges).toBeGreaterThan(2000);
   });
 });

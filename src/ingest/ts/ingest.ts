@@ -77,12 +77,16 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
     throw new Error("node outside a source file");
   };
 
-  const resolveCallee = (call: ts.CallExpression | ts.NewExpression): string | null => {
+  // "local" when the callee is a local variable or parameter inside a
+  // function (a helper, a callback passed in): real, but not a node.
+  const resolveCallee = (call: ts.CallExpression | ts.NewExpression): string | "local" | null => {
     const target = ts.isPropertyAccessExpression(call.expression) ? call.expression.name : call.expression;
     let symbol = checker.getSymbolAtLocation(target);
     if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
     const decl = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-    return decl ? declId(decl) : null;
+    if (!decl) return null;
+    if (isProjectFile(decl.getSourceFile()) && !isDecl(decl)) return "local";
+    return declId(decl);
   };
 
   const decls: DeclFact[] = [];
@@ -102,13 +106,16 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
           containerId: enclosingId(node),
           loc: locOf(node),
           ...(reg && { registration: reg }),
+          ...(isFunctionValue(node) && { functionValue: true as const }),
         });
       }
       if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
         const signature = checker.getResolvedSignature(node);
+        const callee = resolveCallee(node);
         calls.push({
           callerId: enclosingId(node),
-          calleeId: resolveCallee(node),
+          calleeId: callee === "local" ? null : callee,
+          ...(callee === "local" && { localCallee: true as const }),
           calleeText: calleeText(node.expression),
           argTypes: (node.arguments ?? []).map((a) => checker.typeToString(checker.getTypeAtLocation(a))),
           returnType: signature ? checker.typeToString(checker.getReturnTypeOfSignature(signature)) : "unknown",
@@ -121,6 +128,12 @@ export function ingestTsProject(tsconfigPath: string): TsFacts {
   }
 
   return { decls, calls };
+}
+
+function isFunctionValue(node: ts.Node): boolean {
+  if (!ts.isVariableDeclaration(node) && !ts.isPropertyDeclaration(node)) return false;
+  const init = node.initializer;
+  return !!init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init));
 }
 
 // One line, so inline callees (IIFEs, callbacks) stay readable.
