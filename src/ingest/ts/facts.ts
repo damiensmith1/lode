@@ -57,11 +57,13 @@ export interface TsFacts {
   flows: FlowFact[];
   refs: RefFact[];
   channels: ChannelEndpoint[];
+  imports: Record<string, string[]>; // file -> project files it imports
 }
 
 // One file's facts, before cross-file resolution (channel wrappers).
 export interface FileFacts {
   file: string;
+  imports: string[]; // project files this one imports (relative paths)
   decls: DeclFact[];
   calls: CallFact[];
   channelFacts: ChannelFact[];

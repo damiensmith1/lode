@@ -29,6 +29,8 @@ export interface Node {
   parent: NodeId | null;
   loc: Location | null; // null for external (library) nodes
   external: boolean;
+  // Plugin-assigned groupings, each one a lens: { runtime: "main" }.
+  tags?: Record<string, string>;
   // Language-specific detail, opaque to the core.
   detail?: Record<string, unknown>;
 }

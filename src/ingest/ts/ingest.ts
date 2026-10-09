@@ -54,6 +54,7 @@ export function mergeFacts(files: FileFacts[]): TsFacts {
     calls,
     flows: files.flatMap((f) => f.flows),
     refs: files.flatMap((f) => f.refs),
+    imports: Object.fromEntries(files.map((f) => [f.file, f.imports])),
     channels: resolveEndpoints(files.flatMap((f) => f.channelFacts), calls),
   };
 }
@@ -245,8 +246,21 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
-    return { file: rel(sf.fileName), decls, calls, channelFacts, flows, refs: [...refs.values()] };
+    return { file: rel(sf.fileName), imports: importsOf(sf), decls, calls, channelFacts, flows, refs: [...refs.values()] };
   };
+
+  // Project files this one imports or re-exports from.
+  function importsOf(sf: ts.SourceFile): string[] {
+    const imports = new Set<string>();
+    for (const statement of sf.statements) {
+      if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue;
+      const spec = statement.moduleSpecifier;
+      if (!spec || !ts.isStringLiteral(spec)) continue;
+      const resolved = ts.resolveModuleName(spec.text, sf.fileName, program.getCompilerOptions(), ts.sys).resolvedModule;
+      if (resolved && projectFiles.has(path.resolve(resolved.resolvedFileName))) imports.add(rel(resolved.resolvedFileName));
+    }
+    return [...imports];
+  }
 
   // Arguments that are the caller's own parameters, so wrappers of wrappers
   // can be followed. Omitted when there are none.

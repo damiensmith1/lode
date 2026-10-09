@@ -1,9 +1,11 @@
 import { ipcMain, type WebContents } from "electron";
+import { title } from "./format.js";
+import { stamp } from "./util.js";
 
 export interface Note { id: string; text: string }
 
 export function saveNote(text: string): Note {
-  return { id: "1", text };
+  return { id: String(stamp()), text: title(text) };
 }
 
 // A wrapper: the channel is a parameter, so the key comes from its callers.

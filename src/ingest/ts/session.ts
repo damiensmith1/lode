@@ -40,7 +40,7 @@ export function openTsSession(tsconfigPath: string, state?: unknown): PluginSess
     host ??= cachingHost(project.options);
     program = ts.createProgram(project.files, project.options, host, program);
 
-    const affected = changed ? withImporters(new Set(changed), program, rel) : new Set(Object.keys(current));
+    const affected = changed ? withImporters(new Set(changed), cache) : new Set(Object.keys(current));
     for (const file of Object.keys(current)) if (!cache[file]) affected.add(file); // new or never indexed
 
     const extract = createExtractor(program, project);
@@ -81,30 +81,16 @@ function cachingHost(options: ts.CompilerOptions): ts.CompilerHost {
   return host;
 }
 
-// Adds every project file that directly imports one of `files`. Their facts
-// can change too (callee ids, argument types). Transitive effects of inferred
-// types are not followed; a full update catches those.
-function withImporters(files: Set<string>, program: ts.Program, rel: (abs: string) => string): Set<string> {
+// Adds every project file that directly imports one of `files`, per the
+// cached facts (an importer whose own text changed is in `files` already).
+// Their facts can change too (callee ids, argument types). Transitive effects
+// of inferred types are not followed; a full update catches those.
+function withImporters(files: Set<string>, cache: Record<string, CachedFile>): Set<string> {
   const result = new Set(files);
-  const options = program.getCompilerOptions();
-  for (const sf of program.getSourceFiles()) {
-    if (sf.isDeclarationFile) continue;
-    for (const spec of moduleSpecifiers(sf)) {
-      const resolved = ts.resolveModuleName(spec, sf.fileName, options, ts.sys).resolvedModule;
-      if (resolved && files.has(rel(resolved.resolvedFileName))) result.add(rel(sf.fileName));
-    }
+  for (const [file, cached] of Object.entries(cache)) {
+    if (cached.facts.imports.some((imported) => files.has(imported))) result.add(file);
   }
   return result;
-}
-
-function moduleSpecifiers(sf: ts.SourceFile): string[] {
-  const specs: string[] = [];
-  for (const statement of sf.statements) {
-    if ((ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)) {
-      specs.push(statement.moduleSpecifier.text);
-    }
-  }
-  return specs;
 }
 
 function hashOf(content: Buffer): string {

@@ -228,6 +228,29 @@ node, so its key can't be followed. Known gap. Node `EventEmitter`
   nodes, e.g. folder and runtime (main vs renderer). An inferred concept
   lens comes later.
 
+### Hierarchies (lenses)
+
+A lens is a tree over the same nodes (`graph.lens(name)`: `parent`,
+`children`, `roots`, `path`). Lenses only add group nodes above the
+containment tree; they never change edges. Group ids are namespaced
+(`dir:src/main`, `runtime:main`).
+
+- **`containment`**: `node.parent` as is (file › class › method).
+- **`folder`**: directories above top-level nodes, from their file path.
+  Built in the core.
+- **Tag lenses**: any `node.tags` key a plugin sets becomes a lens. The TS
+  plugin tags file nodes with `runtime` (`src/ingest/ts/runtimes.ts`): a
+  file is seeded `main`, `preload` or `renderer` by the Electron/DOM APIs it
+  calls, and files without a seed inherit the runtime of the files that
+  import them (`shared` when imported from more than one).
+
+Imports are part of each file's facts, which also lets the session find a
+changed file's importers from cached facts.
+
+On glance: 40 files in `main` (including pure utilities, via importers), 3
+in `preload`, none untagged. Glance's renderer code is plain JS outside the
+TS project, so `renderer` doesn't appear.
+
 ## Build vs buy: existing code graphs
 
 Joern (code property graph) and CodeQL were considered as the core and

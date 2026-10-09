@@ -1,5 +1,6 @@
 import type { Edge, GraphData, Node, NodeKind } from "../../schema/index.js";
 import type { DeclFact, TsFacts } from "./facts.js";
+import { runtimesOf } from "./runtimes.js";
 
 const KIND_BY_TS: Record<string, NodeKind> = {
   SourceFile: "container",
@@ -29,6 +30,10 @@ export function toGraph(facts: TsFacts): GraphData {
   const edges: Edge[] = [];
 
   for (const decl of facts.decls) nodes.set(decl.id, declNode(decl));
+  for (const [file, runtime] of runtimesOf(facts)) {
+    const node = nodes.get(file);
+    if (node) node.tags = { runtime };
+  }
 
   const external = (id: string) => {
     if (nodes.has(id)) return;

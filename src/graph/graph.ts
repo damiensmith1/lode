@@ -1,4 +1,5 @@
 import type { Edge, EdgeKind, GraphData, Node, NodeId } from "../schema/index.js";
+import { containmentLens, folderLens, type Lens, tagLens } from "./lens.js";
 
 export type Direction = "up" | "down"; // up: what feeds a node; down: what it feeds
 
@@ -7,6 +8,7 @@ export class Graph {
   private readonly outgoing = new Map<NodeId, Edge[]>();
   private readonly incoming = new Map<NodeId, Edge[]>();
   private readonly children = new Map<NodeId, NodeId[]>();
+  private readonly lenses = new Map<string, Lens>();
 
   // Rejects data the core can't trust: duplicate ids, dangling parents or edges.
   static from(data: GraphData): Graph {
@@ -33,6 +35,21 @@ export class Graph {
 
   node(id: NodeId): Node | undefined {
     return this.nodes.get(id);
+  }
+
+  allNodes(): Iterable<Node> {
+    return this.nodes.values();
+  }
+
+  // A hierarchy to browse the graph by: "containment", "folder", or any tag
+  // plugins put on nodes (e.g. "runtime"). Built on first use.
+  lens(name: string): Lens {
+    let lens = this.lenses.get(name);
+    if (!lens) {
+      lens = name === "containment" ? containmentLens(this) : name === "folder" ? folderLens(this) : tagLens(this, name);
+      this.lenses.set(name, lens);
+    }
+    return lens;
   }
 
   childrenOf(id: NodeId): Node[] {
