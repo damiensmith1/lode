@@ -7,6 +7,12 @@ import { GraphStore } from "./graph/store.js";
 import { tsPlugin } from "./ingest/ts/index.js";
 import type { Edge } from "./schema/index.js";
 
+// Exit quietly when piped into something that stops reading (`| head`).
+process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EPIPE") process.exit(0);
+  throw error;
+});
+
 const args = process.argv.slice(2);
 const option = (name: string) => {
   const i = args.indexOf(`--${name}`);
