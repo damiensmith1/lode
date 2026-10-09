@@ -47,6 +47,27 @@ inference) is bought, not built:
   channels like `ipc.send('topic:update', …)`.
 - **SCIP / LSP**: the route to other languages later.
 
+### TypeScript and JavaScript
+
+One plugin covers both, through the TS compiler (`src/ingest/ts`):
+
+- **Projects** (`project.ts`): a `tsconfig.json`, a `jsconfig.json`, or a
+  directory (its config if it has one, else plain-JS defaults). `allowJs` is
+  always on, so a TS project's `.js` files are indexed too.
+- **Vendored code is skipped**: files under `vendor/`, `third_party/` etc.,
+  `*.min.js`, and anything with minified lines. It still loads as a library
+  when imported, named by its path (`ext:src/shared/vendor/…#html`).
+- **CommonJS**: `exports.x = …`, `module.exports.x = …` and
+  `module.exports = {…}` at the top level are declarations (callable, value
+  or container); `require("…")` is an import, not a call. Destructured
+  imports (`const { f } = require("./m")`) resolve to the property's node.
+- **JSDoc**: the checker reads JSDoc types for free (`@param`, `@returns`);
+  `@typedef`/`@callback` become type nodes, and types referenced in JSDoc
+  become `type` references.
+- **Untyped code resolves less**: on glance's renderer JS, ~80% of calls
+  resolve; the rest are methods on untyped values (`e.preventDefault()`),
+  a natural place for a model to fill gaps later.
+
 lode uses the `typescript` 5.x package for analysis. TypeScript 7 (the Go
 port) doesn't expose the classic JS compiler API, but 5.x reads TS 7
 projects fine (glance is one).
@@ -216,8 +237,15 @@ Split between plugin and core:
 - **Preload bridges are nodes.** Objects passed to
   `contextBridge.exposeInMainWorld` become containers, and their function
   members become callables, so `clance.onTerminalData` is a real endpoint.
+- **The bridge is a channel too** (family `electron-bridge`): each exposed
+  member receives on key `api.member`, and renderer calls
+  `window.api.member(…)` (or `api.member(…)` on an undeclared global, or via
+  `const api = window.api`) send on it, awaiting the member's return value.
+  That links renderer → preload → main end to end.
 
-On glance: 321 endpoints, 286 flow edges, every send matched a receiver.
+On glance: 286 IPC flow edges, every IPC send matched a receiver; plus 230
+bridge calls from renderer JS, all matched to a bridge member (4 members
+are never called).
 The 5 receivers with no sender: 3 truly have none in TS, and 2 are sent
 through a *local* wrapper (`const send = …` inside a function), which isn't a
 node, so its key can't be followed. Known gap. Node `EventEmitter`
@@ -247,9 +275,11 @@ containment tree; they never change edges. Group ids are namespaced
 Imports are part of each file's facts, which also lets the session find a
 changed file's importers from cached facts.
 
-On glance: 40 files in `main` (including pure utilities, via importers), 3
-in `preload`, none untagged. Glance's renderer code is plain JS outside the
-TS project, so `renderer` doesn't appear.
+Bridge calls (`window.api.x()`) also seed `renderer`, and imports include
+`require()` and dynamic `import()`.
+
+On glance: 40 files in `main`, 41 in `renderer`, 3 in `preload`, none
+untagged.
 
 ## Build vs buy: existing code graphs
 

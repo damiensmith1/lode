@@ -2,8 +2,9 @@ import path from "node:path";
 import ts from "typescript";
 import type { CallFact, DeclFact, FileFacts, FlowFact, Location, RefFact, TsFacts } from "./facts.js";
 import { returningFunction, sourceCalls } from "./flows.js";
+import { loadProject, type Project } from "./project.js";
 import { referenceOf } from "./refs.js";
-import { channelFactOf, type ChannelFact, keyParamOf, resolveEndpoints } from "./channels.js";
+import { bridgeReceiveOf, bridgeSendOf, channelFactOf, type ChannelFact, keyParamOf, resolveEndpoints } from "./channels.js";
 import { type Registration, registrationOf } from "./registrations.js";
 
 // Declarations that become nodes. Anything else nested inside them is
@@ -24,24 +25,10 @@ const DECL_KINDS = new Set([
   ts.SyntaxKind.VariableDeclaration,
 ]);
 
-export interface Project {
-  root: string;
-  options: ts.CompilerOptions;
-  files: string[]; // absolute paths of the project's own source files
-}
-
-export function loadProject(tsconfigPath: string): Project {
-  const root = path.dirname(path.resolve(tsconfigPath));
-  const config = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-  if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
-  return { root, options: parsed.options, files: parsed.fileNames.map((f) => path.resolve(f)) };
-}
-
 // Whole project in one pass. Sessions (session.ts) use the pieces below to
 // re-extract only what changed.
-export function ingestTsProject(tsconfigPath: string): TsFacts {
-  const project = loadProject(tsconfigPath);
+export function ingestTsProject(projectPath: string): TsFacts {
+  const project = loadProject(projectPath);
   const program = ts.createProgram(project.files, project.options);
   const extract = createExtractor(program, project);
   return mergeFacts(project.files.map((f) => extract(program.getSourceFile(f)!)));
@@ -86,6 +73,8 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
     const reg = registration(node);
     if (reg) return reg.key ? `${reg.call}:${reg.key}` : `${reg.call}@L${locOf(node).line}`;
     if (ts.isPropertyAssignment(node)) return isObjectMember(node) ? declName(node) : null;
+    if (ts.isBinaryExpression(node)) return commonJsExportName(node);
+    if (isJsDocTypedef(node)) return node.name && ts.isIdentifier(node.name) ? node.name.text : null;
     if (!DECL_KINDS.has(node.kind) || isLocalVariable(node)) return null;
     return declName(node as ts.NamedDeclaration);
   };
@@ -100,7 +89,9 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
     if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return false;
     const object = node.parent;
     if (registration(object)) return true;
-    return ts.isVariableDeclaration(object.parent) && object.parent.initializer === object && isDecl(object.parent);
+    const holder = object.parent; // `const api = {…}` or `module.exports = {…}`
+    if (ts.isVariableDeclaration(holder)) return holder.initializer === object && isDecl(holder);
+    return ts.isBinaryExpression(holder) && holder.right === object && isDecl(holder);
   };
 
   // "<file>#<Outer.Inner>" for project code; "ext:<package>#<name>" otherwise.
@@ -109,15 +100,17 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
     const names: string[] = [];
     for (let n: ts.Node | undefined = decl; n && n !== sf; n = n.parent) {
       if (isDecl(n)) names.unshift(nameOf(n)!);
+      if (isJsDocTypedef(n)) break; // module-scoped wherever the comment sits
     }
     if (!isProjectFile(sf)) {
-      const pkg = program.isSourceFileDefaultLibrary(sf) ? "lib" : packageOf(sf.fileName);
+      const pkg = program.isSourceFileDefaultLibrary(sf) ? "lib" : (packageOf(sf.fileName) ?? rel(sf.fileName));
       return `ext:${pkg}#${names.join(".")}`;
     }
     return names.length ? `${rel(sf.fileName)}#${names.join(".")}` : rel(sf.fileName);
   };
 
   const enclosingId = (node: ts.Node): string => {
+    if (isJsDocTypedef(node)) return rel(node.getSourceFile().fileName);
     for (let n = node.parent; n; n = n.parent) {
       if (ts.isSourceFile(n)) return rel(n.fileName);
       if (isDecl(n)) return declId(n);
@@ -137,13 +130,36 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
     const target = ts.isPropertyAccessExpression(call.expression) ? call.expression.name : call.expression;
     let symbol = checker.getSymbolAtLocation(target);
     if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-    const decl = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-    if (!decl) return null;
+    const found = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+    if (!found) return null;
+    const decl = canonicalDecl(found);
     if (isProjectFile(decl.getSourceFile()) && !isDecl(decl)) return "local";
     return declId(decl);
   };
 
-  const nodeIdOf = (node: ts.Node) => (isDecl(node) ? declId(node) : null);
+  // The declaration that's actually a node, from what the checker hands back:
+  // - `exports.f = …` declares `f` at the left-hand side; the node is the assignment.
+  // - `const { f } = require("./m")` (or any destructuring) binds a local;
+  //   the node is the property it was taken from.
+  const canonicalDecl = (decl: ts.Node, depth = 0): ts.Node => {
+    if (ts.isPropertyAccessExpression(decl) && ts.isBinaryExpression(decl.parent) && decl.parent.left === decl) return decl.parent;
+    if (ts.isBindingElement(decl) && depth < 3) {
+      let holder: ts.Node = decl.parent;
+      while (!ts.isVariableDeclaration(holder) && holder.parent) holder = holder.parent;
+      const key = decl.propertyName ?? decl.name;
+      if (ts.isVariableDeclaration(holder) && holder.initializer && ts.isIdentifier(key)) {
+        const prop = checker.getTypeAtLocation(holder.initializer).getProperty(key.text);
+        const target = prop?.valueDeclaration ?? prop?.declarations?.[0];
+        if (target) return canonicalDecl(target, depth + 1);
+      }
+    }
+    return decl;
+  };
+
+  const nodeIdOf = (node: ts.Node) => {
+    const decl = canonicalDecl(node);
+    return isDecl(decl) ? declId(decl) : null;
+  };
 
   // The node a function's return value belongs to: the function itself, or
   // the variable/property it's assigned to. Null for anonymous inner functions.
@@ -163,7 +179,7 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
         .filter((id): id is string => !!id && id !== "local"),
     ),
   ];
-  const channelCtx = { checker, nodeIdOf, enclosingId, locOf };
+  const channelCtx = { checker, nodeIdOf, canonicalDecl, enclosingId, locOf };
 
   return (sf: ts.SourceFile): FileFacts => {
     const decls: DeclFact[] = [];
@@ -195,9 +211,12 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
           loc: locOf(node),
           ...(reg && { registration: reg }),
           ...(isFunctionValue(node) && { functionValue: true as const }),
+          ...(ts.isBinaryExpression(node) && ts.isObjectLiteralExpression(node.right) && { objectValue: true as const }),
         });
+        const bridge = bridgeReceiveOf(node, registration(node.parent)?.key ?? null, channelCtx);
+        if (bridge) channelFacts.push(bridge);
       }
-      if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && !isRequire(node)) {
         const signature = checker.getResolvedSignature(node);
         const callee = resolveCallee(node);
         const argTypes = (node.arguments ?? []).map((a) => checker.typeToString(checker.getTypeAtLocation(a)));
@@ -214,6 +233,8 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
         if (ts.isCallExpression(node)) {
           const channel = channelFactOf(node, callee === "local" ? null : callee, channelCtx);
           if (channel) channelFacts.push(channel);
+          const bridge = bridgeSendOf(node, callee === "local" ? null : callee, channelCtx);
+          if (bridge) channelFacts.push(bridge);
         }
         if (callee && callee !== "local") {
           const within = enclosingId(node);
@@ -243,6 +264,8 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
       }
       if (ts.isReturnStatement(node) && node.expression) flowOut(node.expression, ownerOf(returningFunction(node)));
       if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) flowOut(node.body, ownerOf(node));
+      // JSDoc isn't part of the regular tree: typedefs and @param/@returns types live there.
+      for (const doc of jsDocOf(node)) visit(doc);
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
@@ -250,15 +273,23 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
   };
 
   // Project files this one imports or re-exports from.
+  // Includes CommonJS `require("…")` and dynamic `import("…")`.
   function importsOf(sf: ts.SourceFile): string[] {
     const imports = new Set<string>();
-    for (const statement of sf.statements) {
-      if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue;
-      const spec = statement.moduleSpecifier;
-      if (!spec || !ts.isStringLiteral(spec)) continue;
+    const add = (spec: ts.Expression | undefined) => {
+      if (!spec || !ts.isStringLiteralLike(spec)) return;
       const resolved = ts.resolveModuleName(spec.text, sf.fileName, program.getCompilerOptions(), ts.sys).resolvedModule;
       if (resolved && projectFiles.has(path.resolve(resolved.resolvedFileName))) imports.add(rel(resolved.resolvedFileName));
-    }
+    };
+    const walk = (node: ts.Node) => {
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
+      else if (ts.isCallExpression(node)) {
+        const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
+        if (isRequire || node.expression.kind === ts.SyntaxKind.ImportKeyword) add(node.arguments[0]);
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(sf);
     return [...imports];
   }
 
@@ -270,7 +301,37 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
   }
 }
 
+// `module.exports = …` and `exports.x = …` / `module.exports.x = …` at the top
+// level of a file: CommonJS declarations.
+function commonJsExportName(node: ts.BinaryExpression): string | null {
+  if (node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+  if (!ts.isExpressionStatement(node.parent) || !ts.isSourceFile(node.parent.parent)) return null;
+  const isModuleExports = (e: ts.Expression) =>
+    ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "module" && e.name.text === "exports";
+  if (isModuleExports(node.left)) return "module.exports";
+  const left = node.left;
+  if (!ts.isPropertyAccessExpression(left)) return null;
+  const target = left.expression;
+  return (ts.isIdentifier(target) && target.text === "exports") || isModuleExports(target) ? left.name.text : null;
+}
+
+// `require("./m")` is an import (see importsOf), not a call worth an edge.
+function isRequire(node: ts.CallExpression | ts.NewExpression): boolean {
+  return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require";
+}
+
+function isJsDocTypedef(node: ts.Node): node is ts.JSDocTypedefTag | ts.JSDocCallbackTag {
+  return ts.isJSDocTypedefTag(node) || ts.isJSDocCallbackTag(node);
+}
+
+// The JSDoc comments attached to a node. `jsDoc` isn't in TS's public types,
+// but it's what the public JSDoc helpers read.
+function jsDocOf(node: ts.Node): ts.JSDoc[] {
+  return (node as { jsDoc?: ts.JSDoc[] }).jsDoc ?? [];
+}
+
 function isFunctionValue(node: ts.Node): boolean {
+  if (ts.isBinaryExpression(node)) return ts.isArrowFunction(node.right) || ts.isFunctionExpression(node.right);
   if (!ts.isVariableDeclaration(node) && !ts.isPropertyDeclaration(node)) return false;
   const init = node.initializer;
   return !!init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init));
@@ -297,9 +358,11 @@ function declName(node: ts.NamedDeclaration): string | null {
   return null; // destructuring patterns, computed names
 }
 
-function packageOf(fileName: string): string {
+// The npm package a library file belongs to; null for files outside
+// node_modules (vendored code in the repo is named by its path instead).
+function packageOf(fileName: string): string | null {
   const parts = fileName.split(/[\\/]/);
   const i = parts.lastIndexOf("node_modules");
-  if (i === -1) return "lib";
+  if (i === -1) return null;
   return parts[i + 1].startsWith("@") ? `${parts[i + 1]}/${parts[i + 2]}` : parts[i + 1];
 }

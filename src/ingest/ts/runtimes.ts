@@ -18,6 +18,8 @@ export function runtimesOf(facts: TsFacts): Map<string, string> {
     const seed = call.calleeId && SEEDS.find((s) => s.callee.test(call.calleeId!));
     if (seed) add(seeds, call.loc.file, seed.runtime);
   }
+  // Calling into the preload bridge (window.api.x()) only happens in renderers.
+  for (const e of facts.channels) if (e.family === "electron-bridge" && e.role === "send") add(seeds, e.loc.file, "renderer");
 
   // Push each seed down the import graph.
   const runtimes = new Map<string, Set<string>>();

@@ -21,6 +21,9 @@ const KIND_BY_TS: Record<string, NodeKind> = {
   VariableDeclaration: "value",
   PropertyDeclaration: "value",
   PropertySignature: "value",
+  JSDocTypedefTag: "type",
+  JSDocCallbackTag: "type",
+  BinaryExpression: "value", // CommonJS export; callable/container when it holds a function/object
 };
 
 // Maps TS facts into the lode schema. Library code the project calls into
@@ -76,7 +79,7 @@ export function toGraph(facts: TsFacts): GraphData {
 }
 
 function declNode(decl: DeclFact): Node {
-  const kind = decl.functionValue ? "callable" : KIND_BY_TS[decl.tsKind];
+  const kind = decl.functionValue ? "callable" : decl.objectValue ? "container" : KIND_BY_TS[decl.tsKind];
   if (!kind) throw new Error(`no node kind for TS kind ${decl.tsKind} (${decl.id})`);
   return {
     id: decl.id,

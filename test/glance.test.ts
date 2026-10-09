@@ -38,9 +38,18 @@ describe.skipIf(!tsconfig)("glance", () => {
     expect(handlers.every((d) => d.registration?.key)).toBe(true);
   });
 
-  it("resolves almost every call", () => {
-    const unresolved = facts.calls.filter((c) => !c.calleeId && !c.localCallee).length;
-    expect(unresolved / facts.calls.length).toBeLessThan(0.02);
+  it("resolves almost every call in TypeScript", () => {
+    const ts = facts.calls.filter((c) => c.loc.file.endsWith(".ts"));
+    const unresolved = ts.filter((c) => !c.calleeId && !c.localCallee).length;
+    expect(unresolved / ts.length).toBeLessThan(0.02);
+  });
+
+  it("resolves most calls in untyped JavaScript", () => {
+    // Bridge calls (window.api.x) resolve through channel flows instead; the
+    // rest unresolved are methods on untyped values (e.preventDefault()).
+    const js = facts.calls.filter((c) => c.loc.file.endsWith(".js") && !/^(window\.)?clance/.test(c.calleeText));
+    const unresolved = js.filter((c) => !c.calleeId && !c.localCallee).length;
+    expect(unresolved / js.length).toBeLessThan(0.3);
   });
 
   it("builds a valid graph", () => {
@@ -59,5 +68,19 @@ describe.skipIf(!tsconfig)("glance", () => {
         via: { family: "electron-ipc:to-renderer", key: "dictation:start" },
       }),
     );
+  });
+
+  it("indexes the renderer's JavaScript and follows it through the bridge to main", () => {
+    const next = (id: string) => graph.neighbors(id, "down", ["flows"]).map((e) => e.to);
+    const member = "src/preload/mainWindow.ts#exposeInMainWorld:clanceApp.docConfirmUnsaved";
+    expect(next("src/mainWindow/Shell.js#confirmUnsaved")).toContain(member);
+    expect(next(member)).toContain("src/main/index.ts#handle:doc:confirm-unsaved");
+  });
+
+  it("places every file in a runtime, and skips vendored bundles", () => {
+    const runtime = graph.lens("runtime");
+    expect(runtime.roots().filter((r) => !r.includes(":"))).toEqual([]); // no untagged files
+    expect(runtime.children("runtime:renderer").length).toBeGreaterThan(30);
+    expect(graph.node("src/shared/vendor/xterm/xterm.js")).toBeUndefined();
   });
 });

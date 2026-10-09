@@ -16,6 +16,8 @@ export interface DeclFact {
   loc: Location;
   // Set on variables/properties whose value is a function literal.
   functionValue?: true;
+  // Set on CommonJS exports whose value is an object literal (`module.exports = {…}`).
+  objectValue?: true;
   // Set when this is a callback handed to a registration (event, IPC, route…).
   registration?: { call: string; key: string | null };
 }

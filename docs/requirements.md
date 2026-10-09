@@ -5,8 +5,8 @@ later.
 
 ## Functional
 
-- **Index a TypeScript codebase** into the lode graph. Clance is the first
-  target.
+- **Index TypeScript and JavaScript codebases** into the lode graph
+  (ESM, CommonJS, JSDoc). Clance is the first target.
 - **Resolve names across files**, so every use of a symbol links to its one
   declaration.
 - **Normalize to a common schema** of node kinds (container, callable, type,
@@ -42,28 +42,28 @@ later.
 - MCP tooling
 - Diffs
 - Exports (e.g. Mermaid)
-- Languages other than TypeScript
+- Languages other than TypeScript and JavaScript
 - Inferred concept hierarchy
 
 ## Status (core MVP)
 
-Done, tested on fixtures and on glance (43 files: 1799 nodes, 5490 edges,
-~1.3s full index, 24ms cached reopen):
+Done, tested on fixtures and on glance (84 files, TS + JS: ~2900 nodes,
+~9700 edges, ~2.3s full index, ~50ms cached reopen):
 
-- TS ingest with cross-file name resolution and source locations
+- TypeScript and JavaScript ingest (ESM, CommonJS, JSDoc; vendored bundles
+  skipped) with cross-file name resolution and source locations
 - Schema with node kinds, containment, calls / references / flows edges
 - Flow edges: tier 1 (local), tier 2 (shared state), tier 3 (channels, with
   wrapper following); confidence on derived edges
-- Lenses: containment, folder, runtime
+- Electron preload bridge: renderer `window.api.x()` → bridge member → main
+- Lenses: containment, folder, runtime (main / preload / renderer / shared)
 - One-hop traversal up and down
 - Persistent cache with incremental per-file updates
 - CLI: `index`, `node`
 
 Known gaps:
 
-- **JavaScript files** aren't indexed (glance's renderer is plain JS), so
-  calls from renderer code into the preload bridge are missing. TS can
-  analyze JS (`allowJs`); worth doing next.
+- Untyped JS resolves ~80% of calls; methods on untyped values don't resolve.
 - Channel keys passed through *local* wrappers inside functions.
 - Node `EventEmitter` `emit`/`on` channels.
 - Reassignment-based local flows (`let x; x = load()`).

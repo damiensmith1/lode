@@ -160,3 +160,71 @@ export function keysOf(type: string | null): { value: string; pattern: boolean }
     return [];
   });
 }
+
+// The Electron preload bridge: contextBridge.exposeInMainWorld("api", {...})
+// makes each member callable from renderer code as window.api.member(...).
+// Members are receivers keyed "api.member"; renderer calls are senders, and
+// the member's return value comes back to the caller.
+const BRIDGE = "electron-bridge";
+
+export function bridgeReceiveOf(member: ts.Node, apiKey: string | null, ctx: Context): ChannelFact | null {
+  if (!apiKey || !(ts.isPropertyAssignment(member) || ts.isMethodDeclaration(member))) return null;
+  const nodeId = ctx.nodeIdOf(member);
+  const name = member.name && ts.isIdentifier(member.name) ? member.name.text : null;
+  if (!nodeId || !name) return null;
+  const signature = ctx.checker.getTypeAtLocation(member).getCallSignatures()[0];
+  return {
+    role: "receive",
+    family: BRIDGE,
+    nodeId,
+    keyType: JSON.stringify(`${apiKey}.${name}`),
+    keyParam: null,
+    payload: [],
+    ...(signature && { returns: ctx.checker.typeToString(ctx.checker.getReturnTypeOfSignature(signature)) }),
+    loc: ctx.locOf(member),
+  };
+}
+
+// `window.api.member(...)`, `globalThis.api.member(...)`, `api.member(...)`
+// with `api` an undeclared global, or through a local `const api = window.api`.
+export function bridgeSendOf(call: ts.CallExpression, calleeId: string | null, ctx: Context): ChannelFact | null {
+  if (!ts.isPropertyAccessExpression(call.expression)) return null;
+  if (calleeId?.startsWith("ext:")) return null; // a real library API (window.localStorage.getItem)
+  const api = globalName(call.expression.expression, ctx.checker);
+  if (!api) return null;
+  const { checker } = ctx;
+  return {
+    role: "send",
+    family: BRIDGE,
+    nodeId: ctx.enclosingId(call),
+    keyType: JSON.stringify(`${api}.${call.expression.name.text}`),
+    keyParam: null,
+    payload: call.arguments.map((a) => checker.typeToString(checker.getTypeAtLocation(a))),
+    awaitsReply: true,
+    loc: ctx.locOf(call),
+  };
+}
+
+const GLOBAL_OBJECTS = new Set(["window", "globalThis", "self"]);
+
+function globalName(expr: ts.Expression, checker: ts.TypeChecker, depth = 0): string | null {
+  if (depth > 3) return null;
+  while (ts.isParenthesizedExpression(expr) || ts.isNonNullExpression(expr)) expr = expr.expression;
+  if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression) && GLOBAL_OBJECTS.has(expr.expression.text)) {
+    return isGlobal(expr.expression, checker) ? expr.name.text : null;
+  }
+  if (!ts.isIdentifier(expr)) return null;
+  const symbol = checker.getSymbolAtLocation(expr);
+  if (!symbol) return expr.text; // an undeclared global
+  const decl = symbol.valueDeclaration;
+  if (decl && ts.isVariableDeclaration(decl) && decl.initializer && ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) {
+    return globalName(decl.initializer, checker, depth + 1);
+  }
+  return null;
+}
+
+// `window` the global, not a local variable that happens to be called window.
+function isGlobal(id: ts.Identifier, checker: ts.TypeChecker): boolean {
+  const decl = checker.getSymbolAtLocation(id)?.valueDeclaration;
+  return !decl || decl.getSourceFile().hasNoDefaultLib;
+}

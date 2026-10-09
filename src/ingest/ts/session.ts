@@ -4,7 +4,8 @@ import path from "node:path";
 import ts from "typescript";
 import type { GraphData, PluginSession } from "../../schema/index.js";
 import type { FileFacts } from "./facts.js";
-import { createExtractor, loadProject, mergeFacts } from "./ingest.js";
+import { createExtractor, mergeFacts } from "./ingest.js";
+import { loadProject } from "./project.js";
 import { toGraph } from "./toGraph.js";
 
 interface CachedFile {
@@ -20,22 +21,22 @@ interface State {
 // and keeps each file's facts so only changed files (and the files that
 // import them) are re-extracted. The program is only built when something
 // actually needs re-extracting.
-export function openTsSession(tsconfigPath: string, state?: unknown): PluginSession {
+export function openTsSession(projectPath: string, state?: unknown): PluginSession {
   let cache: Record<string, CachedFile> = isState(state) ? state.files : {};
   let program: ts.Program | undefined;
   let host: ts.CompilerHost | undefined;
 
-  const root = () => path.dirname(path.resolve(tsconfigPath));
-  const rel = (abs: string) => path.relative(root(), abs).split(path.sep).join("/");
+  const root = loadProject(projectPath).root; // fixed for the session
+  const rel = (abs: string) => path.relative(root, abs).split(path.sep).join("/");
 
   const files = () => {
     const hashes: Record<string, string> = {};
-    for (const abs of loadProject(tsconfigPath).files) hashes[rel(abs)] = hashOf(readFileSync(abs));
+    for (const abs of loadProject(projectPath).files) hashes[rel(abs)] = hashOf(readFileSync(abs));
     return hashes;
   };
 
   const update = (changed?: string[]): GraphData => {
-    const project = loadProject(tsconfigPath);
+    const project = loadProject(projectPath);
     const current = files();
     host ??= cachingHost(project.options);
     program = ts.createProgram(project.files, project.options, host, program);
@@ -50,7 +51,7 @@ export function openTsSession(tsconfigPath: string, state?: unknown): PluginSess
         next[file] = cache[file];
         continue;
       }
-      const sf = program.getSourceFile(path.join(root(), file));
+      const sf = program.getSourceFile(path.join(root, file));
       if (sf) next[file] = { hash: current[file], facts: extract(sf) };
     }
     cache = next; // files that disappeared drop out here

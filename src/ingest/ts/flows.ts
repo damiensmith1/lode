@@ -10,6 +10,7 @@ export function sourceCalls(expr: ts.Expression, checker: ts.TypeChecker, depth 
   const next = (e: ts.Expression) => sourceCalls(e, checker, depth + 1);
   expr = unwrap(expr);
 
+  if (ts.isCallExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === "require") return []; // an import
   if (ts.isCallExpression(expr) || ts.isNewExpression(expr)) return [expr];
   if (ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)) return next(expr.expression);
   if (ts.isConditionalExpression(expr)) return [...next(expr.whenTrue), ...next(expr.whenFalse)];
