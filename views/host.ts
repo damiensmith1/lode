@@ -8,6 +8,11 @@ export interface LodeHost {
   // Optional: mark source lines in the host's editor for what the view
   // shows (null clears). The host decides whether to open or scroll.
   highlight?(highlight: SourceHighlight | null): void;
+  // Optional: syntax-colour source text, one HTML string per line, with the
+  // source escaped. Views that show code use it; without it, code is plain.
+  syntax?(text: string, file: string): string[];
+  // CSS for the classes `syntax` emits; views put it inside their shadow root.
+  syntaxCss?: string;
 }
 
 export interface SourceHighlight {
@@ -21,7 +26,8 @@ export interface SourceHighlight {
 export type ViewRequest =
   | { kind: "focus"; id: string }
   | { kind: "map"; lens?: string; parent?: string }
-  | { kind: "graph"; lens?: string; select?: string };
+  | { kind: "graph"; lens?: string; select?: string }
+  | { kind: "flow"; id?: string };
 
 // Views dispatch this (bubbling, composed) when their title changes, so the
 // host can label the tab.

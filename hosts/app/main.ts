@@ -3,7 +3,7 @@
 // clicking in the graph opens and jumps the code. Nothing moves on its own. It's one host among many;
 // everything lode-specific comes from ../../views through LodeHost.
 import type { FileEntry, FileView, NodeRef, ProjectInfo } from "../../src/query/types.js";
-import { highlightLines } from "./highlight.js";
+import { highlightLines, SYNTAX_CSS } from "./highlight.js";
 import { createView, LodeClient, TITLE_EVENT, type LodeHost, type SourceHighlight, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -115,6 +115,8 @@ let linked: Tab | null = null; // the focus tab that follows the code
 function select(tab: Tab) {
   for (const t of tabs) t.button.setAttribute("aria-selected", String(t === tab));
   $("view").replaceChildren(tab.view);
+  // The flow view is the code, so the code pane steps aside for it.
+  document.body.classList.toggle("flow-mode", tab.view.tagName === "LODE-FLOW");
   applyHighlight(tab.highlight ?? null);
 }
 
@@ -136,6 +138,8 @@ function openView(request: ViewRequest, options: { linked?: boolean } = {}): Tab
   const host: LodeHost = {
     openSource: (file, line) => void showSource(file, line),
     openView: (r) => void openView(r),
+    syntax: highlightLines,
+    syntaxCss: SYNTAX_CSS,
     highlight: (h) => {
       tab.highlight = h;
       if (button.getAttribute("aria-selected") === "true") applyHighlight(h);
@@ -221,9 +225,19 @@ function renderTree(files: FileEntry[]) {
 }
 
 // Opening a file just shows it; click a line (or ◇) to bring the graph along.
+// In flow mode it starts the flow from the file's outline instead.
 async function openFile(file: string) {
+  if (startFlow(file)) return;
   await showSource(file);
   $("code").scrollTop = 0;
+}
+
+// Point the flow view at a node, if the flow tab is the one showing.
+function startFlow(id: string): boolean {
+  const view = $("view").firstElementChild;
+  if (view?.tagName !== "LODE-FLOW") return false;
+  view.setAttribute("node", id);
+  return true;
 }
 
 function indent<T extends HTMLElement>(node: T, depth: number): T {
@@ -249,7 +263,7 @@ function setupSearch() {
             {},
             el(
               "button",
-              { role: "option", onclick: () => (focusLinked(n.id), (results.hidden = true), (input.value = "")) },
+              { role: "option", onclick: () => (startFlow(n.id) || focusLinked(n.id), (results.hidden = true), (input.value = "")) },
               el("span", { className: "mono" }, n.name),
               el("span", { className: "where" }, `${n.kind} · ${n.file ?? ""}${n.line ? `:${n.line}` : ""}`),
             ),
@@ -281,12 +295,14 @@ async function start() {
   setupSearch();
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
 
-  // Deep links: #token=…&focus=<node id>&file=<path>&line=<n>
+  // Deep links: #token=…&flow=<node id> | focus=<node id> | file=<path>
   if (link.get("focus")) focusLinked(link.get("focus")!);
   else if (link.get("file")) void openFile(link.get("file")!);
   openView({ kind: "map", lens: "runtime" });
   openView({ kind: "graph", lens: "runtime" });
-  if (linked) select(linked);
+  const flow = openView({ kind: "flow", ...(link.get("flow") && { id: link.get("flow")! }) });
+  $("tabs").prepend(flow.button);
+  if (linked && !link.get("flow")) select(linked);
 
   client.onChanged(async (files) => {
     Object.assign(info, await client.call<ProjectInfo>("info"));
@@ -298,6 +314,8 @@ async function start() {
     }
   });
 }
+
+document.head.append(el("style", {}, SYNTAX_CSS));
 
 start().catch((error) => {
   document.body.textContent = `lode: ${error.message}`;

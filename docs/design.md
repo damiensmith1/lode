@@ -330,6 +330,26 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
     line without scrolling. A focus the code asked for doesn't scroll the
     code back.
 - Declarations record their **end line** (`loc.endLine`) for ranges.
+- **Flow view: code as nodes** (`<lode-flow>`, the app's first tab). The
+  graph views showed structure but didn't make code readable: a box saying
+  `startRecording()` says nothing the name doesn't, so reading still
+  happened in the code pane. Here the nodes *are* the code. Blocks of real
+  code sit in columns, left to right; a line that leads somewhere (a call,
+  IPC, a shared-state write) carries a chip, and clicking it opens that code
+  in the next column, lined up with the line, with an arrow from it
+  (Finder-style: opening from column i replaces what's right of it). The
+  first block lists its callers; clicking one re-roots the flow upstream.
+  Long bodies fold down to the lines that lead somewhere (±1 line), comment
+  runs fold, and any fold opens on click. With the flow tab showing, the
+  code pane steps aside. Backed by the `block(id)` query: a node's lines,
+  its outgoing links by line (including from callbacks inside it), and its
+  callers with the calling line; files come back as an outline of members.
+  Prior art: Code Bubbles and the Haystack editor; lode's difference is that
+  the graph picks which blocks and lines matter. Next idea: a model-written
+  one-line summary above each block.
+- **Host syntax hook**: hosts may pass `syntax(text, file)` (escaped HTML per
+  line) and `syntaxCss`; views put the CSS inside their shadow root. Views
+  never bundle a highlighter.
 - **Graph view (experiment)** (`<lode-graph>`): the whole project as one
   horizontal tree you zoom around, a different take from focus/map. Columns
   are tree levels, highest on the left (runtimes › files › symbols ›

@@ -114,3 +114,26 @@ describe("tree query", () => {
     expect(t.edges).toContainEqual(expect.objectContaining({ kind: "channel", from: "src/preload.ts#exposeInMainWorld:notes.clear" }));
   });
 });
+
+describe("block query", () => {
+  it("returns a node's lines, the lines that lead somewhere, and its callers", () => {
+    const b = q.block("src/main.ts#registerIpc")!;
+    expect(b.outline).toBe(false);
+    expect(b.lines.map((l) => l.n)).toEqual([16, 17, 18, 19]);
+    expect(b.lines[0].text).toContain("export function registerIpc");
+    // links leave from lines inside it, including from callbacks defined there
+    expect(b.links).toContainEqual(expect.objectContaining({ line: 17, kind: "calls", target: expect.objectContaining({ name: "saveNote" }) }));
+    expect(b.links).toContainEqual(expect.objectContaining({ line: 18, kind: "channel", label: "notes:cleared" }));
+  });
+
+  it("knows who leads to a block, with the line in the caller", () => {
+    const b = q.block("src/main.ts#saveNote")!;
+    expect(b.callers).toContainEqual(expect.objectContaining({ node: expect.objectContaining({ name: "handle:notes:save" }), line: 17 }));
+  });
+
+  it("gives files as an outline of their members", () => {
+    const b = q.block("src/main.ts")!;
+    expect(b.outline).toBe(true);
+    expect(b.links.map((l) => l.target.name)).toEqual(expect.arrayContaining(["saveNote", "registerIpc"]));
+  });
+});

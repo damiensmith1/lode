@@ -125,3 +125,20 @@ export interface GraphDump {
   nodes: GraphNode[]; // parents before children, children in source order
   edges: GraphEdge[];
 }
+
+// A node's own code, as a block for code-as-nodes views: its lines, the lines
+// that lead somewhere (and where), and who leads to it.
+export interface BlockLink {
+  line: number; // the line in this block it leaves from
+  kind: LinkKind;
+  target: NodeRef;
+  label?: string; // channel key, "writes", "read by"
+}
+
+export interface CodeBlock {
+  node: NodeRef;
+  outline: boolean; // a file or class: one line per member instead of a body
+  lines: { n: number; text: string }[];
+  links: BlockLink[];
+  callers: { node: NodeRef; line: number; kind: LinkKind; label?: string }[]; // line is in the caller
+}

@@ -42,6 +42,20 @@ export function highlightLines(text: string, file: string): string[] {
   return lines;
 }
 
+// Colours for the classes highlight.js emits, from Clance's theme tokens.
+// Used by the app's code pane and handed to views (inside their shadow root).
+export const SYNTAX_CSS = `
+.hljs-keyword, .hljs-literal, .hljs-meta .hljs-keyword { color: #8a3b6b; }
+.hljs-string, .hljs-regexp, .hljs-template-tag, .hljs-subst { color: #7a5320; }
+.hljs-number { color: #2f5fa8; }
+.hljs-title.function_, .hljs-title.class_, .hljs-title { color: #3a5a7a; }
+.hljs-built_in, .hljs-type { color: #2f6b5e; }
+.hljs-comment, .hljs-doctag { color: #75726b; font-style: italic; }
+.hljs-attr, .hljs-property { color: #5f5d57; }
+.hljs-variable.language_, .hljs-params { color: #34322e; }
+.hljs-meta { color: #75726b; }
+`;
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 }

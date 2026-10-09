@@ -4,6 +4,8 @@ import type { Graph } from "../graph/graph.js";
 import type { Edge, Node, NodeId } from "../schema/index.js";
 import type {
   Annotation,
+  BlockLink,
+  CodeBlock,
   FileEntry,
   FileView,
   FocusResult,
@@ -221,16 +223,8 @@ export class Queries {
 
   // A source file with lode's inline annotations and the symbols in it.
   source(file: string): FileView | null {
-    let text: string;
-    try {
-      // Real paths on both sides, so neither `..` nor a symlink leaves the project.
-      const root = realpathSync(this.root);
-      const absolute = realpathSync(path.resolve(this.root, file));
-      if (!absolute.startsWith(root + path.sep)) return null;
-      text = readFileSync(absolute, "utf8");
-    } catch {
-      return null;
-    }
+    const text = this.readText(file);
+    if (text === null) return null;
     const g = this.graph();
     const annotations: Annotation[] = [];
     const seen = new Set<string>();
@@ -260,6 +254,87 @@ export class Queries {
       .map((n) => this.ref(n))
       .sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
     return { file, text, annotations: annotations.sort((a, b) => a.line - b.line), symbols };
+  }
+
+  // A node's code as a block: its lines, which of them lead where, and who
+  // leads to it. Files and classes come back as an outline of their members.
+  block(id: NodeId): CodeBlock | null {
+    const g = this.graph();
+    const node = g.node(id);
+    if (!node?.loc || node.external) return null;
+    const text = this.readText(node.loc.file);
+    if (text === null) return null;
+    const source = text.split("\n");
+    const lineText = (n: number) => source[n - 1] ?? "";
+
+    const callers: CodeBlock["callers"] = [];
+    const seenCallers = new Set<string>();
+    for (const e of g.neighbors(id, "up")) {
+      const kind = e.kind === "calls" ? "calls" : e.kind === "flows" && e.via ? "channel" : null;
+      const from = g.node(e.from);
+      if (!kind || !from || from.external || !e.loc || seenCallers.has(from.id)) continue;
+      seenCallers.add(from.id);
+      callers.push({ node: this.ref(from), line: e.loc.line, kind, ...(e.via && { label: e.via.key }) });
+    }
+
+    if (node.kind === "container") {
+      const members = g.childrenOf(id).filter((c) => c.loc && c.kind !== "block");
+      return {
+        node: this.ref(node),
+        outline: true,
+        lines: members.map((c) => ({ n: c.loc!.line, text: lineText(c.loc!.line) })),
+        links: members.map((c) => ({ line: c.loc!.line, kind: "calls" as const, target: this.ref(c), label: "open" })),
+        callers,
+      };
+    }
+
+    const start = node.loc.line;
+    const end = node.loc.endLine ?? start;
+    const lines = [];
+    for (let n = start; n <= end; n++) lines.push({ n, text: lineText(n) });
+
+    // Links leave from lines in this block, including from callbacks inside it.
+    const inside = new Set<NodeId>();
+    const walk = (n: NodeId) => (inside.add(n), g.childrenOf(n).forEach((c) => walk(c.id)));
+    walk(id);
+    const links: BlockLink[] = [];
+    const seen = new Set<string>();
+    const add = (l: BlockLink) => {
+      const key = `${l.line}|${l.target.id}|${l.kind}`;
+      if (seen.has(key) || l.line < start || l.line > end) return;
+      seen.add(key);
+      links.push(l);
+    };
+    for (const from of inside) {
+      for (const e of g.neighbors(from, "down")) {
+        const to = g.node(e.to);
+        if (!to || to.external || !e.loc || e.loc.file !== node.loc.file || inside.has(to.id)) continue;
+        if (e.kind === "calls") add({ line: e.loc.line, kind: "calls", target: this.ref(to) });
+        else if (e.kind === "flows" && e.via) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
+        else if (e.kind === "references" && e.access === "write" && to.kind === "value") add({ line: e.loc.line, kind: "state", target: this.ref(to), label: "writes" });
+      }
+    }
+    // A value leads to whoever reads it.
+    if (node.kind === "value") {
+      for (const reader of this.accessors(id, "read")) {
+        const r = g.node(reader);
+        if (r) add({ line: start, kind: "state", target: this.ref(r), label: "read by" });
+      }
+    }
+    return { node: this.ref(node), outline: false, lines, links: links.sort((a, b) => a.line - b.line), callers };
+  }
+
+  // A project file's text; real paths on both sides, so neither `..` nor a
+  // symlink can leave the project.
+  private readText(file: string): string | null {
+    try {
+      const root = realpathSync(this.root);
+      const absolute = realpathSync(path.resolve(this.root, file));
+      if (!absolute.startsWith(root + path.sep)) return null;
+      return readFileSync(absolute, "utf8");
+    } catch {
+      return null;
+    }
   }
 
   ref(node: Node): NodeRef {
