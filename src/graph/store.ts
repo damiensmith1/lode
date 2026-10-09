@@ -44,6 +44,11 @@ export class GraphStore {
     this.graph = buildGraph(this.data);
   }
 
+  // The project's root directory (where node locations are relative to).
+  get root(): string {
+    return this.session.root();
+  }
+
   static open(plugin: LanguagePlugin, projectPath: string, options: StoreOptions = {}): GraphStore {
     const absolute = path.resolve(projectPath);
     const cachePath = path.join(options.cacheDir ?? defaultCacheDir(absolute), "graph.json");

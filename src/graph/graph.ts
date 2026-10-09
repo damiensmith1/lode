@@ -8,6 +8,7 @@ export class Graph {
   private readonly outgoing = new Map<NodeId, Edge[]>();
   private readonly incoming = new Map<NodeId, Edge[]>();
   private readonly children = new Map<NodeId, NodeId[]>();
+  private readonly withinIndex = new Map<NodeId, Edge[]>();
   private readonly lenses = new Map<string, Lens>();
 
   // Rejects data the core can't trust: duplicate ids, dangling parents or edges.
@@ -29,6 +30,7 @@ export class Graph {
       }
       push(graph.outgoing, edge.from, edge);
       push(graph.incoming, edge.to, edge);
+      if (edge.within) push(graph.withinIndex, edge.within, edge);
     }
     return graph;
   }
@@ -60,6 +62,11 @@ export class Graph {
   neighbors(id: NodeId, direction: Direction, kinds?: EdgeKind[]): Edge[] {
     const edges = (direction === "up" ? this.incoming : this.outgoing).get(id) ?? [];
     return kinds ? edges.filter((e) => kinds.includes(e.kind)) : edges;
+  }
+
+  // Local flows that happen inside `id` (edges whose `within` is it).
+  within(id: NodeId): Edge[] {
+    return this.withinIndex.get(id) ?? [];
   }
 
   get size() {

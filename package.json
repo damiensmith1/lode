@@ -6,13 +6,17 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lode": "tsx src/cli.ts"
+    "lode": "tsx src/cli.ts",
+    "build:web": "tsx hosts/app/build.ts"
   },
   "dependencies": {
-    "typescript": "5.9.3"
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
     "tsx": "4.23.15",
     "vite": "8.3.4",
     "vitest": "5.0.3"

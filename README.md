@@ -15,6 +15,11 @@ npm run lode -- index path/to/tsconfig.json --json out.json
 npm run lode -- node path/to/tsconfig.json 'src/main/x.ts#fn'   # one node, one hop each way
 ```
 
+```sh
+npm run lode -- open path/to/project     # standalone app in the browser
+npm run lode -- serve path/to/project    # just the server, for another host
+```
+
 The graph is cached in `~/.cache/lode/<project hash>/` (override with
 `--cache <dir>`); nothing is written into the indexed project.
 
@@ -29,7 +34,11 @@ src/schema      the contract between plugins and the core (nodes, edges, channel
 src/ingest/ts   TypeScript + JavaScript plugin: facts from the compiler API, mapped to the schema
 src/derive      core analysis: channel matching (tier 3), shared-state flows (tier 2)
 src/graph       Graph (validation, traversal), lenses, GraphStore (cache)
-src/cli.ts      the commands above
+src/query      deterministic queries views need (focus, map, search, source)
+src/server     JSON-RPC over WebSocket (`/rpc`), file watching
+views/         web components (<lode-focus>, <lode-map>), client, host contract
+hosts/app      the standalone host (`lode open`)
+src/cli.ts     the commands above
 ```
 
 ## Tests

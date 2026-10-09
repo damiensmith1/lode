@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lode</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;450;550;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand"><span class="diamond" aria-hidden="true">◇</span> lode</span>
+  <span id="project" class="faint"></span>
+  <div class="search">
+    <label for="search" class="faint">find</label>
+    <input id="search" type="search" placeholder="symbol name…" autocomplete="off">
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+</header>
+<main class="body">
+  <nav id="tree" aria-label="Files"></nav>
+  <section class="code" aria-label="Source">
+    <div id="code-path" class="pane-head faint">pick a file</div>
+    <div id="code"></div>
+  </section>
+  <section class="views" aria-label="lode views">
+    <div id="tabs" role="tablist"></div>
+    <div id="view"></div>
+  </section>
+</main>
+<footer id="status" class="faint"></footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

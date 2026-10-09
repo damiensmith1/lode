@@ -60,7 +60,7 @@ export function openTsSession(projectPath: string, state?: unknown): PluginSessi
 
   const graphData = () => toGraph(mergeFacts(Object.values(cache).map((c) => c.facts)));
 
-  return { files, update, state: (): State => ({ files: cache }) };
+  return { root: () => root, files, update, state: (): State => ({ files: cache }) };
 }
 
 // A compiler host that only re-parses a file when its text changed. Most of a

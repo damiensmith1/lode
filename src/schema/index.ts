@@ -82,6 +82,8 @@ export interface LanguagePlugin {
 }
 
 export interface PluginSession {
+  // The project's root directory; node locations are relative to it.
+  root(): string;
   // Every source file in the project (relative path) and its content hash.
   files(): Record<string, string>;
   // Re-index the given files (and whatever depends on them) and return the

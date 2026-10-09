@@ -281,10 +281,43 @@ Bridge calls (`window.api.x()`) also seed `renderer`, and imports include
 On glance: 40 files in `main`, 41 in `renderer`, 3 in `preload`, none
 untagged.
 
-## Views and hosts (exploring)
+## Views and hosts
 
-Not built yet. Mockups, using real data from the glance index:
+Mockups of the target UX, using real data from the glance index:
 [lode UX mockups](https://claude.ai/artifact/HtcZBCmXu8LkFT9yNSQ9tq).
+
+### What's built
+
+```
+GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC / WebSocket ══▶ views (views/) ─▶ host
+                                       lode serve | lode open                          <lode-focus>      standalone app
+                                                                                       <lode-map>        (hosts/app)
+```
+
+- **Queries** (`src/query`): deterministic, from the graph alone:
+  `info`, `files`, `search`, `focus(id)`, `map(lens, parent?)`,
+  `source(file)` (text + inline annotations + symbols). Results are plain
+  JSON (`src/query/types.ts`), the only thing views depend on.
+- **Server** (`src/server`): JSON-RPC over a WebSocket at `/rpc`, localhost
+  only; watches the project and pushes `changed` after re-indexing.
+  Optionally serves a host's static files.
+- **Views** (`views/`): framework-free web components with shadow DOM,
+  themed by `--lode-*` CSS custom properties from the host.
+  `<lode-focus node=…>` refocuses in place with back history; `<lode-map
+  lens=… parent=…>` drills down a lens. Wires are measured from the laid-out
+  DOM, so layout stays plain CSS.
+- **Host contract** (`views/host.ts`): a host passes a `LodeClient` and a
+  `LodeHost` (`openSource`, `openView`) and listens for `lode-title` to name
+  tabs. That's all an adapter (VS Code, Clance) has to implement.
+- **Standalone host** (`hosts/app`): file tree, source pane with ◇
+  annotations, lode views in tabs, symbol search, deep links
+  (`#focus=<id>&file=<path>&line=<n>`). `lode open <project>` builds it
+  with esbuild and opens it.
+
+Not built yet: trace (needs the query layer), impact, inline annotations
+and SCM hooks in a real IDE (need a host adapter).
+
+### Target UX
 
 lode runs as a plugin inside an IDE-like host. The host owns its chrome
 (activity bar, explorer, source control, editor tabs, status bar); lode

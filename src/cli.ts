@@ -1,8 +1,17 @@
-// lode index <tsconfig.json> [--json <out>] [--cache <dir>]
+// A project is a directory, a tsconfig.json or a jsconfig.json.
+//
+// lode index <project> [--json <out>] [--cache <dir>]
 //   Build (or refresh) the graph and print a summary.
-// lode node <tsconfig.json> <node-id> [--cache <dir>]
+// lode node <project> <node-id> [--cache <dir>]
 //   Print one node, its place in each lens, and its edges one hop up and down.
+// lode serve <project> [--port <n>] [--cache <dir>]
+//   Run the lode server for a host to connect to (ws://…/rpc).
+// lode open <project> [--port <n>] [--cache <dir>]
+//   Run the server with the standalone app, and open it in the browser.
+import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { GraphStore } from "./graph/store.js";
 import { tsPlugin } from "./ingest/ts/index.js";
 import type { Edge } from "./schema/index.js";
@@ -20,10 +29,19 @@ const option = (name: string) => {
 };
 const json = option("json");
 const cacheDir = option("cache");
+const port = Number(option("port") ?? 0);
 const [command, project, nodeId] = args;
 
-if (!project || (command !== "index" && command !== "node") || (command === "node" && !nodeId)) {
-  console.error("usage: lode index <tsconfig.json> [--json out] [--cache dir]\n       lode node <tsconfig.json> <node-id> [--cache dir]");
+const COMMANDS = ["index", "node", "serve", "open"];
+if (!project || !COMMANDS.includes(command) || (command === "node" && !nodeId)) {
+  console.error(
+    [
+      "usage: lode index <project> [--json out] [--cache dir]",
+      "       lode node <project> <node-id> [--cache dir]",
+      "       lode serve <project> [--port n] [--cache dir]",
+      "       lode open <project> [--port n] [--cache dir]",
+    ].join("\n"),
+  );
   process.exit(1);
 }
 
@@ -32,7 +50,19 @@ const store = GraphStore.open(tsPlugin, project, { cacheDir });
 const ms = Math.round(performance.now() - start);
 const { graph } = store;
 
-if (command === "index") {
+if (command === "serve" || command === "open") {
+  const { startServer } = await import("./server/index.js");
+  let staticDir: string | undefined;
+  if (command === "open") {
+    const { buildApp } = await import("../hosts/app/build.js");
+    staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dist", "app");
+    await buildApp(staticDir);
+  }
+  const server = await startServer({ store, port, staticDir, watch: true });
+  console.log(`lode · ${graph.size.nodes} nodes, ${graph.size.edges} edges (${ms}ms) · ${store.root}`);
+  console.log(command === "open" ? `open ${server.url}` : `serving ws://127.0.0.1:${server.port}/rpc`);
+  if (command === "open") spawn(process.platform === "darwin" ? "open" : "xdg-open", [server.url], { stdio: "ignore", detached: true }).unref();
+} else if (command === "index") {
   const data = graph.toData();
   const count = <T>(items: T[], key: (t: T) => string) =>
     Object.entries(items.reduce<Record<string, number>>((m, t) => ((m[key(t)] = (m[key(t)] ?? 0) + 1), m), {}))
