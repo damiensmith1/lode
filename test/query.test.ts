@@ -14,22 +14,13 @@ const store = GraphStore.open(tsPlugin, "test/fixtures/ipc", { cacheDir });
 const q = new Queries(() => store.graph, store.root);
 
 describe("queries", () => {
-  it("focus: steps in source order, local flows, and links both ways", () => {
-    const f = q.focus("src/main.ts#registerIpc.on:notes:clear")!;
-    expect(f.node.runtime).toBe("main");
-    expect(f.steps.map((s) => s.label)).toEqual(["notify()"]);
-    expect(f.up).toContainEqual(expect.objectContaining({ kind: "channel", label: "notes:clear", node: expect.objectContaining({ name: "clear" }) }));
-    expect(f.down).toContainEqual(expect.objectContaining({ kind: "channel", label: "notes:cleared" }));
-    expect(f.hidden.libraryCalls).toBe(1); // Date.now()
+  it("block: a type is reached from what uses it", () => {
+    const b = q.block("src/main.ts#Note")!;
+    expect(b.callers).toContainEqual(expect.objectContaining({ label: "uses it", node: expect.objectContaining({ name: "saveNote" }) }));
   });
 
-  it("focus on a type shows what uses it", () => {
-    const f = q.focus("src/main.ts#Note")!;
-    expect(f.down).toContainEqual(expect.objectContaining({ label: "uses it", node: expect.objectContaining({ name: "saveNote" }) }));
-  });
-
-  it("focus: unknown nodes return null", () => {
-    expect(q.focus("nope")).toBeNull();
+  it("block: unknown and library nodes return null", () => {
+    expect(q.block("nope")).toBeNull();
   });
 
   it("map: groups at one level with edges merged between them", () => {
@@ -47,12 +38,6 @@ describe("queries", () => {
     expect(save?.endLine).toBeGreaterThan(save!.line!);
     expect(q.symbolAt("src/main.ts", 17)?.id).toBe("src/main.ts#registerIpc.handle:notes:save");
     expect(q.symbolAt("src/main.ts", 2)?.id).toBe("src/main.ts");
-  });
-
-  it("focus on a file lists what's declared in it", () => {
-    const f = q.focus("src/main.ts")!;
-    expect(f.steps.every((s) => s.member)).toBe(true);
-    expect(f.steps.map((s) => s.label)).toEqual(expect.arrayContaining(["saveNote()", "registerIpc()", "Note"]));
   });
 
   it("search ranks exact and prefix matches first", () => {
@@ -83,8 +68,8 @@ describe("server", () => {
       });
     const info = await call(1, "info");
     expect(info.result).toMatchObject({ files: expect.any(Number), nodes: expect.any(Number) });
-    const focus = await call(2, "focus", { id: "src/util.ts#stamp" });
-    expect(focus.result).toMatchObject({ node: { name: "stamp" } });
+    const block = await call(2, "block", { id: "src/util.ts#stamp" });
+    expect(block.result).toMatchObject({ node: { name: "stamp" } });
     expect((await call(3, "nope")).error).toMatch(/unknown method/);
     socket.close();
     await server.close();

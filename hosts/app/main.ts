@@ -1,6 +1,6 @@
-// The standalone host: the code on the left, lode views on the right, kept
-// in step by clicks only. Clicking a line focuses the linked view there;
-// clicking in the graph opens and jumps the code. Nothing moves on its own. It's one host among many;
+// The standalone host. The flow view is where code is read; the code pane is
+// for browsing a file, and clicking in it opens that code in the flow. Map
+// and graph give overviews. Nothing moves on its own, only on clicks. It's one host among many;
 // everything lode-specific comes from ../../views through LodeHost.
 import type { FileEntry, FileView, NodeRef, ProjectInfo } from "../../src/query/types.js";
 import { highlightLines, SYNTAX_CSS } from "./highlight.js";
@@ -49,10 +49,10 @@ function renderSource(view: FileView) {
       const n = i + 1;
       const symbol = symbolsByLine.get(n)?.find((s) => s.kind === "callable") ?? symbolsByLine.get(n)?.[0];
       const gutter = el("span", { className: "gut" });
-      if (symbol) gutter.append(el("button", { title: `focus ${symbol.name}`, ariaLabel: `Focus ${symbol.name}`, onclick: () => focusLinked(symbol.id) }, "◇"));
+      if (symbol) gutter.append(el("button", { title: `read ${symbol.name}`, ariaLabel: `Read ${symbol.name} in the flow`, onclick: () => readInFlow(symbol.id) }, "◇"));
       const notes = el("span", { className: "notes" });
       for (const a of (notesByLine.get(n) ?? []).slice(0, 3)) {
-        notes.append(el("button", { className: `note k-${a.kind}`, onclick: () => focusLinked(a.target) }, `◇ ${a.text}`));
+        notes.append(el("button", { className: `note k-${a.kind}`, onclick: () => readInFlow(a.target) }, `◇ ${a.text}`));
       }
       const src = el("span", { className: "src hljs" });
       src.innerHTML = highlighted[i] || " "; // highlight.js output: source text is escaped
@@ -66,7 +66,7 @@ function renderSource(view: FileView) {
   if (selectedTab?.highlight?.file === view.file) applyHighlight(selectedTab.highlight);
 }
 
-// Click a line: the linked view focuses on whatever's declared around it.
+// Click a line: read whatever's declared around it in the flow.
 // Selecting text isn't a click on a line.
 $("code").addEventListener("click", (e) => {
   if ((e.target as Element).closest("button") || String(window.getSelection() ?? "")) return;
@@ -110,7 +110,6 @@ interface Tab {
   highlight?: SourceHighlight | null;
 }
 const tabs: Tab[] = [];
-let linked: Tab | null = null; // the focus tab that follows the code
 
 function select(tab: Tab) {
   for (const t of tabs) t.button.setAttribute("aria-selected", String(t === tab));
@@ -120,17 +119,24 @@ function select(tab: Tab) {
   applyHighlight(tab.highlight ?? null);
 }
 
-function openView(request: ViewRequest, options: { linked?: boolean } = {}): Tab {
-  const key = options.linked ? "linked" : JSON.stringify(request);
+function openView(request: ViewRequest): Tab {
+  // There's one flow: asking for another reads in it instead.
+  const flow = tabs.find((t) => t.view.tagName === "LODE-FLOW");
+  if (request.kind === "flow" && flow) {
+    if (request.id) flow.view.setAttribute("node", request.id);
+    select(flow);
+    return flow;
+  }
+  const key = JSON.stringify(request);
   const existing = tabs.find((t) => t.key === key);
   if (existing) {
     select(existing);
     return existing;
   }
 
-  const label = el("span", {}, request.kind === "focus" ? request.id.split("#").pop()! : request.kind);
+  const label = el("span", {}, request.kind);
   const close = el("span", { className: "close", title: "Close", role: "button" }, "×");
-  const icon = el("span", { className: "diamond", ariaHidden: "true", title: options.linked ? "follows the code" : "" }, options.linked ? "⇄" : "◇");
+  const icon = el("span", { className: "diamond", ariaHidden: "true" }, "◇");
   const button = el("button", { className: "tab", role: "tab" }, icon, label, close);
   const tab = { key, button } as Tab;
 
@@ -153,27 +159,20 @@ function openView(request: ViewRequest, options: { linked?: boolean } = {}): Tab
     const i = tabs.indexOf(tab);
     tabs.splice(i, 1);
     button.remove();
-    if (tab === linked) linked = null;
     if (button.getAttribute("aria-selected") === "true") {
       if (tabs.length) select(tabs[Math.max(0, i - 1)]);
       else $("view").replaceChildren(), applyHighlight(null);
     }
   });
   tabs.push(tab);
-  if (options.linked) {
-    linked = tab;
-    $("tabs").prepend(button);
-  } else $("tabs").append(button);
+  if (request.kind === "flow") $("tabs").prepend(button);
+  else $("tabs").append(button);
   select(tab);
   return tab;
 }
 
-// Point the linked view at a node, creating it if needed.
-function focusLinked(id: string, selectIt = true) {
-  if (!linked) return void openView({ kind: "focus", id }, { linked: true });
-  if (linked.view.getAttribute("node") !== id) linked.view.setAttribute("node", id);
-  if (selectIt) select(linked);
-}
+// Read a node in the flow.
+const readInFlow = (id: string) => void openView({ kind: "flow", id });
 
 async function followCode(file: string, line: number) {
   const at = await client.call<NodeRef | null>("symbolAt", { file, line });
@@ -182,7 +181,7 @@ async function followCode(file: string, line: number) {
   // The graph view, when it's showing, reveals the node in place.
   const view = $("view").firstElementChild as (HTMLElement & { reveal?: (id: string) => void }) | null;
   if (view?.tagName === "LODE-GRAPH" && view.reveal) view.reveal(at.id);
-  else focusLinked(at.id);
+  else readInFlow(at.id);
 }
 
 // --- File tree ------------------------------------------------------------
@@ -264,7 +263,7 @@ function setupSearch() {
             {},
             el(
               "button",
-              { role: "option", onclick: () => (startFlow(n.id) || focusLinked(n.id), (results.hidden = true), (input.value = "")) },
+              { role: "option", onclick: () => (readInFlow(n.id), (results.hidden = true), (input.value = "")) },
               el("span", { className: "mono" }, n.name),
               el("span", { className: "where" }, `${n.kind} · ${n.file ?? ""}${n.line ? `:${n.line}` : ""}`),
             ),
@@ -289,7 +288,7 @@ async function start() {
   $("project").textContent = info.root;
   const status = $("status");
   const setStatus = (extra = "") => {
-    status.textContent = `◇ lode · ${info.files} files · ${info.nodes} nodes · ${info.edges} edges · click a line to focus it${extra}`;
+    status.textContent = `◇ lode · ${info.files} files · ${info.nodes} nodes · ${info.edges} edges · click a line to read it in the flow${extra}`;
   };
   setStatus();
   renderTree(await client.call<FileEntry[]>("files"));
@@ -299,14 +298,15 @@ async function start() {
     document.body.classList.toggle(flowMode ? "show-tree" : "no-tree");
   });
 
-  // Deep links: #token=…&flow=<node id> | focus=<node id> | file=<path>
-  if (link.get("focus")) focusLinked(link.get("focus")!);
-  else if (link.get("file")) void openFile(link.get("file")!);
+  // Deep links: #token=…&flow=<node id> | file=<path>
   openView({ kind: "map", lens: "runtime" });
   openView({ kind: "graph", lens: "runtime" });
-  const flow = openView({ kind: "flow", ...(link.get("flow") && { id: link.get("flow")! }) });
-  $("tabs").prepend(flow.button);
-  if (linked && !link.get("flow")) select(linked);
+  const start = link.get("flow") ?? link.get("focus"); // "focus" links predate the flow
+  openView({ kind: "flow", ...(start && { id: start }) });
+  if (link.get("file") && !start) {
+    select(tabs.find((t) => t.view.tagName === "LODE-MAP")!);
+    void openFile(link.get("file")!);
+  }
 
   client.onChanged(async (files) => {
     Object.assign(info, await client.call<ProjectInfo>("info"));

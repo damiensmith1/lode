@@ -8,18 +8,14 @@ import type {
   CodeBlock,
   FileEntry,
   FileView,
-  FocusResult,
   GraphDump,
   GraphEdge,
   GraphNode,
-  Link,
   LinkKind,
-  LocalFlow,
   MapEdge,
   MapResult,
   NodeRef,
   ProjectInfo,
-  Step,
 } from "./types.js";
 
 export type * from "./types.js";
@@ -59,76 +55,6 @@ export class Queries {
     }
     scored.sort((a, b) => a.score - b.score || a.node.id.length - b.node.id.length);
     return scored.slice(0, limit).map((s) => this.ref(s.node));
-  }
-
-  focus(id: NodeId): FocusResult | null {
-    const g = this.graph();
-    const node = g.node(id);
-    if (!node) return null;
-
-    // Steps: the project calls it makes, plus callbacks defined inside it.
-    // A file or class instead lists what's declared in it, as an outline.
-    const outline = node.kind === "container";
-    const calls = outline ? [] : g.neighbors(id, "down", ["calls"]);
-    const steps: Step[] = [];
-    let libraryCalls = 0;
-    if (outline) {
-      for (const child of g.childrenOf(id)) {
-        if (child.kind === "block") continue;
-        steps.push({ label: child.kind === "callable" ? `${child.name}()` : child.name, target: this.ref(child), line: child.loc?.line ?? 0, member: true });
-      }
-    }
-    for (const e of calls) {
-      const target = g.node(e.to);
-      if (!target || target.external) {
-        libraryCalls++;
-        continue;
-      }
-      steps.push({ label: `${target.name}()`, target: this.ref(target), line: e.loc?.line ?? 0 });
-    }
-    for (const child of outline ? [] : g.childrenOf(id)) {
-      if (child.kind === "callable" && child.detail?.registration) {
-        steps.push({ label: child.name, target: this.ref(child), line: child.loc?.line ?? 0, callback: true });
-      }
-    }
-    steps.sort((a, b) => a.line - b.line);
-
-    // Local flows, mapped onto steps (the first step calling each producer).
-    const stepOf = (target: NodeId) => steps.findIndex((s) => s.target?.id === target);
-    const flows: LocalFlow[] = [];
-    const seenFlows = new Set<string>();
-    for (const e of g.within(id)) {
-      const from = stepOf(e.from);
-      const to = e.to === id ? "return" : stepOf(e.to);
-      const key = `${from}>${to}`;
-      if (from < 0 || to === -1 || from === to || seenFlows.has(key)) continue;
-      seenFlows.add(key);
-      flows.push({ from, to, type: e.type });
-    }
-
-    const up = new LinkSet(this);
-    const down = new LinkSet(this);
-    for (const e of g.neighbors(id, "up")) {
-      if (e.kind === "calls") up.add(e.from, "calls", undefined, e.args?.join(", "));
-      else if (e.kind === "flows" && e.via) up.add(e.from, "channel", e.via.key, e.type);
-      else if (e.kind === "references" && e.access === "read" && g.node(e.to)?.kind === "callable") up.add(e.from, "calls", "passes it");
-      // A type is about who uses it; a value about who writes and reads it.
-      else if (e.kind === "references" && e.access === "type" && node.kind === "type") down.add(e.from, "calls", "uses it");
-      else if (e.kind === "references" && node.kind === "value" && e.access === "write") up.add(e.from, "state", "writes it", e.type);
-      else if (e.kind === "references" && node.kind === "value" && e.access === "read") down.add(e.from, "state", "reads it", e.type);
-    }
-    for (const e of g.neighbors(id, "down")) {
-      if (e.kind === "calls" && !g.node(e.to)?.external) down.add(e.to, "calls", undefined, e.returns);
-      else if (e.kind === "flows" && e.via) down.add(e.to, "channel", e.via.key, e.type);
-      else if (e.kind === "references" && e.to !== id && g.node(e.to)?.kind === "value") {
-        const readers = this.accessors(e.to, "read").filter((r) => r !== id).length;
-        const writers = this.accessors(e.to, "write").filter((w) => w !== id).length;
-        if (e.access === "write") down.add(e.to, "state", "writes", e.type, `${readers} readers`);
-        else if (e.access === "read" && writers > 0) up.add(e.to, "state", "reads", e.type, `${writers} writers`);
-      }
-    }
-
-    return { node: this.ref(node), path: this.pathOf(id), steps, flows, up: up.list(), down: down.list(), hidden: { libraryCalls } };
   }
 
   // The innermost node whose declaration spans `line` in `file`, or the file
@@ -375,30 +301,6 @@ export class Queries {
     const nodes = new Set<NodeId>();
     for (const e of this.graph().neighbors(value, "up", ["references"])) if (e.access === access) nodes.add(e.from);
     return [...nodes];
-  }
-}
-
-// Links to the same node and kind merge, counting the edges behind them.
-class LinkSet {
-  private readonly links = new Map<string, Link>();
-  constructor(private readonly queries: Queries) {}
-
-  add(id: NodeId, kind: LinkKind, label?: string, type?: string, detail?: string) {
-    const key = `${id}|${kind}|${label ?? ""}`;
-    const existing = this.links.get(key);
-    if (existing) {
-      existing.count++;
-      return;
-    }
-    const node = this.queries.graph().node(id);
-    if (!node) return;
-    this.links.set(key, { node: this.queries.ref(node), kind, ...(label && { label }), ...(type && { type }), count: 1, ...(detail && { detail }) });
-  }
-
-  // Channels first (they cross boundaries), then state, then calls.
-  list(): Link[] {
-    const order: Record<LinkKind, number> = { channel: 0, state: 1, calls: 2, local: 3 };
-    return [...this.links.values()].sort((a, b) => order[a.kind] - order[b.kind] || a.node.name.localeCompare(b.node.name));
   }
 }
 

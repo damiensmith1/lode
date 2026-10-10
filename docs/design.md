@@ -295,8 +295,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
 ```
 
 - **Queries** (`src/query`): deterministic, from the graph alone:
-  `info`, `files`, `search`, `focus(id)`, `map(lens, parent?)`,
-  `source(file)` (text + inline annotations + symbols). Results are plain
+  `info`, `files`, `search`, `block(id)`, `map(lens, parent?)`,
+  `graph(lens)`, `symbolAt(file, line)`, `source(file)` (text + inline
+  annotations + symbols). Results are plain
   JSON (`src/query/types.ts`), the only thing views depend on.
 - **Server** (`src/server`): JSON-RPC over a WebSocket at `/rpc`, localhost
   only; watches the project and pushes `changed` after re-indexing.
@@ -307,28 +308,25 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   the token in the URL fragment, which never goes over HTTP. `source` checks
   real paths, so symlinks can't escape the project.
 - **Views** (`views/`): framework-free web components with shadow DOM,
-  themed by `--lode-*` CSS custom properties from the host.
-  `<lode-focus node=…>` refocuses in place with back history; `<lode-map
-  lens=… parent=…>` drills down a lens. Wires are measured from the laid-out
-  DOM, so layout stays plain CSS.
+  themed by `--lode-*` CSS custom properties from the host: `<lode-flow>`
+  (reading), `<lode-map>` (overview by lens), `<lode-graph>` (experiment).
+  Wires are measured from the laid-out DOM, so layout stays plain CSS.
+- **Focus was removed.** It showed one symbol's steps and links as names;
+  flow shows the same links on the real code (callers in each block header,
+  calls / IPC / state as chips on lines), so focus added nothing.
 - **Host contract** (`views/host.ts`): a host passes a `LodeClient` and a
-  `LodeHost` (`openSource`, `openView`, optional `highlight`) and listens for
+  `LodeHost` (`openSource`, `openView`, optional `highlight`, `syntax`,
+  `syntaxCss`) and listens for
   `lode-title` to name tabs. That's all an adapter (VS Code, Clance) has to
   implement. `highlight` reports the lines a view is about (the focused
   node's range, its step lines, the line under the pointer); the host
   decides how to show them, which in an IDE maps to editor decorations.
-- **Code and graph stay in step, by clicks only** (the standalone app's
-  behaviour, and the pattern for other hosts). Following the cursor or the
-  scroll position automatically moved things around too much, so nothing
-  moves on its own:
-  - code → graph: clicking a line (not selecting text) or a ◇ moves a
-    *linked* focus tab (⇄) to the innermost declaration there (`symbolAt`).
-    Opening or scrolling a file changes nothing. Focusing a file shows its
-    outline (what's declared in it).
-  - graph → code: clicking a node opens its file, jumps to it, tints its
-    range and marks its step lines; hovering a step or card highlights its
-    line without scrolling. A focus the code asked for doesn't scroll the
-    code back.
+- **Code pane → flow, by clicks only.** Following the cursor or scroll
+  automatically moved things around too much, so nothing moves on its own.
+  Clicking a line (not selecting text), a ◇ in the gutter or an inline note
+  reads that code in the flow (`symbolAt` finds the innermost declaration).
+  With the graph tab showing, a click reveals the node there instead. Views
+  that report `highlight` (graph) tint the node's range in the code pane.
 - Declarations record their **end line** (`loc.endLine`) for ranges.
 - **Flow view: code as nodes** (`<lode-flow>`, the app's first tab). The
   graph views showed structure but didn't make code readable: a box saying
@@ -349,13 +347,11 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   one-line summary above each block.
 - **What leads here, on every block.** Tried a focus panel beside the flow
   that followed the selected block; it duplicated the flow and was dropped.
-  Its one useful part, who reaches this code, now sits in every block's
-  header: callers, IPC senders, code passing it as a callback ("passes
+  Who reaches this code now sits in every block's header: callers, IPC senders, code passing it as a callback ("passes
   it"), writers of a value, users of a type. Clicking one puts it to the
   left of that block with an arrow from the calling line; the one already
   open to the left is marked. Passing a function (`rows.map(toTranscript)`)
-  is also a chip on the passing line. Focus remains as the code pane's
-  linked tab, where it works well.
+  is also a chip on the passing line.
 - **Host syntax hook**: hosts may pass `syntax(text, file)` (escaped HTML per
   line) and `syntaxCss`; views put the CSS inside their shadow root. Views
   never bundle a highlighter.

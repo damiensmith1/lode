@@ -21,7 +21,6 @@ const CSS = `
 .block { position: relative; z-index: 1; width: 600px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
 .block.root { border-color: var(--lode-fg); }
 .block.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 1px 2px rgba(23,22,20,.04); }
-.ln.hovered { background: rgba(226, 99, 47, .16); box-shadow: inset 2px 0 0 var(--lode-channel); }
 .block header { padding: 10px 14px 8px; border-bottom: 1px solid var(--lode-border); display: flex; flex-direction: column; gap: 3px; }
 .title { font: 600 13px var(--lode-mono); }
 .title:hover { text-decoration: underline; }
@@ -60,7 +59,7 @@ export class LodeFlow extends HTMLElement {
 
   private readonly root = this.attachShadow({ mode: "open" });
   private columns: Column[] = [];
-  private selected = 0; // the block the host's summary (focus) follows
+  private selected = 0; // the block reported to the host (highlight)
   private rootHistory: Column[][] = [];
   private unsubscribe?: () => void;
   private resize = new ResizeObserver(() => this.layout());
@@ -105,7 +104,7 @@ export class LodeFlow extends HTMLElement {
     this.select(0);
   }
 
-  // Select a block: the host's summary view follows it.
+  // Select a block, and tell the host which code it is.
   private select(i: number) {
     this.selected = Math.max(0, Math.min(i, this.columns.length - 1));
     this.root.querySelectorAll(".block").forEach((b) => b.classList.toggle("selected", Number((b as HTMLElement).dataset.col) === this.selected));
@@ -113,49 +112,6 @@ export class LodeFlow extends HTMLElement {
     const n = b?.node;
     if (!n?.file || !n.line) return void this.host?.highlight?.(null);
     this.host?.highlight?.({ node: n.id, file: n.file, range: [n.line, n.endLine ?? n.line], marks: [...new Set(b.links.map((l) => l.line))] });
-  }
-
-  // Show `id`, reached from the open block `from`: as the next column from
-  // the line that leads to it, as a new root when it calls the first block,
-  // by going back to it if it's already open, or else as a fresh root.
-  async reveal(id: string, from: string) {
-    const existing = this.columns.findIndex((c) => c.block.node.id === id);
-    if (existing >= 0) {
-      this.columns = this.columns.slice(0, Math.max(existing + 1, this.columns.findIndex((c) => c.block.node.id === from) + 1));
-      this.render();
-      this.select(existing);
-      return this.scrollToColumn(existing);
-    }
-    const block = await this.fetch(id);
-    if (!block) return;
-    const col = this.columns.findIndex((c) => c.block.node.id === from);
-    const link = col >= 0 ? this.columns[col].block.links.find((l) => l.target.id === id) : undefined;
-    const caller = col === 0 ? this.columns[0].block.callers.find((c) => c.node.id === id) : undefined;
-    if (link) {
-      this.columns = [...this.columns.slice(0, col + 1), { block, fromLine: link.line, unfolded: new Set(), showAll: false }];
-      this.render();
-      this.select(this.columns.length - 1);
-    } else if (caller) {
-      this.rootHistory.push(this.columns);
-      this.columns = [{ block, unfolded: new Set(), showAll: false }, { ...this.columns[0], fromLine: caller.line }, ...this.columns.slice(1)];
-      this.render();
-      this.select(0);
-    } else {
-      if (this.columns.length) this.rootHistory.push(this.columns);
-      this.columns = [{ block, unfolded: new Set(), showAll: false }];
-      this.render();
-      this.select(0);
-    }
-    this.scrollToColumn(this.selected);
-  }
-
-  // Point at a line in an open block (e.g. while the summary is hovered).
-  // Marked only; nothing scrolls.
-  mark(id: string, line?: number) {
-    this.root.querySelectorAll(".ln.hovered").forEach((r) => r.classList.remove("hovered"));
-    if (!line) return;
-    const col = this.columns.findIndex((c) => c.block.node.id === id);
-    this.root.querySelector(`.block[data-col="${col}"] .ln[data-n="${line}"]`)?.classList.add("hovered");
   }
 
   // After re-indexing, refetch every open block (lines may have moved).

@@ -17,42 +17,6 @@ export interface NodeRef {
 // How two nodes are connected, as views draw it.
 export type LinkKind = "calls" | "channel" | "state" | "local";
 
-// One call the focus makes, in source order. Library calls are left out
-// (counted in `hidden`); registered callbacks inside it are steps too.
-export interface Step {
-  label: string;
-  target: NodeRef | null;
-  line: number;
-  callback?: boolean; // a callback defined here (`setTimeout(() => …)`)
-  member?: boolean; // for a file or class: something declared in it
-}
-
-// A value produced by one step and consumed by another, or returned.
-export interface LocalFlow {
-  from: number; // step index
-  to: number | "return";
-  type?: string;
-}
-
-export interface Link {
-  node: NodeRef;
-  kind: LinkKind;
-  label?: string; // channel key, "writes", "reads"
-  type?: string; // the data carried
-  count: number; // edges merged into this link
-  detail?: string; // e.g. "9 readers"
-}
-
-export interface FocusResult {
-  node: NodeRef;
-  path: NodeRef[]; // where it sits, runtime first
-  steps: Step[];
-  flows: LocalFlow[];
-  up: Link[]; // what feeds it
-  down: Link[]; // what it feeds
-  hidden: { libraryCalls: number };
-}
-
 export interface MapGroup {
   node: NodeRef;
   children: number;

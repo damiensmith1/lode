@@ -57,7 +57,6 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     info: () => queries.info(),
     files: () => queries.files(),
     search: (p) => queries.search(String(p.query ?? "")),
-    focus: (p) => queries.focus(String(p.id)),
     map: (p) => queries.map(String(p.lens ?? "runtime"), (p.parent as string | undefined) ?? null, Boolean(p.includeExternal)),
     source: (p) => queries.source(String(p.file)),
     graph: (p) => queries.tree(String(p.lens ?? "runtime")),

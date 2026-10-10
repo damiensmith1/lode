@@ -23,7 +23,7 @@ const CSS = `
 
 // <lode-map lens="runtime" parent="runtime:main">: the groups at one level
 // of a lens, with every edge between them merged and counted. Click a group
-// to go a level deeper; a symbol opens a focus view.
+// to go a level deeper; a symbol opens in the flow.
 export class LodeMap extends HTMLElement {
   static observedAttributes = ["lens", "parent"];
   client?: LodeClient;
@@ -73,7 +73,7 @@ export class LodeMap extends HTMLElement {
     const { action, id } = el.dataset;
     if (action === "into" && id) this.setAttribute("parent", id);
     else if (action === "top") this.removeAttribute("parent");
-    else if (action === "focus" && id) this.host?.openView({ kind: "focus", id });
+    else if (action === "read" && id) this.host?.openView({ kind: "flow", id });
   }
 
   private render() {
@@ -92,13 +92,13 @@ export class LodeMap extends HTMLElement {
       .map((g) => {
         const n = g.node;
         const leaf = g.children === 0 || n.kind === "callable";
-        const action = leaf ? "focus" : "into";
+        const action = leaf ? "read" : "into";
         const isGroup = n.id.startsWith(`${d.lens}:`) || n.id.startsWith("dir:");
         const sub = isGroup ? `${g.children} inside` : `${n.kind}${n.line ? ` · line ${n.line}` : ""}`;
         return `<button class="group" data-action="${action}" data-id="${escape(n.id)}" title="${escape(n.id)}">
           <span class="name${isGroup ? "" : " mono"}">${escape(n.name)}</span>
           <span class="sub">${escape(sub)}</span>
-          <span class="open">${leaf ? "focus ↗" : "▸ open"}</span>
+          <span class="open">${leaf ? "read ↗" : "▸ open"}</span>
         </button>`;
       })
       .join("");
