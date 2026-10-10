@@ -405,6 +405,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   toolbar shows the zoom (click for 100%) and "fit". The camera is saved
   with the layout, in canvas coordinates; a startup link to a card that's
   already on the restored canvas selects it without moving the view.
+  Panning and moving cards never select text. Keys (while the flow is
+  showing, not while typing in a field): Delete/Backspace closes the
+  selected card, ⌘Z / Ctrl+Z undoes.
 - **Layouts are saved with the project.** The server keeps a view's layout
   (`loadLayout` / `saveLayout`, `layout-<name>.json` in the project's cache
   dir, name-checked and size-capped), so it survives restarts in any host;

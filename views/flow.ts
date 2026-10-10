@@ -63,6 +63,8 @@ const CSS = `
 :host { display: flex; flex-direction: column; overflow: hidden; }
 .canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: grab; touch-action: none; }
 .canvas.panning { cursor: grabbing; }
+.canvas.panning, .canvas.moving { user-select: none; -webkit-user-select: none; }
+.card header { user-select: none; -webkit-user-select: none; }
 .board { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .zoom { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
 .card { position: absolute; z-index: 1; width: max-content; min-width: 480px; max-width: 760px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
@@ -141,6 +143,7 @@ export class LodeFlow extends HTMLElement {
       </div>
       <div class="canvas"><div class="board"></div></div>`;
     this.root.addEventListener("click", (e) => void this.onClick(e));
+    document.addEventListener("keydown", this.onKey);
     this.setupDrag();
     this.unsubscribe = this.client?.onChanged(() => void this.reload());
     this.ready = this.restore();
@@ -156,7 +159,23 @@ export class LodeFlow extends HTMLElement {
 
   disconnectedCallback() {
     this.unsubscribe?.();
+    document.removeEventListener("keydown", this.onKey);
   }
+
+  // Delete/Backspace closes the selected card; ⌘Z / Ctrl+Z undoes. Only while
+  // this view is showing, and never while typing somewhere.
+  private onKey = (e: KeyboardEvent) => {
+    if (!this.isConnected || !this.offsetParent) return;
+    const typing = e.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
+    if (typing) return;
+    if ((e.key === "Delete" || e.key === "Backspace") && this.selected && this.cards.has(this.selected)) {
+      e.preventDefault();
+      this.close(this.selected);
+    } else if (e.key === "z" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      e.preventDefault();
+      this.popUndo();
+    }
+  };
 
   attributeChangedCallback(_n: string, before: string | null, after: string | null) {
     if (after && before !== after && this.isConnected) void this.ready.then(() => this.show(after));
@@ -619,6 +638,8 @@ export class LodeFlow extends HTMLElement {
       const target = e.target as Element;
       // Empty canvas: drag to move around.
       if (!target.closest(".card") && target.closest(".canvas")) {
+        e.preventDefault(); // no text selection while panning
+        window.getSelection()?.removeAllRanges();
         pan = { x: e.clientX, y: e.clientY, cam: { ...this.camera } };
         canvas.setPointerCapture(e.pointerId);
         canvas.classList.add("panning");
@@ -626,8 +647,10 @@ export class LodeFlow extends HTMLElement {
       }
       const header = target.closest("header");
       if (!header || target.closest("button")) return;
+      e.preventDefault(); // no text selection while moving a card
       const el = header.closest<HTMLElement>(".card")!;
       const c = this.cards.get(el.dataset.key!)!;
+      canvas.classList.add("moving");
       drag = { key: c.key, el, x: e.clientX, y: e.clientY, cx: c.x, cy: c.y, before: this.snapshot(), moved: false };
       el.setPointerCapture(e.pointerId);
     });
@@ -658,6 +681,7 @@ export class LodeFlow extends HTMLElement {
         this.changed();
       }
       if (!drag) return;
+      canvas.classList.remove("moving");
       drag.el.classList.remove("dragging");
       if (drag.moved) {
         this.undo.push(drag.before);
