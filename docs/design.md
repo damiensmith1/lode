@@ -291,7 +291,7 @@ Mockups of the target UX, using real data from the glance index:
 ```
 GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC / WebSocket ══▶ views (views/) ─▶ host
                                        lode serve | lode open                          <lode-flow>       standalone app
-                                                                                       <lode-map>        (hosts/app)
+                                                                                       <lode-entries>    (hosts/app)
 ```
 
 - **Queries** (`src/query`): deterministic, from the graph alone:
@@ -332,8 +332,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   automatically moved things around too much, so nothing moves on its own.
   Clicking a line (not selecting text), a ◇ in the gutter or an inline note
   reads that code in the flow (`symbolAt` finds the innermost declaration).
-  With the graph tab showing, a click reveals the node there instead. Views
-  that report `highlight` (graph) tint the node's range in the code pane.
+  Views can report `highlight` (the flow does, for its selected block); a
+  host with a visible editor can show it as decorations.
 - Declarations record their **end line** (`loc.endLine`) for ranges.
 - **Flow view: code as nodes** (`<lode-flow>`, the app's first tab). The
   graph views showed structure but didn't make code readable: a box saying

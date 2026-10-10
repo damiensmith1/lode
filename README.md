@@ -36,7 +36,7 @@ src/derive      core analysis: channel matching (tier 3), shared-state flows (ti
 src/graph       Graph (validation, traversal), lenses, GraphStore (cache)
 src/query      deterministic queries views need (focus, map, search, source)
 src/server     JSON-RPC over WebSocket (`/rpc`), file watching
-views/         web components (<lode-focus>, <lode-map>), client, host contract
+views/         web components (<lode-entries>, <lode-flow>), client, host contract
 hosts/app      the standalone host (`lode open`)
 src/cli.ts     the commands above
 ```
