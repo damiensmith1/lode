@@ -26,7 +26,8 @@ import { GraphStore, tsPlugin, createService } from "lode";
 
 const store = GraphStore.open(tsPlugin, folder);   // cache: ~/.cache/lode/<hash>, or { cacheDir }
 const service = createService(store);              // the methods views call
-// After files change (from your own watcher): service.refresh()
+const stop = service.watch();                      // re-index as files change; views update
+// or, with your own watcher (an editor's file events): service.refresh()
 ```
 
 ## 2. Connect views to it
@@ -93,7 +94,56 @@ Without a bundler (a webview, a plain page), import the self-contained
 bundles: `lode/dist/views/lode-views.js` and `lode-highlight.js`. See
 `hosts/minimal/index.html` for a whole host in one page.
 
-## 4. The host
+## 4. Your own UI around the views
+
+`lodeApi(connection)` is the typed API for building a file tree, a search
+box, a status line or "show the symbol under the cursor":
+
+```ts
+import { lodeApi, buildFileTree } from "lode/views";
+const api = lodeApi(connection);
+renderTree(buildFileTree(await api.files()));       // folders → files, with runtimes
+renderResults(await api.search(query));             // symbols; open with flow.show(node.id)
+const here = await api.symbolAt(file, cursorLine);  // then flow.show(here.id)
+connection.onChanged(async () => renderTree(buildFileTree(await api.files())));
+```
+
+Also `info()`, `entries()`, `block(id)`, `source(file)`.
+
+## 5. Driving a flow and listening to it
+
+Methods on a `<lode-flow>`: `show(id)` (add a node or file, or go to its
+card), `run(command)`, `cards()`, `selection()`, `setSelection(keys)`.
+Commands: `close` (the selection), `undo`, `fit`, `focus`, `deselect`,
+`zoomReset`, `clear`.
+
+Events (bubbling, composed; types in `FlowEventMap`):
+
+| event | when | detail |
+| --- | --- | --- |
+| `lode-action` | before lode acts on a click or key; **cancelable** | `action`, `card`, `target`, `line`, `via`, `data` |
+| `lode-select` | the selection changed | `selected`, `cards` |
+| `lode-open` | a card was opened or gone to | `card`, `from`, `line`, `existing` |
+| `lode-close` | cards were closed | `cards` (keys) |
+| `lode-change` | anything on the canvas changed | |
+| `lode-title` | the view's title changed | the title |
+
+`preventDefault()` on `lode-action` takes an action over, e.g. open chips
+in the editor instead of on the canvas:
+
+```ts
+flow.addEventListener("lode-action", (e) => {
+  if (e.detail.action === "open") { e.preventDefault(); editor.reveal(e.detail.target); }
+});
+```
+
+**Keys.** Defaults: `close` Delete / Backspace, `undo` Mod+z (⌘ or Ctrl);
+the rest have none. `host.keys` remaps (`{ undo: ["Mod+Shift+u"], fit:
+["Shift+F"] }`; `[]` turns one off) or `false` turns them all off, for a
+host that routes its own keybindings to `flow.run()`. Keys never fire
+while typing in a field, or when the flow isn't showing.
+
+## 6. The host
 
 ```ts
 const host: LodeHost = {
@@ -104,7 +154,27 @@ const host: LodeHost = {
   syntaxCss: "…",                              // CSS for what `syntax` emits
   storage: myStorage,                          // optional: where views keep state (default: the project's cache)
   css: "…",                                    // optional: CSS added last inside every view
+  keys: { … } | false,                         // optional: see above
+  render: { header, footer, line, chip },      // optional: your markup in cards (below)
 };
+```
+
+**Card markup** (`host.render`): each hook gets the card (`CardInfo`) and
+returns HTML, or nothing. You escape what you put in.
+
+```ts
+render: {
+  header: (card) => `<span class="owner">${owners.get(card.node.file)}</span>
+                     <button data-action="host:pin" data-id="${card.key}">pin</button>`,
+  footer: (card) => …,                         // below the code
+  line: (card, line) => coverage.has(line) ? "<i>●</i>" : undefined,  // before a line's chips
+  chip: (link, card) => …,                     // a chip's label
+}
+```
+
+Elements with `data-action="host:<name>"` are your buttons: clicking one
+fires `lode-action` with that action, the card, and the element's `data-*`
+values. They're not drag handles, even in the header.
 ```
 
 **Syntax colours**: bring your editor's tokenizer, or use the bundled one:
@@ -120,7 +190,7 @@ sync or async):
   database, Clance's store. A host can also keep its own tab list in the
   same storage, as the standalone app does (`app-tabs`).
 
-## 5. Look
+## 7. Look
 
 - **Tokens.** Every colour and font is a `--lode-*` custom property, set on
   any ancestor of a view (or on the view). Ready-made: `LIGHT_THEME` (the
@@ -135,7 +205,8 @@ sync or async):
   `card-selected`, `card-header`, `card-title`, `card-meta`, `card-close`,
   `callers`, `caller`, `code`, `line`, `line-number`, `source`, `chips`,
   `chip`, `chip-calls`, `chip-channel`, `chip-state`, `chip-local`, `fold`,
-  `paging`, `paging-button`, `arrows`; entries: `page`, `lede`, `summary`,
+  `paging`, `paging-button`, `arrows`, and `host-header`, `host-footer`,
+  `host-line` around render hooks' markup; entries: `page`, `lede`, `summary`,
   `filter`, `list`, `runtime`, `category`, `entry`, `more`.
 - **`host.css`** goes last inside every view's shadow root, for anything
   tokens and parts don't reach.

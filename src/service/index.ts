@@ -1,3 +1,4 @@
+import { watch as watchFiles } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GraphStore } from "../graph/store.js";
@@ -27,8 +28,20 @@ export interface LodeService {
   handle(method: unknown, params?: unknown): Promise<{ result: unknown } | { error: string }>;
   // Re-index changed files; tells onChanged listeners when something did.
   refresh(): string[];
+  // Watch the project folder and refresh on changes (debounced), so views
+  // update as files change. Returns a function that stops watching.
+  watch(options?: WatchOptions): () => void;
   onChanged(listener: (files: string[]) => void): () => void;
 }
+
+export interface WatchOptions {
+  debounceMs?: number; // default 250
+  // Paths (relative to the project) to ignore. Default: node_modules,
+  // .git, dist, out at any depth.
+  ignore?: (relativePath: string) => boolean;
+}
+
+const IGNORED = /(^|[\\/])(node_modules|\.git|dist|out)([\\/]|$)/;
 
 export function createService(store: GraphStore, options: ServiceOptions = {}): LodeService {
   const queries = new Queries(() => store.graph, store.root);
@@ -75,7 +88,7 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     return fn(params);
   };
 
-  return {
+  const service: LodeService = {
     methods,
     call,
     handle: async (method, params) => {
@@ -91,11 +104,25 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
       if (files.length) for (const listener of listeners) listener(files);
       return files;
     },
+    watch: (watchOptions = {}) => {
+      const ignore = watchOptions.ignore ?? ((name: string) => IGNORED.test(name));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const watcher = watchFiles(store.root, { recursive: true }, (_event, name) => {
+        if (!name || ignore(String(name))) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => service.refresh(), watchOptions.debounceMs ?? 250);
+      });
+      return () => {
+        clearTimeout(timer);
+        watcher.close();
+      };
+    },
     onChanged: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
   };
+  return service;
 }
 
 // Answer views over any message channel (a VS Code webview, an Electron

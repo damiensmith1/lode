@@ -344,6 +344,20 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   localStorage, memory, or the host's own store. The standalone app keeps
   any number of flow tabs this way, plus its tab list (`app-tabs`); the
   first flow keeps the key `flow`, so canvases saved before tabs still load.
+- **Interaction is the host's too.** Every click and key action is
+  announced first as a cancelable `lode-action` (a host can take any over,
+  e.g. open chips in its editor), and the flow reports `lode-select`,
+  `lode-open`, `lode-close`, `lode-change`. Hosts drive it with `show`,
+  `run(command)`, `cards()`, `selection()`, `setSelection()`. Keys map to
+  commands through `host.keys` (remap, `[]` for one off, `false` for all
+  off); defaults are Delete/Backspace and Mod+Z. Cards take host markup
+  through `host.render` (header, footer, per line, chip labels), with
+  `data-action="host:…"` for the host's own buttons.
+- **Around the views.** `lodeApi(connection)` types the calls a host needs
+  for its own file tree, search, status or "symbol at cursor", and
+  `buildFileTree` turns the file list into folders. `service.watch()`
+  re-indexes on file changes (the server's `watch` uses it), and views and
+  the app's tree update from `onChanged`.
 - **Look is the host's.** Every colour and font is a `--lode-*` token with
   its default as a `var()` fallback, so a host sets tokens on any ancestor
   (declaring defaults on `:host` would shadow inherited ones). Syntax

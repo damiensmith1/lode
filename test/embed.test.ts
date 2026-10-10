@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { tsPlugin } from "../src/ingest/ts/index.js";
 import { createService, serveMessages } from "../src/service/index.js";
 import { MessageConnection } from "../views/connection.js";
 import { memoryStorage, serviceStorage } from "../views/storage.js";
+import { buildFileTree } from "../views/api.js";
 import type { CodeBlock } from "../src/query/types.js";
 
 const cacheDir = mkdtempSync(path.join(os.tmpdir(), "lode-embed-"));
@@ -62,5 +63,38 @@ describe("embedding without a server", () => {
     expect(storage.load("k")).toEqual({ a: 1 });
     storage.save("k", null);
     expect(storage.load("k")).toBeNull();
+  });
+});
+
+describe("host helpers", () => {
+  it("buildFileTree: folders first, by name, with paths and runtimes", () => {
+    const tree = buildFileTree([
+      { file: "src/main/b.ts", runtime: "main" },
+      { file: "src/a.ts" },
+      { file: "src/main/a.ts", runtime: "main" },
+      { file: "README.ts" },
+    ]);
+    expect(tree.map((n) => n.name)).toEqual(["src", "README.ts"]);
+    const src = tree[0];
+    expect(src.children!.map((n) => `${n.kind}:${n.path}`)).toEqual(["dir:src/main", "file:src/a.ts"]);
+    expect(src.children![0].children).toEqual([
+      { name: "a.ts", path: "src/main/a.ts", kind: "file", runtime: "main" },
+      { name: "b.ts", path: "src/main/b.ts", kind: "file", runtime: "main" },
+    ]);
+  });
+
+  it("watch: re-indexes when a file changes and tells listeners", async () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), "lode-watch-"));
+    cpSync("test/fixtures/ipc", project, { recursive: true });
+    const watched = createService(GraphStore.open(tsPlugin, project, { cacheDir: path.join(project, ".cache") }));
+    const changed = new Promise<string[]>((resolve) => watched.onChanged(resolve));
+    const stop = watched.watch({ debounceMs: 50, ignore: (name) => name.startsWith(".cache") });
+    await new Promise((r) => setTimeout(r, 100));
+    appendFileSync(path.join(project, "src/main.ts"), "\nexport function addedLater() { return 1; }\n");
+    const files = await Promise.race([changed, new Promise<string[]>((_, reject) => setTimeout(() => reject(new Error("no change seen")), 5000))]);
+    stop();
+    expect(files).toContain("src/main.ts");
+    expect(await watched.call("search", { query: "addedLater" })).toContainEqual(expect.objectContaining({ name: "addedLater" }));
+    rmSync(project, { recursive: true, force: true });
   });
 });

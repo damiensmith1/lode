@@ -1,3 +1,4 @@
+import type { BlockLink, NodeRef } from "../src/query/types.js";
 import type { LodeStorage } from "./storage.js";
 
 // What a host (an IDE, Clance, the standalone app) provides to lode views.
@@ -19,6 +20,12 @@ export interface LodeHost {
   // Optional: CSS added last inside every view's shadow root, to restyle
   // anything (themes are better set as --lode-* tokens; see theme.ts).
   css?: string;
+  // Optional: which keys do what in a flow (see FlowCommand), or false for
+  // none, e.g. when the host routes its own shortcuts to flow.run().
+  // Unlisted commands keep their defaults; [] turns one off.
+  keys?: false | Partial<Record<FlowCommand, string[]>>;
+  // Optional: extra markup in cards (see CardRender).
+  render?: CardRender;
   // Optional: where views keep their state, per view (see ViewRequest's
   // `state`). Defaults to the project's cache, through the connection.
   storage?: LodeStorage;
@@ -39,6 +46,65 @@ export type ViewRequest =
   | { kind: "entries" }
   | { kind: "flow"; id?: string; state?: string };
 
-// Views dispatch this (bubbling, composed) when their title changes, so the
-// host can label the tab.
-export const TITLE_EVENT = "lode-title";
+// What a flow can be asked to do, by a key (LodeHost.keys) or by the host
+// calling flow.run(command).
+export type FlowCommand = "close" | "undo" | "fit" | "focus" | "deselect" | "zoomReset" | "clear";
+
+// Keys are "Delete", "Mod+z" (Mod is ⌘ or Ctrl), "Shift+F", "Escape", …
+export const DEFAULT_KEYS: Record<FlowCommand, string[]> = {
+  close: ["Delete", "Backspace"],
+  undo: ["Mod+z"],
+  fit: [],
+  focus: [],
+  deselect: [],
+  zoomReset: [],
+  clear: [],
+};
+
+// A card as hosts see it, in events, render hooks and flow.cards().
+export interface CardInfo {
+  key: string; // the card's id on the canvas: a node id, or node@start-end for part of one
+  node: NodeRef;
+  range: [number, number];
+  fragment?: string; // for part of a block: its header line
+  x: number;
+  y: number;
+  selected: boolean;
+}
+
+// Hooks that add the host's own markup to cards. Each returns HTML (the
+// host escapes what it puts in) or nothing. Elements with
+// data-action="host:<name>" are the host's buttons: clicking one fires
+// lode-action with that action, the card, and the element's data-* values.
+export interface CardRender {
+  // After the title and file line in a card's header (badges, buttons).
+  header?(card: CardInfo): string | undefined;
+  // Below a card's code.
+  footer?(card: CardInfo): string | undefined;
+  // At the end of a line, before its chips (blame, coverage, a comment dot).
+  line?(card: CardInfo, line: number): string | undefined;
+  // A chip's label in place of the default ("→ name", "writes x", …).
+  chip?(link: BlockLink, card: CardInfo): string | undefined;
+}
+
+// Events views dispatch (bubbling, composed, so a host can listen on any
+// ancestor). Details in FlowEventMap.
+export const TITLE_EVENT = "lode-title"; // the view's title changed: label the tab
+export const ACTION_EVENT = "lode-action"; // about to act on a click or key; cancelable
+export const SELECT_EVENT = "lode-select"; // the selection changed
+export const OPEN_EVENT = "lode-open"; // a card was opened, or gone to
+export const CLOSE_EVENT = "lode-close"; // cards were closed
+export const CHANGE_EVENT = "lode-change"; // the canvas changed (cards, arrows, layout, folds, camera)
+
+export interface FlowEventMap {
+  [TITLE_EVENT]: string;
+  // `action` is the button's or key's: open, fold, reroot (a caller), close,
+  // more, all, less, callers, source, undo, fit, focus, zoom-reset, clear,
+  // deselect, or host:<name>. preventDefault() stops lode handling it, so
+  // a host can take any of them over (e.g. open chips in its editor).
+  [ACTION_EVENT]: { action: string; card?: CardInfo; target?: string; line?: number; via: "click" | "key"; data: Record<string, string> };
+  [SELECT_EVENT]: { selected: CardInfo | null; cards: CardInfo[] };
+  [OPEN_EVENT]: { card: CardInfo; from?: string; line?: number; existing: boolean };
+  [CLOSE_EVENT]: { cards: string[] };
+  [CHANGE_EVENT]: Record<string, never>;
+}

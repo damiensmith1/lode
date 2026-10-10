@@ -1,6 +1,6 @@
 import type { EntriesResult, EntryPoint } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
-import { TITLE_EVENT, type LodeHost } from "./host.js";
+import { ACTION_EVENT, TITLE_EVENT, type LodeHost } from "./host.js";
 import { escape, viewCss } from "./theme.js";
 
 const SHOW_FIRST = 12; // entries shown per category before "show all"
@@ -79,6 +79,9 @@ export class LodeEntries extends HTMLElement {
   private onClick(event: Event) {
     const el = (event.target as Element).closest<HTMLElement>("[data-action]");
     if (!el) return;
+    // Tell the host first; preventDefault() takes it over.
+    const go = this.dispatchEvent(new CustomEvent(ACTION_EVENT, { detail: { action: el.dataset.action, target: el.dataset.id, via: "click", data: { ...el.dataset } }, bubbles: true, composed: true, cancelable: true }));
+    if (!go) return;
     if (el.dataset.action === "read" && el.dataset.id) this.host?.openView({ kind: "flow", id: el.dataset.id });
     if (el.dataset.action === "more" && el.dataset.key) {
       this.opened.add(el.dataset.key);

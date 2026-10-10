@@ -3,9 +3,8 @@
 // file tree (a file opens in the flow too). Nothing moves on its own, only
 // on clicks. It's one host among many; everything lode-specific comes from
 // ../../views through LodeHost.
-import type { FileEntry, NodeRef, ProjectInfo } from "../../src/query/types.js";
 import { highlightJs } from "../../views/highlight.js";
-import { createView, LodeClient, serviceStorage, TITLE_EVENT, type LodeHost, type ViewRequest } from "../../views/index.js";
+import { buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) => {
@@ -19,6 +18,7 @@ const link = new URLSearchParams(location.hash.slice(1));
 const client = new LodeClient(`ws://${location.host}/rpc?token=${encodeURIComponent(link.get("token") ?? "")}`);
 // Tabs and each flow's canvas are kept with the project (lode's cache).
 const storage = serviceStorage(client);
+const api = lodeApi(client);
 const TABS_KEY = "app-tabs";
 
 // --- Tabs of lode views ---------------------------------------------------
@@ -112,46 +112,39 @@ function closeTab(tab: Tab) {
 // Read a node (or a whole file) in the flow.
 function readInFlow(id: string) {
   openView({ kind: "flow", id });
+  currentFile = id;
   document.querySelectorAll<HTMLElement>("#tree [data-file]").forEach((b) => b.setAttribute("aria-current", String(b.dataset.file === id)));
 }
 
 // --- File tree ------------------------------------------------------------
 
-function renderTree(files: FileEntry[]) {
-  const tree = $("tree");
-  const open = new Set<string>();
-  const draw = () => {
-    const rows: HTMLElement[] = [];
-    const seenDirs = new Set<string>();
-    for (const f of files) {
-      const parts = f.file.split("/");
-      // Show each ancestor directory once; skip files under closed ones.
-      let hidden = false;
-      for (let d = 1; d < parts.length; d++) {
-        const dir = parts.slice(0, d).join("/");
-        if (hidden) break;
-        if (!seenDirs.has(dir)) {
-          seenDirs.add(dir);
-          const isOpen = open.has(dir);
-          rows.push(indent(el("button", { ariaExpanded: String(isOpen), onclick: () => (isOpen ? open.delete(dir) : open.add(dir), draw()) }, `${isOpen ? "▾" : "▸"} ${parts[d - 1]}`), d - 1));
-        }
-        if (!open.has(dir)) hidden = true;
+// Folders start open at the top level; what's opened stays open across
+// redraws (after re-indexing, say).
+const openDirs = new Set<string>();
+let treeShown = false;
+let currentFile = "";
+
+function renderTree(tree: FileTreeNode[]) {
+  if (!treeShown) for (const n of tree) if (n.kind === "dir") openDirs.add(n.path);
+  treeShown = true;
+  const rows: HTMLElement[] = [];
+  const walk = (nodes: FileTreeNode[], depth: number) => {
+    for (const n of nodes) {
+      if (n.kind === "dir") {
+        const isOpen = openDirs.has(n.path);
+        const toggle = () => (isOpen ? openDirs.delete(n.path) : openDirs.add(n.path), renderTree(tree));
+        rows.push(indent(el("button", { ariaExpanded: String(isOpen), onclick: toggle }, `${isOpen ? "▾" : "▸"} ${n.name}`), depth));
+        if (isOpen) walk(n.children ?? [], depth + 1);
+      } else {
+        const button = indent(el("button", { title: n.runtime ? `runtime: ${n.runtime}` : "", onclick: () => readInFlow(n.path) }, el("span", { className: `dot rt-${n.runtime ?? "none"}` }), n.name), depth);
+        button.dataset.file = n.path;
+        button.setAttribute("aria-current", String(n.path === currentFile));
+        rows.push(button);
       }
-      if (hidden) continue;
-      const button = indent(
-        el("button", { title: f.runtime ? `runtime: ${f.runtime}` : "", onclick: () => readInFlow(f.file) }, el("span", { className: `dot rt-${f.runtime ?? "none"}` }), parts[parts.length - 1]),
-        parts.length - 1,
-      );
-      button.dataset.file = f.file;
-      rows.push(button);
     }
-    tree.replaceChildren(...rows);
   };
-  for (const f of files) {
-    const parts = f.file.split("/");
-    if (parts.length > 1) open.add(parts[0]);
-  }
-  draw();
+  walk(tree, 0);
+  $("tree").replaceChildren(...rows);
 }
 
 function indent<T extends HTMLElement>(node: T, depth: number): T {
@@ -168,7 +161,7 @@ function setupSearch() {
   input.addEventListener("input", () => {
     clearTimeout(timer);
     timer = window.setTimeout(async () => {
-      const found = await client.call<NodeRef[]>("search", { query: input.value });
+      const found = await api.search(input.value);
       results.hidden = found.length === 0;
       results.replaceChildren(
         ...found.map((n) =>
@@ -198,14 +191,14 @@ function setupSearch() {
 // --- Start ------------------------------------------------------------------
 
 async function start() {
-  const info = await client.call<ProjectInfo>("info");
+  const info = await api.info();
   $("project").textContent = info.root;
   const status = $("status");
   const setStatus = (extra = "") => {
     status.textContent = `◇ lode · ${info.files} files · ${info.nodes} nodes · ${info.edges} edges${extra}`;
   };
   setStatus();
-  renderTree(await client.call<FileEntry[]>("files"));
+  renderTree(buildFileTree(await api.files()));
   setupSearch();
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
 
@@ -226,7 +219,8 @@ async function start() {
   else select(tabs[start ? reader : selected]);
 
   client.onChanged(async (files) => {
-    Object.assign(info, await client.call<ProjectInfo>("info"));
+    Object.assign(info, await api.info());
+    renderTree(buildFileTree(await api.files()));
     setStatus(` · re-indexed ${files.length} file${files.length === 1 ? "" : "s"}`);
   });
 }

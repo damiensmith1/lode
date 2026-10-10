@@ -1,7 +1,7 @@
 import type { BlockLink, BlockRegion, CodeBlock, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
-import { TITLE_EVENT, type LodeHost } from "./host.js";
+import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, DEFAULT_KEYS, OPEN_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 
 const MAX_CALLERS = 4;
@@ -124,7 +124,7 @@ export class LodeFlow extends HTMLElement {
   host?: LodeHost;
 
   private readonly root = this.attachShadow({ mode: "open" });
-  private cards = new Map<string, Card>();
+  private cardMap = new Map<string, Card>();
   private arrows: Arrow[] = [];
   private selected: string | null = null; // the primary card (highlighted in the host)
   private group = new Set<string>(); // every selected card, ⌘-click adds
@@ -145,7 +145,7 @@ export class LodeFlow extends HTMLElement {
     // click acts twice.
     if (this.built) {
       // Laid out while detached, everything measured 0: measure again.
-      if (this.cards.size) this.position();
+      if (this.cardMap.size) this.position();
       return;
     }
     this.built = true;
@@ -169,7 +169,7 @@ export class LodeFlow extends HTMLElement {
       const id = this.getAttribute("node");
       // A link to a card that's already on the restored canvas just selects
       // it; the saved view stays where it was.
-      if (id && this.cards.has(id)) this.select(id);
+      if (id && this.cardMap.has(id)) this.select(id);
       else if (id) void this.show(id);
       else this.render();
     });
@@ -183,17 +183,79 @@ export class LodeFlow extends HTMLElement {
   // Delete/Backspace closes the selected cards; ⌘Z / Ctrl+Z undoes. Only while
   // this view is showing, and never while typing somewhere.
   private onKey = (e: KeyboardEvent) => {
-    if (!this.isConnected || !this.offsetParent) return;
+    if (!this.isConnected || !this.offsetParent || this.host?.keys === false) return;
     const typing = e.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
     if (typing) return;
-    if ((e.key === "Delete" || e.key === "Backspace") && this.group.size) {
-      e.preventDefault();
-      this.close([...this.group]);
-    } else if (e.key === "z" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
-      e.preventDefault();
-      this.popUndo();
-    }
+    const keys = { ...DEFAULT_KEYS, ...(this.host?.keys || {}) };
+    const command = (Object.keys(keys) as FlowCommand[]).find((c) => keys[c]?.some((k) => keyMatches(k, e)));
+    if (!command || !this.canRun(command)) return;
+    e.preventDefault();
+    if (this.emit(ACTION_EVENT, { action: command, via: "key", data: {} }, true)) this.run(command);
   };
+
+  // --- for hosts ---------------------------------------------------------------
+
+  // Do what a key or toolbar button would. Returns whether there was
+  // anything to do.
+  run(command: FlowCommand): boolean {
+    if (!this.canRun(command)) return false;
+    if (command === "close") this.close([...this.group]);
+    else if (command === "undo") this.popUndo();
+    else if (command === "fit") this.fit(this.group.size > 1 ? [...this.group] : [...this.cardMap.keys()]);
+    else if (command === "focus") this.frame([...this.group]);
+    else if (command === "zoomReset") this.zoomTo(1, this.viewCentre());
+    else if (command === "deselect") this.setSelection([]);
+    else if (command === "clear") this.clearAll();
+    return true;
+  }
+
+  private canRun(command: FlowCommand): boolean {
+    if (command === "close" || command === "focus" || command === "deselect") return this.group.size > 0;
+    if (command === "undo") return this.undo.length > 0;
+    if (command === "fit" || command === "clear") return this.cardMap.size > 0;
+    return true;
+  }
+
+  // Every card on the canvas.
+  cards(): CardInfo[] {
+    return [...this.cardMap.keys()].map((k) => this.info(k)!);
+  }
+
+  // The selected cards, the primary one first.
+  selection(): CardInfo[] {
+    const keys = [...this.group];
+    if (this.selected) keys.sort((a, b) => Number(b === this.selected) - Number(a === this.selected));
+    return keys.flatMap((k) => this.info(k) ?? []);
+  }
+
+  // Select these cards (the first is the primary); [] clears.
+  setSelection(keys: string[]) {
+    const known = keys.filter((k) => this.cardMap.has(k));
+    this.group = new Set(known);
+    this.selected = known[0] ?? null;
+    this.showSelection();
+  }
+
+  private info(key: string): CardInfo | undefined {
+    const c = this.cardMap.get(key);
+    if (!c) return undefined;
+    const n = c.block.node;
+    return {
+      key,
+      node: { id: n.id, name: n.name, kind: n.kind, file: n.file, line: n.line, ...(n.runtime && { runtime: n.runtime }) } as CardInfo["node"],
+      range: c.range,
+      ...(c.fragment && { fragment: c.fragment }),
+      x: Math.round(c.x),
+      y: Math.round(c.y),
+      selected: this.group.has(key),
+    };
+  }
+
+  private emit<K extends keyof FlowEventMap>(name: K, detail: FlowEventMap[K], cancelable = false): boolean {
+    return this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true, cancelable }));
+  }
+
+
 
   attributeChangedCallback(_n: string, before: string | null, after: string | null) {
     if (after && before !== after && this.isConnected) void this.ready.then(() => this.show(after));
@@ -202,15 +264,19 @@ export class LodeFlow extends HTMLElement {
   // Show a node: select its card if it's open, else add it as a new tree.
   async show(id: string) {
     await this.ready;
-    if (this.cards.has(id)) return this.goTo(id);
+    if (this.cardMap.has(id)) {
+      this.goTo(id);
+      return void this.emit(OPEN_EVENT, { card: this.info(id)!, existing: true });
+    }
     const block = await this.fetch(id);
     if (!block) return;
     this.remember();
-    this.cards.set(id, newCard(id, block));
+    this.cardMap.set(id, newCard(id, block));
     this.connect(id);
     this.render();
     this.placeRoot(id);
     this.goTo(id);
+    this.emit(OPEN_EVENT, { card: this.info(id)!, existing: false });
     this.changed();
   }
 
@@ -232,24 +298,20 @@ export class LodeFlow extends HTMLElement {
       if (cardEl && !String(window.getSelection() ?? "")) this.select(cardEl.dataset.key!, e.metaKey);
       return;
     }
-    const { action, id, line, start, end } = el.dataset;
+    const { action = "", id, line, start, end } = el.dataset;
     const key = cardEl?.dataset.key ?? "";
-    const here = this.cards.get(key);
+    const here = this.cardMap.get(key);
+    // Tell the host first; it can take any action over (or handle its own,
+    // host:<name>, from markup it added).
+    const data = { ...el.dataset } as Record<string, string>;
+    const detail = { action, via: "click" as const, data, ...(here && { card: this.info(key) }), ...(id && { target: id }), ...(line && { line: Number(line) }) };
+    if (!this.emit(ACTION_EVENT, detail, true) || action.startsWith("host:")) return;
 
-    if (action === "undo") return this.popUndo();
-    if (action === "fit") return this.fit(this.group.size > 1 ? [...this.group] : [...this.cards.keys()]);
-    if (action === "focus") return this.group.size && this.frame([...this.group]);
-    if (action === "zoom-reset") return this.zoomTo(1, this.viewCentre());
-    if (action === "clear") {
-      if (!this.cards.size) return;
-      this.remember();
-      this.cards.clear();
-      this.arrows = [];
-      this.selected = null;
-      this.group.clear();
-      this.render();
-      return this.changed();
-    }
+    if (action === "undo") return this.run("undo");
+    if (action === "fit") return this.run("fit");
+    if (action === "focus") return this.run("focus");
+    if (action === "zoom-reset") return this.run("zoomReset");
+    if (action === "clear") return this.run("clear");
     if (!here) return;
     if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);
     if (action === "fold") return this.fold(here, Number(start), Number(end));
@@ -279,39 +341,53 @@ export class LodeFlow extends HTMLElement {
     }
   }
 
+  private clearAll() {
+    this.remember();
+    const gone = [...this.cardMap.keys()];
+    this.cardMap.clear();
+    this.arrows = [];
+    this.selected = null;
+    this.group.clear();
+    this.render();
+    this.emit(CLOSE_EVENT, { cards: gone });
+    this.changed();
+  }
+
   // Open `id` as a card to the right of `from`, with an arrow from `line`.
   // If it's already on the canvas, just add the arrow and go to it.
   private async openFrom(from: string, line: number, id: string, kind: LinkKind, fragment?: { block: CodeBlock; range: [number, number]; header: string }) {
     const key = fragment ? `${id}@${fragment.range[0]}-${fragment.range[1]}` : id;
-    const existing = this.cards.has(key);
+    const existing = this.cardMap.has(key);
     const block = fragment ? fragment.block : existing ? null : await this.fetch(id);
     if (!existing && !block) return;
     this.remember();
     if (!existing) {
       const card = newCard(key, block!);
       if (fragment) Object.assign(card, { range: fragment.range, fragment: fragment.header });
-      this.cards.set(key, card);
+      this.cardMap.set(key, card);
     }
     this.addArrow({ from, line, to: key, kind });
     if (!existing) this.connect(key);
     this.render();
     if (!existing) this.placeBeside(key, from, line);
     this.goTo(key);
+    this.emit(OPEN_EVENT, { card: this.info(key)!, from, line, existing });
     this.changed();
   }
 
   // A caller goes to the left of the card, with an arrow from its line.
   private async openCaller(cardKey: string, callerId: string, line: number, kind: LinkKind) {
-    const existing = this.cards.has(callerId);
+    const existing = this.cardMap.has(callerId);
     const block = existing ? null : await this.fetch(callerId);
     if (!existing && !block) return;
     this.remember();
-    if (!existing) this.cards.set(callerId, newCard(callerId, block!));
+    if (!existing) this.cardMap.set(callerId, newCard(callerId, block!));
     this.addArrow({ from: callerId, line, to: cardKey, kind });
     if (!existing) this.connect(callerId);
     this.render();
     if (!existing) this.placeLeft(callerId, cardKey, line);
     this.goTo(callerId);
+    this.emit(OPEN_EVENT, { card: this.info(callerId)!, from: cardKey, line, existing });
     this.changed();
   }
 
@@ -343,11 +419,12 @@ export class LodeFlow extends HTMLElement {
   private close(keys: string[]) {
     this.remember();
     const gone = new Set(keys);
-    for (const k of gone) this.cards.delete(k);
+    for (const k of gone) this.cardMap.delete(k);
     this.arrows = this.arrows.filter((a) => !gone.has(a.from) && !gone.has(a.to));
     if (this.selected && gone.has(this.selected)) this.selected = null;
     for (const k of gone) this.group.delete(k);
     this.render();
+    this.emit(CLOSE_EVENT, { cards: [...gone] });
     this.changed();
   }
 
@@ -356,7 +433,7 @@ export class LodeFlow extends HTMLElement {
   // the first line that does, unless there's an arrow between them already.
   // Whole files don't, or one would point at everything it contains.
   private connect(key: string) {
-    const card = this.cards.get(key);
+    const card = this.cardMap.get(key);
     if (!card) return;
     const isFile = (c: Card) => c.block.node.id === c.block.node.file;
     if (isFile(card)) return;
@@ -365,9 +442,9 @@ export class LodeFlow extends HTMLElement {
       const l = from.block.links.find((l) => l.target.id === to && l.line >= from.range[0] && l.line <= from.range[1]);
       if (l) this.addArrow({ from: from.key, line: l.line, to, kind: l.kind });
     };
-    for (const other of this.cards.values()) {
+    for (const other of this.cardMap.values()) {
       if (other === card) continue;
-      if (this.cards.has(other.block.node.id) && other.key === other.block.node.id) link(card, other.key);
+      if (this.cardMap.has(other.block.node.id) && other.key === other.block.node.id) link(card, other.key);
       if (key === card.block.node.id) link(other, key);
     }
   }
@@ -386,7 +463,7 @@ export class LodeFlow extends HTMLElement {
 
   private snapshot(): Snapshot {
     return {
-      cards: [...this.cards.values()].map((c) => ({ ...c, expanded: new Set(c.expanded) })),
+      cards: [...this.cardMap.values()].map((c) => ({ ...c, expanded: new Set(c.expanded) })),
       arrows: this.arrows.map((a) => ({ ...a })),
       selected: this.selected,
     };
@@ -395,10 +472,10 @@ export class LodeFlow extends HTMLElement {
   private popUndo() {
     const s = this.undo.pop();
     if (!s) return;
-    this.cards = new Map(s.cards.map((c) => [c.key, c]));
+    this.cardMap = new Map(s.cards.map((c) => [c.key, c]));
     this.arrows = s.arrows;
-    this.selected = s.selected;
-    this.group.clear();
+    this.selected = s.selected && this.cardMap.has(s.selected) ? s.selected : null;
+    this.group = new Set(this.selected ? [this.selected] : []);
     this.render();
     if (this.selected) this.select(this.selected);
     this.changed();
@@ -419,11 +496,23 @@ export class LodeFlow extends HTMLElement {
     this.showSelection();
   }
 
+  private lastSelection = JSON.stringify([null, []]); // nothing selected
+
+  // Tell the host when the selection is different from last time.
+  private announceSelection() {
+    const signature = JSON.stringify([this.selected, [...this.group].sort()]);
+    if (signature === this.lastSelection) return;
+    this.lastSelection = signature;
+    const cards = this.selection();
+    this.emit(SELECT_EVENT, { selected: (this.selected && this.info(this.selected)) || null, cards });
+  }
+
   private showSelection() {
-    this.root.querySelector<HTMLButtonElement>('[data-action="fit"]')!.disabled = !this.cards.size;
+    this.announceSelection();
+    this.root.querySelector<HTMLButtonElement>('[data-action="fit"]')!.disabled = !this.cardMap.size;
     this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
     this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", this.group.has(c.dataset.key!)));
-    const c = this.selected ? this.cards.get(this.selected) : undefined;
+    const c = this.selected ? this.cardMap.get(this.selected) : undefined;
     const n = c?.block.node;
     if (!c || !n?.file) return void this.host?.highlight?.(null);
     this.host?.highlight?.({ node: n.id, file: n.file, range: c.range, marks: [...new Set(c.block.links.map((l) => l.line))] });
@@ -527,6 +616,7 @@ export class LodeFlow extends HTMLElement {
   // --- saving ----------------------------------------------------------------
 
   private changed() {
+    this.emit(CHANGE_EVENT, {});
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.save(), 400);
   }
@@ -538,7 +628,7 @@ export class LodeFlow extends HTMLElement {
   private async save() {
     const data: SavedLayout = {
       v: 1,
-      cards: [...this.cards.values()].map((c) => ({
+      cards: [...this.cardMap.values()].map((c) => ({
         key: c.key,
         node: c.block.node.id,
         range: c.range,
@@ -578,7 +668,7 @@ export class LodeFlow extends HTMLElement {
     for (const c of saved.cards) {
       const block = blocks.get(c.node);
       if (!block) continue; // gone since: renamed or deleted
-      this.cards.set(c.key, {
+      this.cardMap.set(c.key, {
         key: c.key,
         block,
         range: c.fragment ? c.range : fullRange(block),
@@ -590,9 +680,9 @@ export class LodeFlow extends HTMLElement {
         y: c.y,
       });
     }
-    this.arrows = saved.arrows.filter((a) => this.cards.has(a.from) && this.cards.has(a.to));
-    this.selected = saved.selected && this.cards.has(saved.selected) ? saved.selected : null;
-    this.group.clear();
+    this.arrows = saved.arrows.filter((a) => this.cardMap.has(a.from) && this.cardMap.has(a.to));
+    this.selected = saved.selected && this.cardMap.has(saved.selected) ? saved.selected : null;
+    this.group = new Set(this.selected ? [this.selected] : []);
     this.render();
     if (saved.camera) {
       const { x, y, k } = saved.camera;
@@ -604,14 +694,14 @@ export class LodeFlow extends HTMLElement {
 
   // After re-indexing, refetch every card (lines may have moved).
   private async reload() {
-    const ids = [...new Set([...this.cards.values()].map((c) => c.block.node.id))];
+    const ids = [...new Set([...this.cardMap.values()].map((c) => c.block.node.id))];
     const blocks = new Map(await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const)));
-    for (const [key, c] of this.cards) {
+    for (const [key, c] of this.cardMap) {
       const block = blocks.get(c.block.node.id);
-      if (!block) this.cards.delete(key);
+      if (!block) this.cardMap.delete(key);
       else Object.assign(c, { block, ...(c.fragment ? {} : { range: fullRange(block) }) });
     }
-    this.arrows = this.arrows.filter((a) => this.cards.has(a.from) && this.cards.has(a.to));
+    this.arrows = this.arrows.filter((a) => this.cardMap.has(a.from) && this.cardMap.has(a.to));
     this.render();
   }
 
@@ -634,7 +724,7 @@ export class LodeFlow extends HTMLElement {
 
   // New card to the right of `from`, level with the line that opened it.
   private placeBeside(key: string, from: string, line: number) {
-    const a = this.cards.get(from)!;
+    const a = this.cardMap.get(from)!;
     const aEl = this.cardEl(from)!;
     const row = this.rowFor(aEl, line);
     const header = this.cardEl(key)!.querySelector("header")!.offsetHeight;
@@ -643,7 +733,7 @@ export class LodeFlow extends HTMLElement {
 
   // A caller to the left of `to`, its calling line level with `to`'s top.
   private placeLeft(key: string, to: string, line: number) {
-    const t = this.cards.get(to)!;
+    const t = this.cardMap.get(to)!;
     const el = this.cardEl(key)!;
     const row = this.rowFor(el, line);
     this.settle(key, t.x - el.offsetWidth - GAP, t.y - (row?.offsetTop ?? 0) + 24);
@@ -651,7 +741,7 @@ export class LodeFlow extends HTMLElement {
 
   // A new tree: below everything already open.
   private placeRoot(key: string) {
-    const others = [...this.cards.values()].filter((c) => c.key !== key);
+    const others = [...this.cardMap.values()].filter((c) => c.key !== key);
     if (!others.length) return this.settle(key, 0, 0);
     const bottom = Math.max(...others.map((c) => c.y + (this.cardEl(c.key)?.offsetHeight ?? 0)));
     this.settle(key, Math.min(...others.map((c) => c.x)), bottom + 56);
@@ -659,12 +749,12 @@ export class LodeFlow extends HTMLElement {
 
   // Put a card at (x, y), moving it down until it overlaps nothing.
   private settle(key: string, x: number, y: number) {
-    const card = this.cards.get(key)!;
+    const card = this.cardMap.get(key)!;
     const el = this.cardEl(key)!;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
     for (let i = 0; i < 200; i++) {
-      const hit = [...this.cards.values()].find((o) => {
+      const hit = [...this.cardMap.values()].find((o) => {
         if (o.key === key) return false;
         const oe = this.cardEl(o.key);
         if (!oe) return false;
@@ -687,7 +777,7 @@ export class LodeFlow extends HTMLElement {
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const el of els) {
-      const c = this.cards.get(el.dataset.key!)!;
+      const c = this.cardMap.get(el.dataset.key!)!;
       minX = Math.min(minX, c.x);
       minY = Math.min(minY, c.y);
       maxX = Math.max(maxX, c.x + el.offsetWidth);
@@ -701,7 +791,7 @@ export class LodeFlow extends HTMLElement {
     this.offset = next;
     this.applyCamera();
     for (const el of els) {
-      const c = this.cards.get(el.dataset.key!)!;
+      const c = this.cardMap.get(el.dataset.key!)!;
       el.style.left = `${c.x + this.offset.x}px`;
       el.style.top = `${c.y + this.offset.y}px`;
     }
@@ -756,13 +846,13 @@ export class LodeFlow extends HTMLElement {
         return;
       }
       const header = target.closest("header");
-      if (!header || target.closest("button")) return;
+      if (!header || target.closest("button, a, input, [data-action]")) return; // controls, not a drag handle
       e.preventDefault(); // no text selection while moving a card
       const el = header.closest<HTMLElement>(".card")!;
       const key = el.dataset.key!;
       const keys = this.group.has(key) ? [...this.group] : [key];
       const starts = keys.flatMap((k) => {
-        const c = this.cards.get(k);
+        const c = this.cardMap.get(k);
         const cel = this.cardEl(k);
         return c && cel ? [{ c, el: cel, x: c.x, y: c.y }] : [];
       });
@@ -836,20 +926,21 @@ export class LodeFlow extends HTMLElement {
   // --- rendering -------------------------------------------------------------
 
   private render() {
+    this.announceSelection();
     const board = this.board();
     this.root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.disabled = !this.undo.length;
     this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
-    this.root.querySelector(".count")!.textContent = this.cards.size ? `${this.cards.size} card${this.cards.size === 1 ? "" : "s"}` : "";
-    if (!this.cards.size) {
+    this.root.querySelector(".count")!.textContent = this.cardMap.size ? `${this.cardMap.size} card${this.cardMap.size === 1 ? "" : "s"}` : "";
+    if (!this.cardMap.size) {
       board.innerHTML = `<div class="hint" part="empty">Pick an entry point, a file or a symbol to start reading from it.</div>`;
       board.style.width = board.style.height = "";
       board.style.transform = "";
       this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: "flow", bubbles: true, composed: true }));
       return;
     }
-    board.innerHTML = [...this.cards.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
+    board.innerHTML = [...this.cardMap.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
     this.position();
-    const first = this.cards.values().next().value!;
+    const first = this.cardMap.values().next().value!;
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${first.block.node.name}`, bubbles: true, composed: true }));
   }
 
@@ -864,6 +955,9 @@ export class LodeFlow extends HTMLElement {
     const n = b.node;
     const out = this.arrows.filter((a) => a.from === c.key);
     const isActive = (line: number, to: string) => out.some((a) => a.line === line && a.to === to);
+    // The host's own markup (LodeHost.render), given the card as it sees it.
+    const render = this.host?.render;
+    const info = render ? this.info(c.key)! : undefined;
 
     const header = c.fragment ? `<div class="callers" part="callers">in <span class="mono">${escape(blockName(b))}</span></div>` : this.callersHtml(c);
 
@@ -881,7 +975,7 @@ export class LodeFlow extends HTMLElement {
     const html = this.host?.syntax?.(b.lines.map((l) => l.text).join("\n"), n.file ?? "") ?? b.lines.map((l) => escape(l.text));
 
     const chip = (link: BlockLink, line: number, rolled: boolean) =>
-      `<button part="chip chip-${link.kind}" class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${escape(chipText(link))}</button>`;
+      `<button part="chip chip-${link.kind}" class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${(info && render?.chip?.(link, info)) ?? escape(chipText(link))}</button>`;
 
     const rows: string[] = [];
     let shownLines = 0;
@@ -920,7 +1014,8 @@ export class LodeFlow extends HTMLElement {
         rolled.length > MAX_ROLLED && fold
           ? `<button part="chip" class="chip rolled" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="Open the fold to see them">+${rolled.length - MAX_ROLLED} inside</button>`
           : "";
-      const chips = [...own.map((l) => chip(l, line, false)), ...rolled.slice(0, MAX_ROLLED).map((l) => chip(l, line, true)), more].join("");
+      const hostLine = info && render?.line?.(info, line);
+      const chips = [hostLine ? `<span class="host-line" part="host-line">${hostLine}</span>` : "", ...own.map((l) => chip(l, line, false)), ...rolled.slice(0, MAX_ROLLED).map((l) => chip(l, line, true)), more].join("");
       const classes = ["ln", own.length || rolled.length ? "linked" : "", out.some((a) => a.line === line) ? "active" : ""].filter(Boolean).join(" ");
       rows.push(`<div part="line" class="${classes}" data-n="${line}"><span class="no" part="line-number">${line}</span><span class="src" part="source">${html[line - first] || " "}${foldHtml}</span>${chips ? `<span class="chips" part="chips">${chips}</span>` : ""}</div>`);
     }
@@ -933,14 +1028,18 @@ export class LodeFlow extends HTMLElement {
     if (paging) rows.push(`<div class="paging" part="paging">${paging}</div>`);
 
     const span = c.range[1] - c.range[0] + 1;
+    const hostHeader = info && render?.header?.(info);
+    const hostFooter = info && render?.footer?.(info);
     return `<section part="card${this.group.has(c.key) ? " card-selected" : ""}" class="card${this.group.has(c.key) ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
       <header part="card-header">
         <button class="close" part="card-close" data-action="close" aria-label="Close this card" title="Close this card">×</button>
         ${header}
         <button class="title" part="card-title" data-action="source" title="Open the source">${titleHtml(c)}</button>
         <span class="meta" part="card-meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
+        ${hostHeader ? `<div class="host-header" part="host-header">${hostHeader}</div>` : ""}
       </header>
       <div class="code" part="code">${rows.join("")}</div>
+      ${hostFooter ? `<div class="host-footer" part="host-footer">${hostFooter}</div>` : ""}
     </section>`;
   }
 
@@ -1018,4 +1117,16 @@ function cardName(c: Card): string {
 function titleHtml(c: Card): string {
   if (!c.fragment) return escape(blockName(c.block));
   return `${escape(blockName(c.block))} <span class="part">› ${escape(shorten(c.fragment))}</span>`;
+}
+
+// Does a key name ("Delete", "Mod+z", "Shift+F", "Alt+ArrowLeft") match the
+// event? Mod is ⌘ or Ctrl. Letters ignore case; modifiers must match.
+function keyMatches(spec: string, e: KeyboardEvent): boolean {
+  const parts = spec.split("+");
+  const key = parts.pop()!;
+  const want = new Set(parts.map((p) => p.toLowerCase()));
+  const mod = want.has("mod");
+  if (mod ? !(e.metaKey || e.ctrlKey) : e.metaKey !== want.has("meta") || e.ctrlKey !== want.has("ctrl")) return false;
+  if (e.shiftKey !== want.has("shift") || e.altKey !== want.has("alt")) return false;
+  return e.key.toLowerCase() === key.toLowerCase();
 }

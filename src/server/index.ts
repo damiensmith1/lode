@@ -1,5 +1,4 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import path from "node:path";
@@ -97,15 +96,7 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     const message = JSON.stringify({ method: "changed", params: { files } });
     for (const s of sockets) s.send(message);
   });
-  let watcher: FSWatcher | undefined;
-  if (options.watch) {
-    let timer: NodeJS.Timeout | undefined;
-    watcher = watch(store.root, { recursive: true }, (_event, name) => {
-      if (!name || /(^|[\\/])(node_modules|\.git|dist|out)([\\/]|$)/.test(name)) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => service.refresh(), 250);
-    });
-  }
+  const stopWatching = options.watch ? service.watch() : undefined;
 
   await new Promise<void>((resolve) => http.listen(options.port ?? 0, "127.0.0.1", resolve));
   port = (http.address() as { port: number }).port;
@@ -115,7 +106,7 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     rpcUrl: `ws://127.0.0.1:${port}/rpc?token=${token}`,
     token,
     close: async () => {
-      watcher?.close();
+      stopWatching?.();
       unsubscribe();
       for (const s of sockets) s.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));

@@ -10,7 +10,23 @@ export { LodeClient } from "./client.js";
 export { MessageConnection, type LodeConnection, type LodeMessagePort } from "./connection.js";
 export { localStorageStorage, memoryStorage, serviceStorage, type LodeStorage } from "./storage.js";
 export { DARK_THEME, LIGHT_THEME, themeCss, type LodeTheme } from "./theme.js";
-export { TITLE_EVENT, type LodeHost, type SourceHighlight, type ViewRequest } from "./host.js";
+export {
+  ACTION_EVENT,
+  CHANGE_EVENT,
+  CLOSE_EVENT,
+  DEFAULT_KEYS,
+  OPEN_EVENT,
+  SELECT_EVENT,
+  TITLE_EVENT,
+  type CardInfo,
+  type CardRender,
+  type FlowCommand,
+  type FlowEventMap,
+  type LodeHost,
+  type SourceHighlight,
+  type ViewRequest,
+} from "./host.js";
+export { buildFileTree, lodeApi, type FileTreeNode, type LodeApi } from "./api.js";
 export { LodeEntries } from "./entries.js";
 export { LodeFlow } from "./flow.js";
 export type * from "../src/query/types.js";
