@@ -290,7 +290,7 @@ Mockups of the target UX, using real data from the glance index:
 
 ```
 GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC / WebSocket ══▶ views (views/) ─▶ host
-                                       lode serve | lode open                          <lode-focus>      standalone app
+                                       lode serve | lode open                          <lode-flow>       standalone app
                                                                                        <lode-map>        (hosts/app)
 ```
 
@@ -371,7 +371,7 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   (highlight.js, Clance's palette; a host concern, so not in views) and ◇
   annotations,
   lode views in tabs on the right, file tree, symbol search, deep links
-  (`#focus=<id>&file=<path>&line=<n>`). `lode open <project>` builds it
+  (`#flow=<id>` or `#file=<path>`). `lode open <project>` builds it
   with esbuild and opens it.
 
 Not built yet: trace (needs the query layer), impact, inline annotations
@@ -412,7 +412,7 @@ outlines; library code is hidden behind a toggle.
 ```
 lode-core      graph, plugins, derive, cache (this repo today)
 lode-query     query layers: deterministic cut + model-scored (Jev / LLM)
-lode-views     framework-free view components (focus, trace, impact, map)
+lode-views     framework-free view components (flow, map; trace and impact later)
 lode-<host>    thin adapters: VS Code first, Clance later
 ```
 
