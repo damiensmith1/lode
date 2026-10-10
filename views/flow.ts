@@ -620,7 +620,13 @@ export class LodeFlow extends HTMLElement {
       const row = this.rowFor(fromEl, a.line);
       const y0 = fromEl.offsetTop + (row ? row.offsetTop + row.offsetHeight / 2 : 20);
       const header = toEl.querySelector("header")!.offsetHeight;
-      paths.push(wire(route(rect(fromEl), y0, rect(toEl), header), a.kind));
+      const y1 = toEl.offsetTop + header / 2;
+      // Leave from the side facing the target.
+      const rightward = toEl.offsetLeft + toEl.offsetWidth / 2 >= fromEl.offsetLeft + fromEl.offsetWidth / 2;
+      const x0 = rightward ? fromEl.offsetLeft + fromEl.offsetWidth : fromEl.offsetLeft;
+      const x1 = rightward ? toEl.offsetLeft - 3 : toEl.offsetLeft + toEl.offsetWidth + 3;
+      const bend = Math.max(40, Math.abs(x1 - x0) / 2) * (rightward ? 1 : -1);
+      paths.push(wire(`M ${x0} ${y0} C ${x0 + bend} ${y0}, ${x1 - bend} ${y1}, ${x1} ${y1}`, a.kind));
     }
     svg.innerHTML = ARROW_DEFS + paths.join("");
   }
@@ -831,62 +837,6 @@ export class LodeFlow extends HTMLElement {
       )
       .join("")}${b.callers.length > shown.length ? `<button class="caller more" data-action="callers">+${b.callers.length - shown.length} more</button>` : ""}</div>`;
   }
-}
-
-interface Box {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}
-
-function rect(el: HTMLElement): Box {
-  return { left: el.offsetLeft, right: el.offsetLeft + el.offsetWidth, top: el.offsetTop, bottom: el.offsetTop + el.offsetHeight };
-}
-
-interface Anchor {
-  x: number;
-  y: number;
-  dx: number; // the edge's outward direction
-  dy: number;
-}
-
-// An arrow from a line (at height y0) in card `s` to card `t`, between the
-// closest pair of edges that face each other. Anchors are fixed points on a
-// card (the line on its sides, its middle on top and bottom; the target's
-// header on its sides), so moving a card only ever switches edges, it never
-// slides an arrow along one.
-function route(s: Box, y0: number, t: Box, header: number): string {
-  const GAP = 16;
-  const sx = (s.left + s.right) / 2;
-  const tx = (t.left + t.right) / 2;
-  const ty = t.top + header / 2;
-  const outs: Anchor[] = [
-    { x: s.right, y: y0, dx: 1, dy: 0 },
-    { x: s.left, y: y0, dx: -1, dy: 0 },
-    { x: sx, y: s.bottom, dx: 0, dy: 1 },
-    { x: sx, y: s.top, dx: 0, dy: -1 },
-  ];
-  const ins: Anchor[] = [
-    { x: t.left - 3, y: ty, dx: -1, dy: 0 },
-    { x: t.right + 3, y: ty, dx: 1, dy: 0 },
-    { x: tx, y: t.top - 3, dx: 0, dy: -1 },
-    { x: tx, y: t.bottom + 3, dx: 0, dy: 1 },
-  ];
-  // Each end must face the other, with room between them.
-  const faces = (a: Anchor, b: Anchor) => (b.x - a.x) * a.dx + (b.y - a.y) * a.dy >= GAP;
-  let best: [Anchor, Anchor] = [outs[0], ins[0]];
-  let bestLength = Infinity;
-  for (const a of outs) {
-    for (const b of ins) {
-      if (!faces(a, b) || !faces(b, a)) continue;
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      if (length < bestLength) [best, bestLength] = [[a, b], length];
-    }
-  }
-  const [a, b] = best;
-  const bend = Math.max(40, Math.min(160, Math.hypot(b.x - a.x, b.y - a.y) / 2));
-  return `M ${a.x} ${a.y} C ${a.x + a.dx * bend} ${a.y + a.dy * bend}, ${b.x + b.dx * bend} ${b.y + b.dy * bend}, ${b.x} ${b.y}`;
 }
 
 function newCard(key: string, block: CodeBlock): Card {
