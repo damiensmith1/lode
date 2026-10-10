@@ -33,6 +33,7 @@ export {
   type ViewRequest,
 } from "./host.js";
 export { buildFileTree, lodeApi, type FileTreeNode, type LodeApi } from "./api.js";
+export { renderMarkdown } from "./markdown.js";
 export { LodeEntries } from "./entries.js";
 export { LodeChanges } from "./changes.js";
 export { LodeFlow } from "./flow.js";

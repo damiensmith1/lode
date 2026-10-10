@@ -4,6 +4,7 @@ import { serviceStorage, type LodeStorage } from "./storage.js";
 import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, COMMAND_HELP, CONTEXT_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
+import { codeNames, renderMarkdown } from "./markdown.js";
 import type { ContextResult } from "../src/context/index.js";
 
 const MAX_CALLERS = 4;
@@ -39,6 +40,27 @@ interface Card {
   y: number;
 }
 
+// What the explain panel's model picker offers by default (the first is
+// the default); a host passes its own as LodeHost.explainModels.
+const DEFAULT_EXPLAIN_MODELS = [
+  { id: "claude-sonnet-5-5", label: "Sonnet" },
+  { id: "claude-haiku-5-5", label: "Haiku" },
+  { id: "claude-opus-5-5", label: "Opus" },
+];
+
+// The explain panel's conversation: what was asked, and what came back
+// (with what the model read and the cards it added).
+interface ChatEntry {
+  role: "user" | "assistant";
+  text: string;
+  scope?: string; // a question: what it was about ("2 selected cards")
+  notes?: { text: string; added?: boolean; ids?: string[] }[]; // what the model did: searched, read, added
+  links?: Record<string, string>; // names in the answer that are real symbols: name → id
+  model?: string; // which model answered (its label)
+  error?: string;
+  stopped?: boolean;
+}
+
 // An arrow from a line in one card to another card.
 interface Arrow {
   from: string;
@@ -58,6 +80,7 @@ interface SavedLayout {
   v: 1;
   cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; note?: string; x: number; y: number }[];
   banner?: string; // the question this flow answers, and how
+  chat?: ChatEntry[]; // the explain conversation
   arrows: Arrow[];
   selected: string | null;
   camera?: Camera; // x, y: where the canvas origin (0, 0) sits on screen
@@ -66,7 +89,66 @@ interface SavedLayout {
 
 const CSS = `
 :host { display: flex; flex-direction: column; overflow: hidden; }
-.canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: grab; touch-action: none; }
+.stage { flex: 1; min-height: 0; display: flex; }
+.canvas { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; cursor: grab; touch-action: none; }
+.explain { position: relative; flex: 0 0 var(--explain-width, 460px); min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--lode-border); background: var(--lode-surface); }
+.explain[hidden] { display: none; }
+.explain-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 2; }
+.explain-resize:hover, .explain-resize.dragging { background: color-mix(in srgb, var(--lode-local) 25%, transparent); }
+.explain-head { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--lode-border); }
+.explain-title { font-weight: 600; font-size: 13.5px; }
+.explain-about { flex: 1; min-width: 0; color: var(--lode-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.explain-about b { color: var(--lode-local); font-weight: 550; }
+.explain-head .icon { padding: 2px 6px; border-radius: 5px; font-size: 12px; color: var(--lode-muted); }
+.explain-head .icon:hover { background: var(--lode-sunken); color: var(--lode-fg); }
+.explain-log { flex: 1; min-height: 0; overflow: auto; padding: 6px 18px 18px; font-size: 13.5px; line-height: 1.6; }
+.explain-empty { padding: 28px 4px 8px; color: var(--lode-muted); }
+.explain-empty b { display: block; margin-bottom: 4px; color: var(--lode-fg); font-size: 14px; }
+.turn { padding: 14px 0; border-bottom: 1px solid color-mix(in srgb, var(--lode-border) 70%, transparent); }
+.turn:last-child { border-bottom: 0; }
+.q { margin-bottom: 8px; font-weight: 600; font-size: 13.5px; color: var(--lode-fg); }
+.q .scope { font-weight: 400; color: var(--lode-faint); font-size: 12px; }
+.steps { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.step { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 10px; background: var(--lode-sunken); color: var(--lode-muted); font-size: 11.5px; line-height: 18px; }
+.step.added { background: color-mix(in srgb, var(--lode-added) 12%, transparent); color: var(--lode-added); cursor: pointer; }
+.step.thinking { background: none; color: var(--lode-faint); padding-left: 0; }
+.step.thinking i { display: inline-block; width: 4px; height: 4px; margin: 0 1px; border-radius: 50%; background: currentColor; animation: dot 1.2s infinite ease-in-out; }
+.step.thinking i:nth-child(2) { animation-delay: .15s; }
+.step.thinking i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+.a { color: var(--lode-fg); }
+.a p { margin: 0 0 9px; }
+.a ul, .a ol { margin: 0 0 9px; padding-left: 20px; }
+.a li { margin: 2px 0; }
+.a li::marker { color: var(--lode-faint); }
+.a pre { margin: 0 0 9px; padding: 8px 10px; border-radius: 6px; background: var(--lode-sunken); font: 12px/1.5 var(--lode-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.a code { font: 12.5px var(--lode-mono); padding: 0 3px; border-radius: 3px; background: var(--lode-sunken); }
+.a code.sym { padding: 0; background: none; color: var(--lode-local); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: color-mix(in srgb, var(--lode-local) 50%, transparent); text-underline-offset: 3px; }
+.a code.sym:hover { text-decoration-style: solid; }
+.a .error { color: var(--lode-removed); }
+.a .stopped { color: var(--lode-faint); font-style: italic; font-size: 12px; }
+.a-foot { display: flex; gap: 12px; margin-top: 2px; }
+.a-foot button, .a-foot .by { font-size: 11.5px; color: var(--lode-faint); }
+.a-foot button:hover { color: var(--lode-fg); }
+.composer { padding: 10px 14px 12px; border-top: 1px solid var(--lode-border); }
+.suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.suggest:empty { display: none; }
+.suggest button { padding: 3px 10px; border-radius: 12px; border: 1px solid var(--lode-border); background: var(--lode-bg); font-size: 12px; color: var(--lode-fg); }
+.suggest button:hover { border-color: var(--lode-local); color: var(--lode-local); }
+.box { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--lode-border); border-radius: 10px; background: var(--lode-bg); }
+.box:focus-within { border-color: var(--lode-local); box-shadow: 0 0 0 3px color-mix(in srgb, var(--lode-local) 12%, transparent); }
+.explain-input { flex: 1; max-height: 160px; padding: 4px 0; border: 0; background: none; color: var(--lode-fg); font: 13.5px/1.45 var(--lode-font); resize: none; outline: none; }
+.model { flex: none; align-self: center; max-width: 92px; padding: 2px 4px; border: 0; border-radius: 5px; background: none; color: var(--lode-muted); font-size: 11.5px; cursor: pointer; }
+.model:hover, .model:focus { background: var(--lode-sunken); color: var(--lode-fg); outline: none; }
+.model[hidden] { display: none; }
+.send { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--lode-local); color: #fff; font-size: 14px; font-weight: 700; text-align: center; }
+.send:disabled { opacity: .35; cursor: default; }
+.send.stop { background: var(--lode-fg); font-size: 10px; }
+.composer-hint { margin-top: 6px; font-size: 11px; color: var(--lode-faint); }
+.card.hl { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lode-local) 45%, transparent), 0 4px 14px color-mix(in srgb, var(--lode-shadow) 8%, transparent); }
+.card.fresh { animation: fresh 2.4s ease-out; }
+@keyframes fresh { 0% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--lode-added) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.banner .explain-banner { margin-left: 12px; padding: 1px 8px; border-radius: 4px; font: 11.5px var(--lode-font); color: var(--lode-local); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lode-local) 45%, transparent); }
 .canvas.panning { cursor: grabbing; }
 .canvas.panning, .canvas.moving { user-select: none; -webkit-user-select: none; }
 .card header { user-select: none; -webkit-user-select: none; }
@@ -215,13 +297,68 @@ export class LodeFlow extends HTMLElement {
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
         <button class="crumb" data-action="fit" title="Show every card">fit</button>
         <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
+        <button class="crumb" data-action="explain" title="Explain these cards, ask follow-ups, build the flow out (i)">explain</button>
         <button class="crumb" data-action="copy-context" title="Copy these cards (or the selected ones) as context for an LLM">copy context</button>
         <button class="crumb diff-toggle" data-action="diff" title="Show what changed since the last commit (git)">changes</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
       <div class="banner" part="banner" hidden></div>
-      <div class="canvas" part="canvas"><div class="board" part="board"></div></div>`;
+      <div class="stage">
+        <div class="canvas" part="canvas"><div class="board" part="board"></div></div>
+        <aside class="explain" part="explain" hidden>
+          <div class="explain-resize" title="Drag to resize"></div>
+          <div class="explain-head"><span class="explain-title">Explain</span><span class="explain-about"></span><button class="icon" data-action="explain-new" title="New conversation">new</button><button class="icon" data-action="explain" title="Close (i)">×</button></div>
+          <div class="explain-log" part="explain-log"></div>
+          <div class="composer" part="explain-composer">
+            <div class="suggest"></div>
+            <div class="box"><textarea class="explain-input" part="explain-input" rows="1" placeholder="Ask about these cards, or to show more…"></textarea><select class="model" part="explain-model" title="Which model answers"></select><button class="send" data-action="explain-send" title="Send (Enter)">↑</button></div>
+            <div class="composer-hint">Enter to send · Shift+Enter for a new line · select cards to ask about just those</div>
+          </div>
+        </aside>
+      </div>`;
     this.root.addEventListener("click", (e) => void this.onClick(e));
+    // The explain input: Enter sends, Shift+Enter is a new line; it grows
+    // with what's typed. Names in answers light up their cards on hover.
+    const input = this.root.querySelector<HTMLTextAreaElement>(".explain-input")!;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        this.sendFromInput();
+      } else if (e.key === "Escape") input.blur();
+    });
+    input.addEventListener("input", () => this.fitInput());
+    this.setupModelPicker();
+    const log = this.root.querySelector<HTMLElement>(".explain-log")!;
+    log.addEventListener("mouseover", (e) => this.highlightCard((e.target as Element).closest<HTMLElement>("code.sym")?.dataset.id ?? null));
+    log.addEventListener("mouseleave", () => this.highlightCard(null));
+    // Drag the panel's left edge to resize it (remembered in this browser).
+    const panel = this.root.querySelector<HTMLElement>(".explain")!;
+    try {
+      const w = Number(localStorage.getItem("lode:explain-width"));
+      if (w >= 320) panel.style.setProperty("--explain-width", `${w}px`);
+    } catch {
+      // No storage: the default width.
+    }
+    const grip = panel.querySelector<HTMLElement>(".explain-resize")!;
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      grip.classList.add("dragging");
+      const startX = e.clientX;
+      const startW = panel.offsetWidth;
+      const move = (m: PointerEvent) => panel.style.setProperty("--explain-width", `${Math.max(320, Math.min(900, startW + startX - m.clientX))}px`);
+      const up = () => {
+        grip.classList.remove("dragging");
+        grip.removeEventListener("pointermove", move);
+        try {
+          localStorage.setItem("lode:explain-width", String(panel.offsetWidth));
+        } catch {
+          // Not remembered.
+        }
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up, { once: true });
+    });
     // A just-saved card refreshes once the caret leaves its code.
     this.root.addEventListener("focusout", (e) => {
       const code = (e.target as Element).closest?.<HTMLElement>(".code");
@@ -306,6 +443,7 @@ export class LodeFlow extends HTMLElement {
     else if (command === "collapseFold") this.foldAtCursor(false);
     else if (command === "edit") this.editAtCursor();
     else if (command === "help") this.toggleHelp();
+    else if (command === "explain") this.toggleExplain();
     // "search" is the host's (its search box): lode-action tells it.
     return true;
   }
@@ -691,6 +829,294 @@ export class LodeFlow extends HTMLElement {
     }
   }
 
+  // --- explaining -------------------------------------------------------------------
+  //
+  // A conversation beside the canvas: explain the flow or the selection,
+  // ask follow-ups, ask to show more (the model adds cards). The server
+  // does the work (src/explain); answers stream in as "explain" events.
+
+  private chat: ChatEntry[] = [];
+  private explaining = false;
+  private explainStream = "";
+  private freshCards = new Map<string, number>(); // added by an answer: when (they glow briefly)
+  private shown = new Map<ChatEntry, number>(); // answers being written out: how much shows so far
+
+  private explainPanel() {
+    return this.root.querySelector<HTMLElement>(".explain")!;
+  }
+
+  // Open (focusing the input) or close the panel.
+  toggleExplain(open?: boolean) {
+    const panel = this.explainPanel();
+    const show = open ?? panel.hidden;
+    panel.hidden = !show;
+    if (show) {
+      this.renderChat();
+      panel.querySelector<HTMLTextAreaElement>(".explain-input")!.focus();
+    }
+  }
+
+  private newChat() {
+    if (this.explaining) this.stopExplain();
+    this.chat = [];
+    this.renderChat();
+    this.changed();
+  }
+
+  // What a question will be about: the selection (two or more cards, or
+  // asked for), else every card.
+  private explainScope(selection: boolean): { keys: string[]; picked: string[]; label: string } {
+    const all = this.readingOrder();
+    const picked = this.group.size > 1 || (selection && this.group.size) ? [...this.group] : [];
+    const n = picked.length || all.length;
+    return { keys: picked.length ? picked : all, picked, label: picked.length ? `${n} selected card${n === 1 ? "" : "s"}` : `all ${n} card${n === 1 ? "" : "s"}` };
+  }
+
+  private sendFromInput() {
+    const input = this.root.querySelector<HTMLTextAreaElement>(".explain-input")!;
+    const text = input.value.trim();
+    if (!text || this.explaining) return;
+    input.value = "";
+    this.fitInput();
+    void this.sendExplain(text);
+  }
+
+  private fitInput() {
+    const input = this.root.querySelector<HTMLTextAreaElement>(".explain-input")!;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(160, input.scrollHeight)}px`;
+  }
+
+  // Ask `text` about the canvas (or the selection; with `selection`, even
+  // a single selected card). Streams in; cards the model adds open as it
+  // adds them.
+  async sendExplain(text: string, selection = false) {
+    if (!this.client || this.explaining || !text.trim()) return;
+    this.toggleExplain(true);
+    const { keys, picked, label } = this.explainScope(selection);
+    const card = (k: string) => {
+      const c = this.cardMap.get(k)!;
+      return { id: k, ...(c.note && { note: c.note }), ...(c.fragment && { range: c.range }) };
+    };
+    const inScope = new Set(keys);
+    const request = {
+      messages: [...this.chat.filter((m) => m.text && !m.error).map((m) => ({ role: m.role, text: m.text })), { role: "user" as const, text }],
+      canvas: { cards: keys.map(card), arrows: this.arrows.filter((a) => inScope.has(a.from) && inScope.has(a.to)) },
+      ...(this.diffBase !== null && { changes: this.diffBase }),
+      ...(picked.length && { focus: picked }),
+      ...(this.banner.startsWith("/ ") && { question: this.banner.slice(2).split(" · ")[0] }),
+      ...(this.explainModel() && { model: this.explainModel() }),
+    };
+    this.chat.push({ role: "user", text, ...(this.cardMap.size && { scope: label }) });
+    const label2 = this.explainModels().find((m) => m.id === this.explainModel())?.label;
+    const answer: ChatEntry = { role: "assistant", text: "", notes: [], ...(label2 && { model: label2 }) };
+    this.chat.push(answer);
+    this.explaining = true;
+    const stream = (this.explainStream = Math.random().toString(36).slice(2));
+    this.renderChat(true);
+    // Write the answer out as it arrives: real streaming passes straight
+    // through; a block that arrives all at once (after a tool call, some
+    // models send the whole answer together) types out over a second or so.
+    this.shown.set(answer, 0);
+    let frame = 0;
+    let rate = 4; // characters a frame; set so what's waiting shows in about 0.8s
+    const redraw = () => {
+      if (frame) return;
+      const tick = () => {
+        const have = answer.text.length;
+        const at = this.shown.get(answer) ?? have;
+        rate = Math.max(rate, Math.ceil((have - at) / 48));
+        if (at < have) this.shown.set(answer, Math.min(have, at + rate));
+        this.renderChat();
+        frame = (this.shown.get(answer) ?? have) < answer.text.length ? requestAnimationFrame(tick) : 0;
+      };
+      frame = requestAnimationFrame(tick);
+    };
+    const revealed = () =>
+      new Promise<void>((done) => {
+        const wait = () => ((this.shown.get(answer) ?? Infinity) >= answer.text.length || answer.stopped ? done() : requestAnimationFrame(wait));
+        wait();
+      });
+    const stop = this.client.onEvent?.((name, payload) => {
+      const p = payload as { stream: string; event: { type: string; text?: string; summary?: string; ids?: string[] } };
+      if (name !== "explain" || p.stream !== stream || answer.stopped) return;
+      const e = p.event;
+      if (e.type === "text") answer.text += e.text ?? "";
+      else if (e.type === "tool") answer.notes!.push({ text: (e.summary ?? "").replace(/`/g, "") });
+      else if (e.type === "add" && e.ids?.length) {
+        answer.notes!.push({ text: `added ${e.ids.length === 1 ? prettyName(e.ids[0]) : `${e.ids.length} cards`}`, added: true, ids: e.ids });
+        for (const id of e.ids) this.freshCards.set(id, Date.now());
+        void this.showAll(e.ids);
+      }
+      redraw();
+    });
+    try {
+      const result = await this.client.call<{ text: string; added: string[] }>("explain", { request, stream });
+      if (!answer.stopped) answer.text = result.text || answer.text;
+      redraw();
+      await Promise.all([this.linkAnswer(answer), revealed()]);
+      // Without streaming, the cards arrive with the answer.
+      if (!stop && result.added.length) void this.showAll(result.added);
+    } catch (error) {
+      if (!answer.stopped) answer.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      stop?.();
+      this.shown.delete(answer);
+      this.explaining = false;
+      this.renderChat();
+      this.changed();
+    }
+  }
+
+  // Which names in an answer are real symbols (asked once it's written);
+  // only those become links.
+  private async linkAnswer(answer: ChatEntry) {
+    const names = codeNames(answer.text);
+    if (!names.length || !this.client) return;
+    const prefer = [...new Set([...this.cardMap.values()].map((c) => c.block.node.file).filter(Boolean))];
+    answer.links = await this.client.call<Record<string, string>>("resolve", { names, prefer }).catch(() => ({}));
+  }
+
+  // While an answer streams (or for older ones without links): names of
+  // cards on the canvas.
+  private linkFor(entry: ChatEntry) {
+    return (name: string) => {
+      if (entry.links) return entry.links[name];
+      const bare = name.replace(/\(\)$/, "").replace(/^this\./, "");
+      return [...this.cardMap.values()].find((c) => c.block.node.name === bare || c.key.endsWith(`#${bare}`))?.key;
+    };
+  }
+
+  // The models the picker offers, and the one chosen (remembered per browser).
+  private explainModels() {
+    return this.host?.explainModels ?? DEFAULT_EXPLAIN_MODELS;
+  }
+
+  private explainModel(): string | undefined {
+    const models = this.explainModels();
+    if (!models.length) return undefined;
+    const picked = this.root.querySelector<HTMLSelectElement>(".model")?.value;
+    return models.some((m) => m.id === picked) ? picked : models[0].id;
+  }
+
+  private setupModelPicker() {
+    const select = this.root.querySelector<HTMLSelectElement>(".model")!;
+    const models = this.explainModels();
+    select.hidden = models.length < 2;
+    select.innerHTML = models.map((m) => `<option value="${escape(m.id)}">${escape(m.label)}</option>`).join("");
+    try {
+      const saved = localStorage.getItem("lode:explain-model");
+      if (saved && models.some((m) => m.id === saved)) select.value = saved;
+    } catch {
+      // No storage: the first model.
+    }
+    select.addEventListener("change", () => {
+      try {
+        localStorage.setItem("lode:explain-model", select.value);
+      } catch {
+        // Not remembered.
+      }
+    });
+  }
+
+  // Stop the answer being written: the server stops asking the model; what
+  // came so far stays.
+  private stopExplain() {
+    const answer = this.chat[this.chat.length - 1];
+    if (!this.explaining || answer?.role !== "assistant") return;
+    answer.stopped = true;
+    this.shown.delete(answer);
+    void this.client?.call("explainCancel", { stream: this.explainStream }).catch(() => {});
+    this.explaining = false;
+    this.renderChat();
+  }
+
+  // The header and composer follow the selection.
+  private renderExplainChrome() {
+    const panel = this.explainPanel();
+    if (panel.hidden) return;
+    const { label, picked } = this.explainScope(false);
+    panel.querySelector(".explain-about")!.innerHTML = this.cardMap.size ? `about <b>${escape(label)}</b>` : "nothing on the canvas yet";
+    const send = panel.querySelector<HTMLButtonElement>(".send")!;
+    send.classList.toggle("stop", this.explaining);
+    send.textContent = this.explaining ? "■" : "↑";
+    send.title = this.explaining ? "Stop" : "Send (Enter)";
+    // Suggestions for where the conversation is.
+    const last = this.chat[this.chat.length - 1];
+    const one = this.group.size === 1 && this.selected ? this.cardMap.get(this.selected)?.block.node.name : undefined;
+    const ideas: { text: string; label: string; selection?: boolean }[] = [];
+    if (!this.explaining && this.cardMap.size) {
+      if (picked.length) ideas.push({ text: "Explain these cards and how they connect.", label: `Explain the ${picked.length} selected`, selection: true });
+      else if (one) ideas.push({ text: `Explain \`${one}\`.`, label: `Explain ${one}`, selection: true });
+      if (!this.chat.length) {
+        ideas.push({ text: "Explain this flow: what it does and how the pieces fit together.", label: "Explain this flow" });
+        ideas.push({ text: "What could break here, and why?", label: "What could break?" });
+        ideas.push({ text: "Show more of this flow: add the cards that matter next.", label: "Show more of the flow" });
+      } else if (last?.role === "assistant") {
+        ideas.push({ text: "Go deeper on that.", label: "Go deeper" });
+        ideas.push({ text: "Show more of this flow: add the cards that matter next.", label: "Show more" });
+        ideas.push({ text: "What could break here, and why?", label: "What could break?" });
+      }
+    }
+    panel.querySelector(".suggest")!.innerHTML = ideas
+      .slice(0, 4)
+      .map((i) => `<button data-action="explain-suggest" data-text="${escape(i.text)}"${i.selection ? ' data-selection="1"' : ""}>${escape(i.label)}</button>`)
+      .join("");
+  }
+
+  private renderChat(scroll = false) {
+    const panel = this.explainPanel();
+    const log = panel.querySelector<HTMLElement>(".explain-log")!;
+    const atBottom = scroll || log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    this.renderExplainChrome();
+    if (!this.chat.length) {
+      log.innerHTML = `<div class="explain-empty"><b>Ask about what's on the canvas</b>What it does, why it's built this way, what could break. Ask to show more and the cards appear. Select cards first to ask about just those.</div>`;
+      return;
+    }
+    const turns: string[] = [];
+    for (let i = 0; i < this.chat.length; i++) {
+      const m = this.chat[i];
+      if (m.role === "user") {
+        turns.push(`<div class="turn"><div class="q">${escape(m.text)}${m.scope ? ` <span class="scope">· ${escape(m.scope)}</span>` : ""}</div>`);
+        continue;
+      }
+      const live = this.explaining && i === this.chat.length - 1;
+      const text = this.shown.has(m) ? m.text.slice(0, this.shown.get(m)) : m.text;
+      const added = (m.notes ?? []).flatMap((n) => n.ids ?? []);
+      const steps = [
+        ...(m.notes ?? []).map((n) =>
+          n.added
+            ? `<span class="step added" data-action="explain-focus" data-ids="${escape((n.ids ?? []).join(" "))}" title="${escape((n.ids ?? []).map(prettyName).join(", "))}">＋ ${escape(n.text)}</span>`
+            : `<span class="step">${escape(n.text)}</span>`,
+        ),
+        ...(live && !text ? ['<span class="step thinking">thinking <i></i><i></i><i></i></span>'] : []),
+      ];
+      const foot = !live && text ? `<div class="a-foot">${m.model ? `<span class="by">${escape(m.model)}</span>` : ""}<button data-action="explain-copy" data-i="${i}">copy</button>${added.length ? `<button data-action="explain-focus" data-ids="${escape(added.join(" "))}">show the ${added.length} added</button>` : ""}</div>` : "";
+      turns.push(
+        `<div class="a">${steps.length ? `<div class="steps">${steps.join("")}</div>` : ""}${renderMarkdown(text, this.linkFor(m))}${m.stopped ? '<p class="stopped">stopped</p>' : ""}${m.error ? `<p class="error">${escape(m.error)}</p>` : ""}${foot}</div></div>`,
+      );
+    }
+    log.innerHTML = turns.join("");
+    if (atBottom || this.explaining) log.scrollTop = log.scrollHeight;
+  }
+
+  private nameOf(id: string) {
+    return this.cardMap.get(id)?.block.node.name ?? prettyName(id);
+  }
+
+  // A linked name in an answer: go to its card, or open it.
+  private async openSymbolId(id: string) {
+    if (this.cardMap.has(id)) return this.goTo(id);
+    await this.show(id);
+  }
+
+  // Hovering a linked name in an answer lights up its card (if it's on the canvas).
+  private highlightCard(id: string | null) {
+    this.root.querySelectorAll(".card.hl").forEach((c) => c.classList.remove("hl"));
+    if (id) this.cardEl(id)?.classList.add("hl");
+  }
+
+
   // --- asking ------------------------------------------------------------------
 
   private banner = "";
@@ -704,6 +1130,14 @@ export class LodeFlow extends HTMLElement {
     if (!el) return;
     el.hidden = !text;
     el.textContent = text;
+    // A flow built for a question can be explained in a click.
+    if (text.startsWith("/ ") && !text.endsWith("asking…") && this.cardMap.size) {
+      const b = document.createElement("button");
+      b.className = "explain-banner";
+      b.dataset.action = "explain-flow";
+      b.textContent = "explain this flow ▸";
+      el.append(b);
+    }
   }
 
   // Ask a question and lay out the flow that answers it here (the server
@@ -946,6 +1380,15 @@ export class LodeFlow extends HTMLElement {
     if (action === "zoom-reset") return this.run("zoomReset");
     if (action === "diff") return void this.setDiff(this.diffBase === null ? "HEAD" : null);
     if (action === "copy-context") return void this.copyContext();
+    if (action === "explain") return this.toggleExplain();
+    if (action === "explain-new") return this.newChat();
+    if (action === "explain-flow") return void this.sendExplain("Explain this flow: what it does and how the pieces fit together.", false);
+    if (action === "explain-selection") return void this.sendExplain(`Explain ${this.group.size > 1 ? "these cards" : "this card"}.`, true);
+    if (action === "explain-suggest" && el.dataset.text) return void this.sendExplain(el.dataset.text, el.dataset.selection === "1");
+    if (action === "explain-send") return this.explaining ? void this.stopExplain() : this.sendFromInput();
+    if (action === "explain-copy" && el.dataset.i) return void navigator.clipboard?.writeText(this.chat[Number(el.dataset.i)]?.text ?? "");
+    if (action === "explain-focus" && el.dataset.ids) return this.frame(el.dataset.ids.split(" ").filter((k) => this.cardMap.has(k)));
+    if (action === "explain-open" && el.dataset.id) return void this.openSymbolId(el.dataset.id);
     if (action === "clear") return this.run("clear");
     if (!here) return;
     if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);
@@ -1350,6 +1793,7 @@ export class LodeFlow extends HTMLElement {
 
   private showSelection() {
     this.announceSelection();
+    if (this.root.querySelector(".explain")) this.renderExplainChrome();
     this.root.querySelector<HTMLButtonElement>('[data-action="fit"]')!.disabled = !this.cardMap.size;
     this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
     this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", this.group.has(c.dataset.key!)));
@@ -1485,6 +1929,7 @@ export class LodeFlow extends HTMLElement {
       selected: this.selected,
       diff: this.diffBase,
       ...(this.banner && { banner: this.banner }),
+      ...(this.chat.length && { chat: this.chat }),
       // Saved in canvas coordinates, independent of the board's padding origin.
       camera: {
         x: Math.round(this.camera.x + this.offset.x * this.camera.k),
@@ -1507,7 +1952,7 @@ export class LodeFlow extends HTMLElement {
       // Unreadable: start empty.
     }
     if (saved?.diff !== undefined && this.diffBase === null) this.diffBase = saved.diff;
-    if (saved?.banner && !this.banner) this.setBanner(saved.banner);
+    if (saved?.chat?.length && !this.chat.length) this.chat = saved.chat;
     await this.loadDiff();
     if (!saved || saved.v !== 1) return;
     const ids = [...new Set(saved.cards.map((c) => c.node))];
@@ -1532,6 +1977,8 @@ export class LodeFlow extends HTMLElement {
     this.selected = saved.selected && this.cardMap.has(saved.selected) ? saved.selected : null;
     this.group = new Set(this.selected ? [this.selected] : []);
     this.render();
+    if (saved.banner && !this.banner) this.setBanner(saved.banner);
+    if (this.chat.length) this.renderChat();
     if (saved.camera) {
       const { x, y, k } = saved.camera;
       this.camera = { k, x: x - this.offset.x * k, y: y - this.offset.y * k };
@@ -2065,7 +2512,8 @@ export class LodeFlow extends HTMLElement {
     const changedFolds = this.changedFolds(c).filter((f) => !this.cardMap.has(f.node ? f.node.id : `${n.id}@${f.start}-${f.end}`));
     const hostHeader = info && render?.header?.(info);
     const hostFooter = info && render?.footer?.(info);
-    return `<section part="card${this.group.has(c.key) ? " card-selected" : ""}" class="card${this.group.has(c.key) ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
+    const fresh = Date.now() - (this.freshCards.get(c.key) ?? 0) < 2500;
+    return `<section part="card${this.group.has(c.key) ? " card-selected" : ""}" class="card${this.group.has(c.key) ? " selected" : ""}${fresh ? " fresh" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
       <header part="card-header">
         <button class="close" part="card-close" data-action="close" aria-label="Close this card" title="Close this card">×</button>
         ${header}
@@ -2171,4 +2619,13 @@ function keyMatches(spec: string, e: KeyboardEvent): boolean {
   const punctuation = key.length === 1 && !/[a-z0-9]/i.test(key);
   if ((!punctuation && e.shiftKey !== want.has("shift")) || e.altKey !== want.has("alt")) return false;
   return key === "Space" ? e.key === " " : e.key.toLowerCase() === key.toLowerCase();
+}
+
+
+// A symbol id as a person reads it: "src/a.ts#Cls.method" → "Cls.method";
+// a callback "start.addEventListener:click" → "addEventListener:click in start".
+function prettyName(id: string): string {
+  const name = id.replace(/@\d+-\d+$/, "").replace(/^.*#/, "");
+  const dot = name.indexOf(".");
+  return dot > 0 && /[:@]/.test(name) ? `${name.slice(dot + 1)} in ${name.slice(0, dot)}` : name;
 }

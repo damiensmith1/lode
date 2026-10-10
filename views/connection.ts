@@ -6,6 +6,9 @@ export interface LodeConnection {
   call<T>(method: string, params?: Record<string, unknown>): Promise<T>;
   // Called after the project re-indexes; returns an unsubscribe function.
   onChanged(listener: (files: string[]) => void): () => void;
+  // Events the server pushes while a call runs (an explanation streaming
+  // in). Optional: without it, answers arrive whole.
+  onEvent?(listener: (name: string, payload: unknown) => void): () => void;
 }
 
 // The message protocol both ends speak (see serveMessages in src/service):
@@ -22,6 +25,7 @@ export interface LodeMessagePort {
 export class MessageConnection implements LodeConnection {
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly changeListeners = new Set<(files: string[]) => void>();
+  private readonly eventListeners = new Set<(name: string, payload: unknown) => void>();
   private nextId = 1;
   readonly close: () => void;
 
@@ -31,6 +35,11 @@ export class MessageConnection implements LodeConnection {
       if (!message || typeof message !== "object" || message.lode !== 1) return;
       if (message.method === "changed") {
         for (const listener of this.changeListeners) listener(message.params?.files ?? []);
+        return;
+      }
+      if (message.method === "event") {
+        const p = message.params as unknown as { name: string; payload: unknown };
+        for (const listener of this.eventListeners) listener(p.name, p.payload);
         return;
       }
       if (message.method !== undefined) return; // a request (ours, echoed on a shared channel)
@@ -53,5 +62,10 @@ export class MessageConnection implements LodeConnection {
   onChanged(listener: (files: string[]) => void): () => void {
     this.changeListeners.add(listener);
     return () => this.changeListeners.delete(listener);
+  }
+
+  onEvent(listener: (name: string, payload: unknown) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
   }
 }

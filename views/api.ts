@@ -18,6 +18,9 @@ export function lodeApi(connection: LodeConnection) {
     entries: () => connection.call<EntriesResult>("entries"),
     // Context for an LLM: a slice of the code, formatted (see src/context).
     context: (request: Record<string, unknown>) => connection.call<{ title: string; markdown: string; tokens: number; dropped: number }>("context", request),
+    // Explain cards and answer follow-ups (see src/explain); pass `stream`
+    // and listen to connection.onEvent for the answer as it's written.
+    explain: (request: Record<string, unknown>, stream?: string) => connection.call<{ text: string; added: string[]; tools: number; ms: number }>("explain", { request, ...(stream && { stream }) }),
     // A flow built for a question ("how do we create tabs?"); needs a judge
     // (Jev) on the server.
     ask: (question: string) => connection.call<FlowPlan>("ask", { question }),

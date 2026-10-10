@@ -6,6 +6,8 @@ import { Queries } from "../query/index.js";
 import { askFlow } from "../ask/index.js";
 import { jevJudge, type Judge } from "../ask/judge.js";
 import { contextFor, type ContextRequest } from "../context/index.js";
+import { explain, type ExplainRequest } from "../explain/index.js";
+import { anthropicModel, type ChatModel } from "../explain/model.js";
 
 // lode's methods with no transport attached: what views call, as plain async
 // functions. The WebSocket server is one way to reach them; a host that runs
@@ -21,6 +23,12 @@ export interface ServiceOptions {
   // What judges "/" questions (see src/ask). Default: Jev, when
   // TYPESAFE_API_KEY is set (read when a question comes in).
   judge?: Judge;
+  // What explains flows (see src/explain). Default: Claude over the
+  // Anthropic API, when ANTHROPIC_API_KEY is set (model: LODE_EXPLAIN_MODEL,
+  // default claude-sonnet-5-5).
+  model?: ChatModel;
+  // Which models a request may ask for (ExplainRequest.model); unset: any.
+  models?: string[];
   // Where views' saved state goes when they use the service for it (the
   // default storage). Defaults to the store's cache directory.
   stateDir?: string;
@@ -38,6 +46,9 @@ export interface LodeService {
   // update as files change. Returns a function that stops watching.
   watch(options?: WatchOptions): () => void;
   onChanged(listener: (files: string[]) => void): () => void;
+  // Events pushed while a method runs (an explanation streaming in), for
+  // transports to forward: { name, payload }.
+  onEvent(listener: (name: string, payload: unknown) => void): () => void;
 }
 
 // A change to a file, as cards make them: lines start..end (1-based,
@@ -64,6 +75,9 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
   const queries = new Queries(() => store.graph, store.root);
   const stateDir = options.stateDir ?? store.cacheDir;
   const listeners = new Set<(files: string[]) => void>();
+  const eventListeners = new Set<(name: string, payload: unknown) => void>();
+  const running = new Map<string, AbortController>(); // explanations, by stream id
+  const emit = (name: string, payload: unknown) => eventListeners.forEach((l) => l(name, payload));
 
   // Saved view state (a flow's cards, camera, …), one JSON file per key.
   // "layout-" is kept so state saved before keys existed still loads.
@@ -156,6 +170,51 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
       if (request.rank === "judge" && !judgeOf()) throw new Error("rank \"judge\" needs a model: set TYPESAFE_API_KEY (Jev)");
       return contextFor(request, queries, judgeOf() ?? undefined);
     },
+    // Explain cards, answer follow-ups, add cards; streamed as "explain"
+    // events tagged with the caller's `stream` id.
+    explain: (p) => {
+      const model = options.model ?? (process.env.ANTHROPIC_API_KEY ? anthropicModel({ apiKey: process.env.ANTHROPIC_API_KEY, ...(process.env.LODE_EXPLAIN_MODEL && { model: process.env.LODE_EXPLAIN_MODEL }) }) : null);
+      if (!model) throw new Error("Explaining needs a model: set ANTHROPIC_API_KEY in the environment or lode's .env");
+      const request = p.request as ExplainRequest;
+      if (!Array.isArray(request?.messages) || !request.messages.length) throw new Error("explain: no messages");
+      if (request.model !== undefined && (typeof request.model !== "string" || !/^[\w.:/-]{1,100}$/.test(request.model))) throw new Error("explain: bad model name");
+      if (request.model && options.models && !options.models.includes(request.model)) throw new Error(`explain: model ${request.model} isn't allowed here (${options.models.join(", ")})`);
+      const stream = String(p.stream ?? "");
+      const abort = new AbortController();
+      if (stream) running.set(stream, abort);
+      return explain(request, queries, model, (event) => emit("explain", { stream, event }), abort.signal).finally(() => running.delete(stream));
+    },
+    // Which names (as written in prose: "addTab", "Queries.changes",
+    // "this.save()") are real symbols: { name: id }. A name several symbols
+    // share counts only in a `prefer`red file; anything else is left out.
+    resolve: (p) => {
+      const names = Array.isArray(p.names) ? p.names.map(String).slice(0, 200) : [];
+      const prefer = new Set(Array.isArray(p.prefer) ? p.prefer.map(String) : []);
+      const g = store.graph;
+      const out: Record<string, string> = {};
+      for (const raw of names) {
+        const name = raw.replace(/\(\)$/, "").replace(/^this\./, "");
+        if (!/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(name) && !name.includes("#")) continue;
+        const direct = g.node(name);
+        if (direct && !direct.external) {
+          out[raw] = direct.id;
+          continue;
+        }
+        const matches = [...g.allNodes()].filter((n) => !n.external && n.loc && n.kind !== "block" && n.id !== n.loc.file && (n.id.endsWith(`#${name}`) || (!name.includes(".") && n.name === name)));
+        // A plain word ("block", "changes") is usually prose: only a name
+        // one symbol in the whole project has.
+        if (/^[a-z]+$/.test(name) && matches.length !== 1) continue;
+        const preferred = matches.filter((n) => prefer.has(n.loc!.file));
+        const pick = preferred.length === 1 ? preferred[0] : matches.length === 1 ? matches[0] : preferred.find((n) => n.id.endsWith(`#${name}`)) ?? matches.find((n) => n.id.endsWith(`#${name}`) && matches.length <= 3);
+        if (pick) out[raw] = pick.id;
+      }
+      return out;
+    },
+    // Stop an explanation that's still running (its `stream` id).
+    explainCancel: (p) => {
+      running.get(String(p.stream ?? ""))?.abort();
+      return true;
+    },
     // Build a flow for a question ("how do we create tabs?").
     ask: (p) => {
       const question = String(p.question ?? "").trim().slice(0, 500);
@@ -215,6 +274,10 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    onEvent: (listener) => {
+      eventListeners.add(listener);
+      return () => eventListeners.delete(listener);
+    },
   };
   return service;
 }
@@ -232,8 +295,10 @@ export function serveMessages(
     void service.handle(message.method, message.params).then((reply) => port.send({ lode: 1, id: message.id, ...reply }));
   });
   const stopChanges = service.onChanged((files) => port.send({ lode: 1, method: "changed", params: { files } }));
+  const stopEvents = service.onEvent((name, payload) => port.send({ lode: 1, method: "event", params: { name, payload } }));
   return () => {
     stopListening();
     stopChanges();
+    stopEvents();
   };
 }

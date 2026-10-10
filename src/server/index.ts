@@ -96,6 +96,11 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     const message = JSON.stringify({ method: "changed", params: { files } });
     for (const s of sockets) s.send(message);
   });
+  // Events while a method runs (an explanation streaming in).
+  const unsubscribeEvents = service.onEvent((name, payload) => {
+    const message = JSON.stringify({ method: "event", params: { name, payload } });
+    for (const s of sockets) s.send(message);
+  });
   const stopWatching = options.watch ? service.watch() : undefined;
 
   await new Promise<void>((resolve) => http.listen(options.port ?? 0, "127.0.0.1", resolve));
@@ -108,6 +113,7 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     close: async () => {
       stopWatching?.();
       unsubscribe();
+      unsubscribeEvents();
       for (const s of sockets) s.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve) => http.close(() => resolve()));

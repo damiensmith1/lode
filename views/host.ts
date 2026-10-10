@@ -33,6 +33,10 @@ export interface LodeHost {
   // and what they became (`lines`); refuse with ok:false if they don't
   // match the file any more.
   saveEdits?(request: { file: string; edits: LineEdit[] }): Promise<EditResult>;
+  // Optional: the models the explain panel offers ({ id, label }; the first
+  // is the default). Default: Claude Sonnet, Haiku and Opus. [] hides the
+  // picker (the server's default model answers).
+  explainModels?: { id: string; label: string }[];
   // Optional: extra markup in cards (see CardRender).
   render?: CardRender;
   // Optional: where views keep their state, per view (see ViewRequest's
@@ -69,7 +73,7 @@ export type FlowCommand =
   // moving around: a line cursor in the selected card
   | "lineDown" | "lineUp" | "follow" | "back" | "nextChip" | "nextCard" | "prevCard" | "nextChange" | "prevChange"
   // folds, editing, the rest
-  | "openFold" | "collapseFold" | "edit" | "search" | "help";
+  | "openFold" | "collapseFold" | "edit" | "search" | "help" | "explain";
 
 // Keys are "Delete", "Mod+z" (Mod is ⌘ or Ctrl), "Shift+N", "Escape",
 // "Space", "?"… Letters match their case through Shift; other single
@@ -97,6 +101,7 @@ export const DEFAULT_KEYS: Record<FlowCommand, string[]> = {
   edit: ["Enter"],
   search: ["/"],
   help: ["?"],
+  explain: ["i"],
 };
 
 // What each command does, for help screens (the flow's own, on "?").
@@ -123,6 +128,7 @@ export const COMMAND_HELP: Record<FlowCommand, string> = {
   clear: "clear the canvas",
   search: "search for a symbol",
   help: "show or hide these keys",
+  explain: "explain: ask about these cards, or to show more (opens the panel)",
 };
 
 // A card as hosts see it, in events, render hooks and flow.cards().

@@ -729,6 +729,48 @@ the cancelable `lode-context` event); and `skills/lode/SKILL.md` for
 agents. Clance can run `lode mcp` for its agent or call `contextFor`
 in-process.
 
+## Explaining
+
+The explain panel is a conversation about the canvas, run on the server
+(`src/explain`): the context is `contextFor` over the cards (or the
+selection, which also becomes what "these" means), plus the question the
+flow was built for and the diff when shown. The model (`ChatModel`;
+Claude over the Anthropic API by default, streaming SSE, the context
+block marked for prompt caching) gets three tools: `search`, `read` (a
+`contextFor` around one symbol) and `add_to_flow`, so it builds the flow
+out only with real graph nodes, at most 10 per message, which the view
+opens as they're added. Names resolve to a symbol in a file already on
+the canvas first. Up to 6 model turns per message. The system prompt asks
+for grounded, concise answers with names in backticks (rendered as links
+to their cards) and to read folded code before describing it. Answers
+stream as service events, forwarded by both transports; conversations
+are saved with the flow's state.
+
+The panel: a header saying what the next question is about (all cards,
+or the selection); each exchange as the question (with its scope), the
+model's steps as compact chips (searched, read, "+ added N cards", which
+frames them), then the answer, kept short (a lead sentence or two, then a
+few bullets) with code names as quiet links that light up their card on
+hover. Only real symbols are links: once an answer is written, its code
+names go to the service's `resolve` (exact names, qualified ids like
+`Queries.changes`, a shared name only in a file on the canvas, a plain
+lowercase word only if one symbol in the project has it); while it
+streams, only names of cards on the canvas link. The rest stays code; copy and "show the N added" under each answer. The composer grows
+with the text, sends on Enter, turns into a stop button while answering
+(`explainCancel` aborts the model request), and offers suggestions for
+the moment (explain the selection, explain this flow, what could break,
+go deeper, show more). Added cards glow briefly. The panel resizes from
+its left edge (remembered per browser).
+
+Observed: Sonnet and Opus 5.5 return the text after a tool result in one
+burst (Haiku streams it), so the panel shows "thinking…" and the model's
+reads while waiting, and writes text out as it arrives at a steady rate
+(whatever is waiting shows in about 0.8s): real streaming passes straight
+through, a burst types out instead of appearing at once.
+`LODE_EXPLAIN_MODEL` sets the server's default model; the panel picks one
+per question (`ExplainRequest.model`, passed to `ChatModel.chat`; a
+host's `models` option limits it, `explainModels` sets the picker).
+
 ## Build vs buy: existing code graphs
 
 Joern (code property graph) and CodeQL were considered as the core and

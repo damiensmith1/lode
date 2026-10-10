@@ -7,6 +7,7 @@ export class LodeClient implements LodeConnection {
   private readonly ready: Promise<void>;
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly changeListeners = new Set<(files: string[]) => void>();
+  private readonly eventListeners = new Set<(name: string, payload: unknown) => void>();
   private nextId = 1;
 
   constructor(url: string) {
@@ -19,6 +20,10 @@ export class LodeClient implements LodeConnection {
       const message = JSON.parse(String(event.data));
       if (message.method === "changed") {
         for (const listener of this.changeListeners) listener(message.params.files);
+        return;
+      }
+      if (message.method === "event") {
+        for (const listener of this.eventListeners) listener(message.params.name, message.params.payload);
         return;
       }
       const waiting = this.pending.get(message.id);
@@ -42,5 +47,11 @@ export class LodeClient implements LodeConnection {
   onChanged(listener: (files: string[]) => void): () => void {
     this.changeListeners.add(listener);
     return () => this.changeListeners.delete(listener);
+  }
+
+  // Events the server pushes while a call runs (an explanation streaming in).
+  onEvent(listener: (name: string, payload: unknown) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
   }
 }

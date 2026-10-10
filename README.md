@@ -45,6 +45,21 @@ step belongs, how risky each dependent of a change is), and code builds
 the flow. Every card is a real piece of your code, and it takes 2-3 model
 calls and a fraction of a cent.
 
+### Explain, and build it out, in conversation
+Every flow has an **explain** panel (**i**): explain the whole flow, the
+selected cards, or ask follow-ups ("why does closeTab call select?"). The
+answer streams in, grounded in the exact code on the canvas, and every
+name in it is a link to its card. Ask for more ("also show where the tabs
+get saved") and the model searches and reads lode's graph, then **adds the
+cards** to your canvas, linked like any other. Flows built with **/** get
+an "explain this flow" button. Conversations are saved with the tab.
+
+Claude does the explaining (`ANTHROPIC_API_KEY` in `.env`), and you pick
+the model per question in the panel (Sonnet by default, Haiku for speed,
+Opus for depth; `LODE_EXPLAIN_MODEL` sets the server's default). It sits
+behind a small `ChatModel` interface any model can implement, and a host
+can offer its own list of models or limit which are allowed.
+
 ### Git changes
 
 ![The changes sidebar and a flow with the diff shown on its cards](docs/images/changes.png)
@@ -112,11 +127,13 @@ is always included (ESM, CommonJS, JSDoc types). The graph is cached in
 `~/.cache/lode/` (`--cache <dir>` to change it); nothing is written into
 the project unless you save an edit.
 
-To ask questions, add a TypeSafe key to a `.env` in lode's folder (it's
-git-ignored, and lode reads only this key from it):
+For **/** questions and the explain panel, add keys to a `.env` in lode's
+folder (it's git-ignored, and lode reads only these keys from it):
 
 ```sh
-TYPESAFE_API_KEY=your-key
+TYPESAFE_API_KEY=your-key        # / questions (Jev)
+ANTHROPIC_API_KEY=your-key       # explain (Claude)
+# LODE_EXPLAIN_MODEL=claude-haiku-5-5   # optional: faster, streams after tool calls
 ```
 
 Other commands:
@@ -151,6 +168,8 @@ node dist/lib/src/cli.js mcp <project>                       # MCP server on std
   that a `Judge` (Jev by default) scores.
 - **Context** (`src/context`, `src/mcp`): slices of the graph formatted
   for language models, and an MCP server that serves them.
+- **Explain** (`src/explain`): a conversation about the canvas with a
+  `ChatModel` (Claude by default) that can search, read and add cards.
 - **Service and server** (`src/service`, `src/server`): the queries as
   methods with no transport, a file watcher, and an optional localhost
   WebSocket server.
@@ -217,6 +236,7 @@ What a host can plug in or take over:
 | **Editing** | read-only, per card, or yours: `host.saveEdits` lets the editor apply saves with its own undo |
 | **Your own UI** | `lodeApi(connection)`: files, `buildFileTree`, search, entries, changes, symbol at cursor, ask |
 | **Asking** | `flow.ask(question)`, `flow.loadPlan(plan)`, or your own model behind the `Judge` interface |
+| **Explaining** | the flow's explain panel, `flow.sendExplain(text)`, `explain()` in Node, or your own model behind `ChatModel`; answers stream as `explain` events on the connection |
 | **LLM context** | `contextFor(request)` in Node, `lode/mcp` (`serveMcp`) for agents, `flow.context()` and the cancelable `lode-context` event to send a canvas to your own agent |
 | **Languages** | a `LanguagePlugin` reads a project into nodes, edges, channels and fold regions; the core does the rest |
 

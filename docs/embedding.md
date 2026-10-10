@@ -316,7 +316,37 @@ button (or `flow.context(budget)`) builds it from the canvas; the
 cancelable `lode-context` event lets a host send it to its own agent
 instead of the clipboard.
 
-## 11. Look
+## 11. Explaining
+
+A flow's explain panel (toolbar "explain", key **i**) holds a conversation
+about the canvas: suggestions (explain the selection or the flow, what
+could break, show more, go deeper) or anything typed; a stop button
+cancels an answer (`explainCancel`). Parts: `explain`, `explain-log`,
+`explain-composer`, `explain-input`. The service's `explain` method (`explain(request, queries, model,
+onEvent)` in Node) builds the context from the cards (or the selection)
+with `contextFor`, sends it with the conversation to a `ChatModel`, and
+gives the model three tools: `search`, `read` and `add_to_flow`. Cards it
+adds open on the canvas as they're added. The answer streams as `explain`
+events (`{ stream, event: text | tool | add }`) through
+`LodeConnection.onEvent` (WebSocket and message channels both forward
+them); without `onEvent`, it arrives whole.
+
+The default model is Claude over the Anthropic API (`anthropicModel`:
+`ANTHROPIC_API_KEY`, `LODE_EXPLAIN_MODEL`, default `claude-sonnet-5-5`;
+the context is marked for prompt caching). Pass `createService(store, {
+model })` with anything implementing `ChatModel.chat({ system, messages,
+tools, model, onText })` to use another.
+
+**Per question:** `ExplainRequest.model` picks the model for one question;
+it reaches `ChatModel.chat` as `model` (the Anthropic one uses it as the
+API model; yours may map or ignore it). `createService(store, { models:
+[...] })` limits which may be asked for. The panel's picker offers
+`LodeHost.explainModels` (`{ id, label }[]`, first is the default;
+default Sonnet, Haiku, Opus; `[]` hides it), remembers the choice per
+browser, and labels each answer with its model. `renderMarkdown` (in `lode/views`) is the
+panel's safe Markdown, with code names as links.
+
+## 12. Look
 
 - **Tokens.** Every colour and font is a `--lode-*` custom property, set on
   any ancestor of a view (or on the view). Ready-made: `LIGHT_THEME` (the
