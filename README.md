@@ -217,3 +217,7 @@ npm run build:web   # just the app
 
 `docs/` holds the background, requirements and design notes, kept current
 with the code.
+
+## License
+
+[MIT](LICENSE) © Damien Smith
