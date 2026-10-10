@@ -312,6 +312,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   themed by `--lode-*` CSS custom properties from the host:
   `<lode-entries>` (where to start) and `<lode-flow>` (reading).
   Wires are measured from the laid-out DOM, so layout stays plain CSS.
+  Hosts may detach and reattach a view (switching tabs does), so a view
+  builds its DOM and listeners once; reattaching only resubscribes.
 - **Map, graph and focus were removed.** Map (one lens level at a time,
   merged edge counts) and graph (a zoomable tree of the whole project)
   answered "what are the parts and how do they talk", but boxes with counts
