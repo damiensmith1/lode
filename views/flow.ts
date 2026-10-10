@@ -138,7 +138,7 @@ export class LodeFlow extends HTMLElement {
         <span class="spacer"></span>
         <span class="faint">drag to move around · scroll to zoom · drag a card by its header</span>
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
-        <button class="crumb" data-action="fit" title="Show every card">fit</button>
+        <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
       <div class="canvas"><div class="board"></div></div>`;
@@ -213,7 +213,7 @@ export class LodeFlow extends HTMLElement {
     const here = this.cards.get(key);
 
     if (action === "undo") return this.popUndo();
-    if (action === "fit") return this.fit();
+    if (action === "focus") return this.selected && this.frame(this.selected);
     if (action === "zoom-reset") return this.zoomTo(1, this.viewCentre());
     if (action === "clear") {
       if (!this.cards.size) return;
@@ -354,6 +354,7 @@ export class LodeFlow extends HTMLElement {
 
   private select(key: string) {
     this.selected = key;
+    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = false;
     this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", c.dataset.key === key));
     const c = this.cards.get(key);
     const n = c?.block.node;
@@ -415,16 +416,17 @@ export class LodeFlow extends HTMLElement {
     this.changed();
   }
 
-  // Show every card.
-  private fit() {
-    const els = [...this.root.querySelectorAll<HTMLElement>(".card")];
-    if (!els.length) return;
+  // Zoom and pan so the card fills the view (up to 125%).
+  private frame(key: string) {
+    const el = this.cardEl(key);
+    if (!el) return;
+    const els = [el];
     const minX = Math.min(...els.map((e) => e.offsetLeft));
     const minY = Math.min(...els.map((e) => e.offsetTop));
     const maxX = Math.max(...els.map((e) => e.offsetLeft + e.offsetWidth));
     const maxY = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight));
     const view = this.canvas().getBoundingClientRect();
-    const k = Math.min(ZOOM.max, Math.max(ZOOM.min, Math.min((view.width - 48) / (maxX - minX), (view.height - 48) / (maxY - minY), 1)));
+    const k = Math.min(1.25, Math.max(ZOOM.min, Math.min((view.width - 48) / (maxX - minX), (view.height - 48) / (maxY - minY))));
     this.camera = { k, x: (view.width - (maxX - minX) * k) / 2 - minX * k, y: (view.height - (maxY - minY) * k) / 2 - minY * k };
     this.applyCamera();
     this.changed();
@@ -710,6 +712,7 @@ export class LodeFlow extends HTMLElement {
   private render() {
     const board = this.board();
     this.root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.disabled = !this.undo.length;
+    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.selected || !this.cards.has(this.selected);
     this.root.querySelector(".count")!.textContent = this.cards.size ? `${this.cards.size} card${this.cards.size === 1 ? "" : "s"}` : "";
     if (!this.cards.size) {
       board.innerHTML = `<div class="hint">Pick an entry point, a file or a symbol to start reading from it.</div>`;
