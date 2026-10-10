@@ -416,21 +416,22 @@ export class LodeFlow extends HTMLElement {
     this.changed();
   }
 
-  // Zoom and pan so the card fills the view (up to 125%).
+  // Bring a card to the left of the view at a readable zoom: no closer than
+  // 100%, further out only if it wouldn't fit otherwise. Vertically centred
+  // when it fits, else from its top.
   private frame(key: string) {
     const el = this.cardEl(key);
     if (!el) return;
-    const els = [el];
-    const minX = Math.min(...els.map((e) => e.offsetLeft));
-    const minY = Math.min(...els.map((e) => e.offsetTop));
-    const maxX = Math.max(...els.map((e) => e.offsetLeft + e.offsetWidth));
-    const maxY = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight));
     const view = this.canvas().getBoundingClientRect();
-    const k = Math.min(1.25, Math.max(ZOOM.min, Math.min((view.width - 48) / (maxX - minX), (view.height - 48) / (maxY - minY))));
-    this.camera = { k, x: (view.width - (maxX - minX) * k) / 2 - minX * k, y: (view.height - (maxY - minY) * k) / 2 - minY * k };
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const k = Math.max(ZOOM.min, Math.min(1, (view.width - 96) / w, (view.height - 48) / h));
+    const y = h * k < view.height - 48 ? (view.height - h * k) / 2 : 24;
+    this.camera = { k, x: 48 - el.offsetLeft * k, y: y - el.offsetTop * k };
     this.applyCamera();
     this.changed();
   }
+
 
   // --- saving ----------------------------------------------------------------
 
