@@ -182,7 +182,7 @@ export class LodeFlow extends HTMLElement {
     if (typing) return;
     if ((e.key === "Delete" || e.key === "Backspace") && this.selected && this.cards.has(this.selected)) {
       e.preventDefault();
-      this.close(this.selected);
+      this.close(this.selected, true);
     } else if (e.key === "z" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
       e.preventDefault();
       this.popUndo();
@@ -323,10 +323,12 @@ export class LodeFlow extends HTMLElement {
   }
 
   // Close a card, and every card that was only reachable through it.
-  private close(key: string) {
+  // × closes a card and every card only reachable through it; the Delete
+  // key (`alone`) closes just the card, leaving what it opened in place.
+  private close(key: string, alone = false) {
     this.remember();
     const gone = new Set([key]);
-    for (let grew = true; grew; ) {
+    for (let grew = !alone; grew; ) {
       grew = false;
       for (const k of this.cards.keys()) {
         if (gone.has(k)) continue;

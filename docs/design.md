@@ -414,7 +414,7 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   already on the restored canvas selects it without moving the view.
   Panning and moving cards never select text. Keys (while the flow is
   showing, not while typing in a field): Delete/Backspace closes the
-  selected card, ⌘Z / Ctrl+Z undoes.
+  selected card alone (unlike ×, the cards it opened stay), ⌘Z / Ctrl+Z undoes.
 - **Layouts are saved with the project.** The server keeps a view's layout
   (`loadLayout` / `saveLayout`, `layout-<name>.json` in the project's cache
   dir, name-checked and size-capped), so it survives restarts in any host;
