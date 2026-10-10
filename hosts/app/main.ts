@@ -319,6 +319,7 @@ async function start() {
   renderTree(buildFileTree(await api.files()));
   setupSearch();
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
+  $("open-entries").addEventListener("click", () => openView({ kind: "entries" }));
   setupChanges();
   const side = (await storage.load(SIDE_KEY)) as { mode?: "files" | "changes"; base?: string } | null;
   if (side?.base) $<HTMLInputElement>("changes-base").value = side.base;

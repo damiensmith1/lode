@@ -534,7 +534,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   like lode, shows none rather than every pair of files). Filter by
   text; clicking an entry starts the flow there. Next idea: a model-written
   one-line summary per entry.
-- **Standalone host** (`hosts/app`): entry points and flow tabs, a file tree
+- **Standalone host** (`hosts/app`): entry points and flow tabs (the top
+  bar's "entry points" brings that tab back once closed; "+" adds a flow), a file tree
   (a file opens in the flow), syntax colours
   (highlight.js, Clance's palette; a host concern, so not in views) and ◇
   annotations,
