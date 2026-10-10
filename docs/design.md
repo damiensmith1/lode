@@ -398,6 +398,13 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   and arrows follow. × closes a card and every card only reachable through
   it. ← is undo: it reverses the last open, close, move, fold or "show
   more".
+- **Camera.** The canvas is a viewport over a transformed board: the wheel
+  (or a pinch) zooms around the pointer (20–200%), dragging empty space
+  pans, dragging a card's header moves the card (scaled, so it tracks the
+  pointer at any zoom). Going to a card pans only if it's off screen. The
+  toolbar shows the zoom (click for 100%) and "fit". The camera is saved
+  with the layout, in canvas coordinates; a startup link to a card that's
+  already on the restored canvas selects it without moving the view.
 - **Layouts are saved with the project.** The server keeps a view's layout
   (`loadLayout` / `saveLayout`, `layout-<name>.json` in the project's cache
   dir, name-checked and size-capped), so it survives restarts in any host;

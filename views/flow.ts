@@ -11,6 +11,13 @@ const GAP = 72; // space between a card and one opened from it
 const PAD = 32; // board padding
 const UNDO_LIMIT = 100;
 const LAYOUT = "flow"; // the name the layout is saved under
+const ZOOM = { min: 0.2, max: 2 };
+
+interface Camera {
+  x: number; // screen offset of the board's origin
+  y: number;
+  k: number; // scale
+}
 
 // Comments and imports open in place: a card of them is just a detour.
 const inPlace = (r: BlockRegion) => r.kind === "comment" || r.kind === "imports";
@@ -49,12 +56,15 @@ interface SavedLayout {
   cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; x: number; y: number }[];
   arrows: Arrow[];
   selected: string | null;
+  camera?: Camera; // x, y: where the canvas origin (0, 0) sits on screen
 }
 
 const CSS = `
 :host { display: flex; flex-direction: column; overflow: hidden; }
-.canvas { position: relative; flex: 1; min-height: 0; overflow: auto; }
-.board { position: relative; min-width: 100%; min-height: 100%; }
+.canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: grab; touch-action: none; }
+.canvas.panning { cursor: grabbing; }
+.board { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.zoom { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
 .card { position: absolute; z-index: 1; width: max-content; min-width: 480px; max-width: 760px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
 .card.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 4px 14px rgba(23,22,20,.06); z-index: 3; }
 .card.dragging { box-shadow: 0 0 0 1px var(--lode-local), 0 12px 32px rgba(23,22,20,.16); z-index: 4; }
@@ -113,6 +123,7 @@ export class LodeFlow extends HTMLElement {
   private selected: string | null = null;
   private undo: Snapshot[] = [];
   private offset = { x: PAD, y: PAD }; // board origin, so negative positions fit
+  private camera: Camera = { x: 0, y: 0, k: 1 };
   private ready: Promise<void> = Promise.resolve();
   private saveTimer?: number;
   private unsubscribe?: () => void;
@@ -123,7 +134,9 @@ export class LodeFlow extends HTMLElement {
         <button class="crumb" data-action="undo" aria-label="Undo" title="Undo">←</button>
         <span class="count faint"></span>
         <span class="spacer"></span>
-        <span class="faint">click a chip or fold to follow it · drag a card by its header</span>
+        <span class="faint">drag to move around · scroll to zoom · drag a card by its header</span>
+        <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
+        <button class="crumb" data-action="fit" title="Show every card">fit</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
       <div class="canvas"><div class="board"></div></div>`;
@@ -133,7 +146,10 @@ export class LodeFlow extends HTMLElement {
     this.ready = this.restore();
     void this.ready.then(() => {
       const id = this.getAttribute("node");
-      if (id) void this.show(id);
+      // A link to a card that's already on the restored canvas just selects
+      // it; the saved view stays where it was.
+      if (id && this.cards.has(id)) this.select(id);
+      else if (id) void this.show(id);
       else this.render();
     });
   }
@@ -178,6 +194,8 @@ export class LodeFlow extends HTMLElement {
     const here = this.cards.get(key);
 
     if (action === "undo") return this.popUndo();
+    if (action === "fit") return this.fit();
+    if (action === "zoom-reset") return this.zoomTo(1, this.viewCentre());
     if (action === "clear") {
       if (!this.cards.size) return;
       this.remember();
@@ -326,7 +344,71 @@ export class LodeFlow extends HTMLElement {
 
   private goTo(key: string) {
     this.select(key);
-    this.cardEl(key)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    this.reveal(key);
+  }
+
+  // --- camera ------------------------------------------------------------------
+
+  private canvas() {
+    return this.root.querySelector<HTMLElement>(".canvas")!;
+  }
+
+  private applyCamera() {
+    const { x, y, k } = this.camera;
+    this.board().style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+    const label = this.root.querySelector(".zoom");
+    if (label) label.textContent = `${Math.round(k * 100)}%`;
+  }
+
+  private viewCentre() {
+    const r = this.canvas().getBoundingClientRect();
+    return { x: r.width / 2, y: r.height / 2 };
+  }
+
+  // Zoom to `k`, keeping the screen point `at` (relative to the canvas) still.
+  private zoomTo(k: number, at: { x: number; y: number }) {
+    const next = Math.min(ZOOM.max, Math.max(ZOOM.min, k));
+    const c = this.camera;
+    this.camera = { k: next, x: at.x - ((at.x - c.x) * next) / c.k, y: at.y - ((at.y - c.y) * next) / c.k };
+    this.applyCamera();
+    this.changed();
+  }
+
+  // Pan so a card is on screen (only if it isn't already).
+  private reveal(key: string) {
+    const el = this.cardEl(key);
+    if (!el) return;
+    const view = this.canvas().getBoundingClientRect();
+    const { x, y, k } = this.camera;
+    const left = x + el.offsetLeft * k;
+    const top = y + el.offsetTop * k;
+    const width = Math.min(el.offsetWidth * k, view.width - 80);
+    const height = Math.min(el.offsetHeight * k, view.height - 80);
+    let dx = 0;
+    let dy = 0;
+    if (left < 24) dx = 24 - left;
+    else if (left + width > view.width - 24) dx = view.width - 24 - (left + width);
+    if (top < 24) dy = 24 - top;
+    else if (top + height > view.height - 24) dy = view.height - 24 - (top + height);
+    if (!dx && !dy) return;
+    this.camera = { ...this.camera, x: x + dx, y: y + dy };
+    this.applyCamera();
+    this.changed();
+  }
+
+  // Show every card.
+  private fit() {
+    const els = [...this.root.querySelectorAll<HTMLElement>(".card")];
+    if (!els.length) return;
+    const minX = Math.min(...els.map((e) => e.offsetLeft));
+    const minY = Math.min(...els.map((e) => e.offsetTop));
+    const maxX = Math.max(...els.map((e) => e.offsetLeft + e.offsetWidth));
+    const maxY = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight));
+    const view = this.canvas().getBoundingClientRect();
+    const k = Math.min(ZOOM.max, Math.max(ZOOM.min, Math.min((view.width - 48) / (maxX - minX), (view.height - 48) / (maxY - minY), 1)));
+    this.camera = { k, x: (view.width - (maxX - minX) * k) / 2 - minX * k, y: (view.height - (maxY - minY) * k) / 2 - minY * k };
+    this.applyCamera();
+    this.changed();
   }
 
   // --- saving ----------------------------------------------------------------
@@ -352,6 +434,12 @@ export class LodeFlow extends HTMLElement {
       })),
       arrows: this.arrows,
       selected: this.selected,
+      // Saved in canvas coordinates, independent of the board's padding origin.
+      camera: {
+        x: Math.round(this.camera.x + this.offset.x * this.camera.k),
+        y: Math.round(this.camera.y + this.offset.y * this.camera.k),
+        k: Math.round(this.camera.k * 1000) / 1000,
+      },
     };
     await this.client?.call("saveLayout", { name: LAYOUT, data }).catch(() => {});
   }
@@ -379,6 +467,11 @@ export class LodeFlow extends HTMLElement {
     this.arrows = saved.arrows.filter((a) => this.cards.has(a.from) && this.cards.has(a.to));
     this.selected = saved.selected && this.cards.has(saved.selected) ? saved.selected : null;
     this.render();
+    if (saved.camera) {
+      const { x, y, k } = saved.camera;
+      this.camera = { k, x: x - this.offset.x * k, y: y - this.offset.y * k };
+      this.applyCamera();
+    }
     if (this.selected) this.select(this.selected);
   }
 
@@ -473,7 +566,13 @@ export class LodeFlow extends HTMLElement {
       maxX = Math.max(maxX, c.x + el.offsetWidth);
       maxY = Math.max(maxY, c.y + el.offsetHeight);
     }
-    this.offset = { x: PAD - minX, y: PAD - minY };
+    // When the board's origin shifts (a card went further left or up), move
+    // the camera the other way so nothing jumps on screen.
+    const next = { x: PAD - minX, y: PAD - minY };
+    this.camera.x -= (next.x - this.offset.x) * this.camera.k;
+    this.camera.y -= (next.y - this.offset.y) * this.camera.k;
+    this.offset = next;
+    this.applyCamera();
     for (const el of els) {
       const c = this.cards.get(el.dataset.key!)!;
       el.style.left = `${c.x + this.offset.x}px`;
@@ -513,9 +612,18 @@ export class LodeFlow extends HTMLElement {
   // Drag a card by its header; arrows follow. A move can be undone.
   private setupDrag() {
     let drag: { key: string; el: HTMLElement; x: number; y: number; cx: number; cy: number; before: Snapshot; moved: boolean } | null = null;
+    let pan: { x: number; y: number; cam: Camera } | null = null;
+    const canvas = this.canvas();
     this.root.addEventListener("pointerdown", (event) => {
       const e = event as PointerEvent;
       const target = e.target as Element;
+      // Empty canvas: drag to move around.
+      if (!target.closest(".card") && target.closest(".canvas")) {
+        pan = { x: e.clientX, y: e.clientY, cam: { ...this.camera } };
+        canvas.setPointerCapture(e.pointerId);
+        canvas.classList.add("panning");
+        return;
+      }
       const header = target.closest("header");
       if (!header || target.closest("button")) return;
       const el = header.closest<HTMLElement>(".card")!;
@@ -525,9 +633,14 @@ export class LodeFlow extends HTMLElement {
     });
     this.root.addEventListener("pointermove", (event) => {
       const e = event as PointerEvent;
+      if (pan) {
+        this.camera = { ...pan.cam, x: pan.cam.x + e.clientX - pan.x, y: pan.cam.y + e.clientY - pan.y };
+        return this.applyCamera();
+      }
       if (!drag) return;
-      const dx = e.clientX - drag.x;
-      const dy = e.clientY - drag.y;
+      // Screen pixels to board pixels.
+      const dx = (e.clientX - drag.x) / this.camera.k;
+      const dy = (e.clientY - drag.y) / this.camera.k;
       if (!drag.moved && Math.hypot(dx, dy) < 4) return;
       drag.moved = true;
       drag.el.classList.add("dragging");
@@ -539,6 +652,11 @@ export class LodeFlow extends HTMLElement {
       this.drawArrows();
     });
     const end = () => {
+      if (pan) {
+        pan = null;
+        canvas.classList.remove("panning");
+        this.changed();
+      }
       if (!drag) return;
       drag.el.classList.remove("dragging");
       if (drag.moved) {
@@ -550,6 +668,17 @@ export class LodeFlow extends HTMLElement {
     };
     this.root.addEventListener("pointerup", end);
     this.root.addEventListener("pointercancel", end);
+    // Scroll (or pinch) to zoom around the pointer.
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        const r = canvas.getBoundingClientRect();
+        const step = e.ctrlKey ? 0.01 : 0.0015; // pinches report small deltas
+        this.zoomTo(this.camera.k * Math.exp(-e.deltaY * step), { x: e.clientX - r.left, y: e.clientY - r.top });
+      },
+      { passive: false },
+    );
   }
 
   // --- rendering -------------------------------------------------------------
@@ -561,6 +690,7 @@ export class LodeFlow extends HTMLElement {
     if (!this.cards.size) {
       board.innerHTML = `<div class="hint">Pick an entry point, a file or a symbol to start reading from it.</div>`;
       board.style.width = board.style.height = "";
+      board.style.transform = "";
       this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: "flow", bubbles: true, composed: true }));
       return;
     }
