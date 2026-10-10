@@ -138,7 +138,11 @@ export class LodeFlow extends HTMLElement {
     // Hosts move views around (switching tabs reattaches them): build and
     // wire up once, or every reattach adds another set of listeners and a
     // click acts twice.
-    if (this.built) return;
+    if (this.built) {
+      // Laid out while detached, everything measured 0: measure again.
+      if (this.cards.size) this.position();
+      return;
+    }
     this.built = true;
     this.root.innerHTML = `<style>${BASE_CSS}${CSS}${this.host?.syntaxCss ?? ""}</style>
       <div class="toolbar">
