@@ -360,15 +360,18 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   level deep: every nested region (if/loop/try bodies, callbacks, multi-line
   literals and argument lists, comment runs, imports) folds to its header
   line, with the fold as a `⋯ n lines` button on that line, so folds cost
-  no height. Small folds (≤3 lines), comments and imports open in place;
-  bigger ones open the next card: a nested declaration's own card when the
+  no height. Regions hiding 3 lines or fewer never fold (they're just shown);
+  comment runs and imports open in place; bigger regions open the next card: a nested declaration's own card when the
   region is exactly its body, otherwise a fragment. An anonymous fold
   carries up to 3 chips from inside it (then "+N inside"). Regions come from
   the TS plugin (`src/ingest/ts/regions.ts`) as plain line ranges on the
   graph (`Region`), so the core stays language-agnostic. On glance,
   `startRecording` goes from 35 lines to 17, `handleAudio` from 97 to 17.
-  Long flat files (index.ts: runs of one-line `ipcMain.handle(…)`) stay
-  long; grouping runs of similar statements is a next step.
+  A card shows 40 lines, then "show 40 more" (each click another 40), and
+  always at least down to the line the next card was opened from, so its
+  arrow has an anchor. Long flat files (index.ts: runs of one-line
+  `ipcMain.handle(…)`) lean on that; grouping runs of similar statements is
+  a next step.
 - **What leads here, on every block.** Tried a focus panel beside the flow
   that followed the selected block; it duplicated the flow and was dropped.
   Who reaches this code now sits in every block's header: callers, IPC senders, code passing it as a callback ("passes

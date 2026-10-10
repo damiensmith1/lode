@@ -5,10 +5,11 @@ import { ARROW_DEFS, BASE_CSS, escape, wire } from "./theme.js";
 
 const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
-const SMALL_FOLD = 3; // folds hiding this many lines or fewer expand in place
+const SMALL = 3; // regions hiding this many lines or fewer never fold
+const PAGE = 40; // lines a card shows before "show 40 more"
 
-// Comments and imports always open in place: a card of them is just a detour.
-const inPlace = (r: BlockRegion) => r.end - r.start <= SMALL_FOLD || r.kind === "comment" || r.kind === "imports";
+// Comments and imports open in place: a card of them is just a detour.
+const inPlace = (r: BlockRegion) => r.kind === "comment" || r.kind === "imports";
 
 // A card: a node's code, or a range inside it (a fragment), shown one level
 // deep: nested regions fold to their header line.
@@ -17,7 +18,8 @@ interface Column {
   range: [number, number];
   fragment?: string; // the fragment's header text, for its title
   fromLine?: number; // the line in the previous card that opened it
-  expanded: Set<number>; // small folds opened in place (by header line)
+  expanded: Set<number>; // comment/import folds opened in place (by header line)
+  limit: number; // lines shown before "show more"
   allCallers?: boolean;
 }
 
@@ -49,6 +51,8 @@ const CSS = `
 .fold { margin-left: 6px; padding: 0 6px; font: 11px/18px var(--lode-mono); color: var(--lode-muted); background: var(--lode-sunken); border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
 .fold:hover, .fold.active { border-color: var(--lode-outline); color: var(--lode-fg); }
 .fold.active { border-color: var(--lode-local); color: var(--lode-local); }
+.more-lines { display: block; margin: 6px 0 2px 58px; padding: 3px 10px; font: 11.5px var(--lode-font); color: var(--lode-muted); background: var(--lode-sunken); border-radius: 5px; }
+.more-lines:hover { color: var(--lode-fg); }
 .chips { flex: none; max-width: 170px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; }
 .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font: 10.5px/18px var(--lode-mono); padding: 0 6px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
 .chip:hover, .chip.active { border-color: currentColor; }
@@ -165,7 +169,7 @@ export class LodeFlow extends HTMLElement {
       const region = here.block.regions.find((r) => r.start === s && r.end === Number(end));
       if (!region) return;
       if (inPlace(region)) {
-        // Small: open (or close) in place.
+        // Comments and imports: open (or close) in place.
         here.expanded.has(s) ? here.expanded.delete(s) : here.expanded.add(s);
         return this.render();
       }
@@ -176,13 +180,16 @@ export class LodeFlow extends HTMLElement {
       } else {
         // An anonymous block: open that part of this card as a fragment.
         const header = here.block.lines.find((l) => l.n === s)?.text.trim() ?? "";
-        this.go([...this.columns.slice(0, c + 1), { block: here.block, range: [region.start, region.end], fragment: header, fromLine: s, expanded: new Set() }], c + 1);
+        this.go([...this.columns.slice(0, c + 1), { block: here.block, range: [region.start, region.end], fragment: header, fromLine: s, expanded: new Set(), limit: PAGE }], c + 1);
       }
     } else if (action === "reroot" && id) {
       // The caller goes to the left of this card, with an arrow from its line
       // (← brings back what was there before).
       const block = await this.fetch(id);
       if (block) this.go([card(block), { ...here, fromLine: Number(line) }, ...this.columns.slice(c + 1)], 0);
+    } else if (action === "more") {
+      here.limit += PAGE;
+      this.render();
     } else if (action === "callers") {
       here.allCallers = true;
       this.render();
@@ -245,17 +252,26 @@ export class LodeFlow extends HTMLElement {
       `<button class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-col="${i}" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${escape(chipText(link))}</button>`;
 
     const rows: string[] = [];
+    let shownLines = 0;
+    let remaining = 0;
+    // Show up to the limit, and always as far as the line the next card came from.
+    const mustReach = next?.fromLine ?? 0;
     for (let line = c.range[0]; line <= c.range[1]; line++) {
       if (hidden.has(line)) continue;
+      if (shownLines >= c.limit && line > mustReach) {
+        remaining++;
+        continue;
+      }
+      shownLines++;
       const own = linksByLine.get(line) ?? [];
       const fold = foldAt.get(line);
       let foldHtml = "";
       let rolled: BlockLink[] = [];
       if (fold) {
         const count = fold.end - fold.start;
-        const small = inPlace(fold);
+        const small = inPlace(fold); // opens in place rather than as a card
         const active = !small && next?.fromLine === line && (fold.node ? next.block.node.id === fold.node.id : !!next.fragment && next.range[0] === fold.start);
-        foldHtml = `<button class="fold${active ? " active" : ""}" data-action="fold" data-col="${i}" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open in the next card"}">⋯ ${count} line${count === 1 ? "" : "s"}${small ? "" : " →"}</button>`;
+        foldHtml = `<button class="fold${active ? " active" : ""}" data-action="fold" data-col="${i}" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open in the next card"}">⋯ ${count} lines${small ? "" : " →"}</button>`;
         // An anonymous fold carries the chips from inside it; a named one
         // doesn't (its own card shows them).
         if (!fold.node) {
@@ -269,6 +285,9 @@ export class LodeFlow extends HTMLElement {
       const chips = [...own.map((l) => chip(l, line, false)), ...rolled.slice(0, MAX_ROLLED).map((l) => chip(l, line, true)), more].join("");
       const classes = ["ln", own.length || rolled.length ? "linked" : "", next?.fromLine === line ? "active" : ""].filter(Boolean).join(" ");
       rows.push(`<div class="${classes}" data-n="${line}"><span class="no">${line}</span><span class="src">${html[line - first] || " "}${foldHtml}</span>${chips ? `<span class="chips">${chips}</span>` : ""}</div>`);
+    }
+    if (remaining) {
+      rows.push(`<button class="more-lines" data-action="more" data-col="${i}">show ${Math.min(PAGE, remaining)} more · ${remaining} left</button>`);
     }
 
     const span = c.range[1] - c.range[0] + 1;
@@ -343,7 +362,7 @@ export class LodeFlow extends HTMLElement {
 }
 
 function card(block: CodeBlock): Column {
-  return { block, range: fullRange(block), expanded: new Set() };
+  return { block, range: fullRange(block), expanded: new Set(), limit: PAGE };
 }
 
 function fullRange(b: CodeBlock): [number, number] {
@@ -351,8 +370,9 @@ function fullRange(b: CodeBlock): [number, number] {
 }
 
 // The regions that fold in a card: inside its range, not its own root (the
-// region spanning the whole card), outermost first. A small fold the reader
-// expanded doesn't fold; the regions inside it get their turn instead.
+// region spanning the whole card), outermost first. Small regions never fold,
+// and nor do comment/import folds the reader opened; regions inside those
+// get their turn instead.
 function topFolds(c: Column): BlockRegion[] {
   const [from, to] = c.range;
   const folds: BlockRegion[] = [];
@@ -360,6 +380,7 @@ function topFolds(c: Column): BlockRegion[] {
     if (r.start < from || r.end > to) continue;
     if (r.start <= from && r.end >= to) continue; // the card itself
     if (folds.some((f) => r.start >= f.start && r.end <= f.end)) continue; // inside a fold
+    if (r.end - r.start <= SMALL) continue;
     if (c.expanded.has(r.start) && inPlace(r)) continue;
     folds.push(r);
   }
