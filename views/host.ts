@@ -62,17 +62,66 @@ export type ViewRequest =
 
 // What a flow can be asked to do, by a key (LodeHost.keys) or by the host
 // calling flow.run(command).
-export type FlowCommand = "close" | "undo" | "fit" | "focus" | "deselect" | "zoomReset" | "clear";
+export type FlowCommand =
+  // cards
+  | "close" | "undo" | "fit" | "focus" | "deselect" | "zoomReset" | "clear" | "expand"
+  // moving around: a line cursor in the selected card
+  | "lineDown" | "lineUp" | "follow" | "back" | "nextChip" | "nextCard" | "prevCard" | "nextChange" | "prevChange"
+  // folds, editing, the rest
+  | "openFold" | "collapseFold" | "edit" | "search" | "help";
 
-// Keys are "Delete", "Mod+z" (Mod is ⌘ or Ctrl), "Shift+F", "Escape", …
+// Keys are "Delete", "Mod+z" (Mod is ⌘ or Ctrl), "Shift+N", "Escape",
+// "Space", "?"… Letters match their case through Shift; other single
+// characters ("?", "/", "[") match however they're typed.
 export const DEFAULT_KEYS: Record<FlowCommand, string[]> = {
-  close: ["Delete", "Backspace"],
+  close: ["Delete", "Backspace", "x"],
   undo: ["Mod+z"],
-  fit: [],
-  focus: [],
+  fit: ["f"],
+  focus: ["Space"],
   deselect: [],
   zoomReset: [],
   clear: [],
+  expand: ["e"],
+  lineDown: ["ArrowDown", "j"],
+  lineUp: ["ArrowUp", "k"],
+  follow: ["ArrowRight", "l"],
+  back: ["ArrowLeft", "h"],
+  nextChip: ["Tab"],
+  nextCard: ["]"],
+  prevCard: ["["],
+  nextChange: ["n"],
+  prevChange: ["Shift+N"],
+  openFold: ["o"],
+  collapseFold: ["c"],
+  edit: ["Enter"],
+  search: ["/"],
+  help: ["?"],
+};
+
+// What each command does, for help screens (the flow's own, on "?").
+export const COMMAND_HELP: Record<FlowCommand, string> = {
+  lineDown: "next line",
+  lineUp: "previous line",
+  follow: "follow the line's chip or fold (open it, or go to it)",
+  back: "back along the arrow to where this came from (or its first caller)",
+  nextChip: "next chip (or fold) on the line, for →",
+  nextCard: "next card, in reading order",
+  prevCard: "previous card",
+  nextChange: "next change (git), opening folds to reach it",
+  prevChange: "previous change",
+  expand: "expand the card: all lines, and what it leads to",
+  openFold: "open the fold on the line (not its chips)",
+  collapseFold: "fold the lines opened around the cursor again",
+  edit: "edit the card's code, at the cursor (Esc stops)",
+  focus: "bring the card into view",
+  fit: "fit the cards (the selection, if several)",
+  zoomReset: "zoom to 100%",
+  close: "close the selected cards",
+  undo: "undo",
+  deselect: "deselect",
+  clear: "clear the canvas",
+  search: "search for a symbol",
+  help: "show or hide these keys",
 };
 
 // A card as hosts see it, in events, render hooks and flow.cards().

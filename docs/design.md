@@ -358,7 +358,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   `buildFileTree` turns the file list into folders. `service.watch()`
   re-indexes on file changes (the server's `watch` uses it), and views and
   the app's tree update from `onChanged`.
-- **Editing in place.** A card's code is always editable (no edit mode):
+- **Editing in place.** A card's code is editable after Enter (an edit
+  mode per card; Esc or the caret leaving ends it, edits kept; clicks
+  only move the line cursor, so reading never types by accident):
   what's visible is what's editable. Visible lines form runs (contiguous in
   the file; folds and the paging cut end one), and no edit crosses runs,
   so hidden lines are never touched. The card's own rows are the editor
@@ -409,6 +411,15 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   files and changes: changed files that drop down into the changed
   declarations as a hierarchy (a class over its methods), with the
   "since" ref and "open all" at the top and a count on the toggle.
+- **Keyboard.** Outside code the flow is navigable: a line cursor in the
+  selected card (outlined; clicks and Esc-from-code set it) that moves by
+  line, follows a line's chip (Tab chooses) or fold, goes back along the
+  arrow it came by, steps cards in reading order (each tree top to bottom,
+  depth first along arrows in line order), and steps git changes hunk by
+  hunk, opening folds and paging to reach them. Every key is a command in
+  `host.keys`, so hosts remap or drop them; `?` lists the current ones.
+  Search is the host's (sent as an action). Enter edits at the cursor; in
+  code, keys type.
 - **Look is the host's.** Every colour and font is a `--lode-*` token with
   its default as a `var()` fallback, so a host sets tokens on any ancestor
   (declaring defaults on `:host` would shadow inherited ones). Syntax

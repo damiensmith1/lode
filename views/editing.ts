@@ -1,5 +1,6 @@
-// Editing code in place, in a card's own rows. A card's code is always
-// editable; what you can edit is what you can see. Visible lines come in
+// Editing code in place, in a card's own rows. A card's code is editable
+// once asked (Enter: its .code gets contenteditable); what you can edit is
+// what you can see. Visible lines come in
 // runs (lines that are contiguous in the file); folds and the paging cut
 // end a run, and no edit crosses from one run to another, so hidden lines
 // are never touched. Typing within a line is the browser's own editing;
@@ -23,6 +24,8 @@ export interface EditingHost {
   save(cardKey: string): void;
   // Rows were restored from an undo step (their numbers may be stale).
   restored(cardKey: string): void;
+  // Esc left the code, from this line (its file line; 0 for an added one).
+  left(cardKey: string, line: number): void;
 }
 
 interface Point {
@@ -183,7 +186,11 @@ export class Editing {
       if (sel) this.replace(code, sel.start, sel.end, "  ");
       return;
     }
-    if (e.key === "Escape") (e.target as HTMLElement).blur?.();
+    if (e.key === "Escape") {
+      const row = this.selection(code)?.start.row;
+      (e.target as HTMLElement).blur?.();
+      this.host.left(cardKeyOf(code), Number(row?.dataset.n ?? 0));
+    }
   }
 
   // Copy (and cut) the code itself: lines joined with newlines, without

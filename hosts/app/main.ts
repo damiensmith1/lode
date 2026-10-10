@@ -5,7 +5,7 @@
 // ../../views through LodeHost.
 import { highlightJs } from "../../views/highlight.js";
 import type { ChangesResult } from "../../src/query/types.js";
-import { buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
+import { ACTION_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) => {
@@ -320,6 +320,12 @@ async function start() {
   setupSearch();
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
   $("open-entries").addEventListener("click", () => openView({ kind: "entries" }));
+  // A flow's "/" (search) is ours: the search box.
+  document.addEventListener(ACTION_EVENT, (e) => {
+    if ((e as CustomEvent).detail?.action !== "search") return;
+    e.preventDefault();
+    $<HTMLInputElement>("search").focus();
+  });
   setupChanges();
   const side = (await storage.load(SIDE_KEY)) as { mode?: "files" | "changes"; base?: string } | null;
   if (side?.base) $<HTMLInputElement>("changes-base").value = side.base;

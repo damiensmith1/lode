@@ -136,7 +136,9 @@ part `expand`.)
 Methods on a `<lode-flow>`: `show(id)` (add a node or file, or go to its
 card), `run(command)`, `cards()`, `selection()`, `setSelection(keys)`.
 Commands: `close` (the selection), `undo`, `fit`, `focus`, `deselect`,
-`zoomReset`, `clear`.
+`zoomReset`, `clear`, `expand`, `lineDown`, `lineUp`, `follow`, `back`,
+`nextChip`, `nextCard`, `prevCard`, `nextChange`, `prevChange`, `openFold`,
+`collapseFold`, `edit`, `search`, `help`.
 
 Events (bubbling, composed; types in `FlowEventMap`):
 
@@ -160,8 +162,19 @@ flow.addEventListener("lode-action", (e) => {
 });
 ```
 
-**Keys.** Defaults: `close` Delete / Backspace, `undo` Mod+z (⌘ or Ctrl);
-the rest have none. `host.keys` remaps (`{ undo: ["Mod+Shift+u"], fit:
+**Keys.** Outside code, a flow is driven from the keyboard: the selected
+card has a line cursor (outlined; clicks move it). Defaults (`DEFAULT_KEYS`,
+described in `COMMAND_HELP`; `?` shows them on the canvas):
+↓/j ↑/k lines (past the end shows 25 more) · →/l follow the line's chip
+or fold (Tab cycles chips, then the fold) · ←/h back along the arrow to the line it came
+from (a root card opens its first caller) · ] [ next/previous card in
+reading order (trees top to bottom, depth first along arrows) · n ⇧N
+next/previous change, hunk by hunk, opening folds to reach it · e expand ·
+o / c open the line's fold (never its chips) / fold back · Enter edit the card
+at the cursor (code is read-only until then; Esc, or the caret leaving,
+stops, keeping unsaved edits, with the cursor on that line) · Space focus · f fit ·
+Delete/Backspace/x close · Mod+z undo · / search (sent as `lode-action`
+for the host to handle: the app focuses its search box) · ? help. `host.keys` remaps (`{ undo: ["Mod+Shift+u"], fit:
 ["Shift+F"] }`; `[]` turns one off) or `false` turns them all off, for a
 host that routes its own keybindings to `flow.run()`. Keys never fire
 while typing in a field, or when the flow isn't showing.
@@ -215,7 +228,9 @@ sync or async):
 
 ## 7. Editing
 
-Cards' code is always editable: what a card shows is what you can change.
+A card's code is editable once you press Enter on it (it shows "editing";
+Esc or clicking elsewhere stops; clicks alone only move the line cursor).
+What a card shows is what you can change.
 Folded and paged-off lines can't be touched from the card (an edit never
 crosses them). Typing, Enter (keeps the indent), Backspace/Delete (joining
 lines only where both are visible together), Tab, paste, cut and copy (the

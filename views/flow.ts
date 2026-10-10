@@ -1,7 +1,7 @@
 import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
-import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
+import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, COMMAND_HELP, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
 
@@ -100,6 +100,17 @@ const CSS = `
 .fold.changed, .more-lines.changed { box-shadow: inset 0 0 0 1px var(--lode-added); }
 .fold.changed::after, .more-lines.changed::after { content: " ●"; color: var(--lode-added); }
 .diff-toggle.on { color: var(--lode-added); font-weight: 550; }
+.card.editing { box-shadow: 0 0 0 2px color-mix(in srgb, var(--lode-local) 45%, transparent), 0 4px 14px color-mix(in srgb, var(--lode-shadow) 6%, transparent); }
+.card.editing .code { cursor: text; }
+.card.editing header .meta::after { content: " · editing (Esc to stop)"; color: var(--lode-local); }
+.ln.cursor { outline: 1.5px solid color-mix(in srgb, var(--lode-local) 70%, transparent); outline-offset: -1.5px; border-radius: 3px; }
+.chip.kbd, .fold.kbd { outline: 2px solid var(--lode-local); outline-offset: 1px; }
+.help { position: absolute; right: 16px; top: 16px; z-index: 20; max-width: 460px; padding: 12px 14px; border-radius: 10px; background: var(--lode-surface); box-shadow: 0 0 0 1px var(--lode-border), 0 12px 32px color-mix(in srgb, var(--lode-shadow) 16%, transparent); font-size: 12px; cursor: default; }
+.help-title { font-weight: 600; margin-bottom: 8px; }
+.help-row { display: flex; gap: 12px; padding: 2px 0; }
+.help-keys { flex: none; width: 150px; }
+.help kbd { display: inline-block; min-width: 18px; padding: 0 5px; margin-right: 2px; border-radius: 4px; background: var(--lode-sunken); box-shadow: inset 0 -1px 0 var(--lode-border); font: 11px var(--lode-mono); text-align: center; }
+.help-note { margin-top: 8px; }
 .card-actions { display: flex; gap: 6px; align-self: flex-start; }
 .card-actions:empty { display: none; }
 .expand { margin-left: 0; padding: 0 7px; border-radius: 4px; font-size: 11px; color: var(--lode-muted); box-shadow: inset 0 0 0 1px var(--lode-border); }
@@ -167,6 +178,7 @@ export class LodeFlow extends HTMLElement {
   private diff = new Map<string, DiffHunk[]>();
   private changedIds = new Set<string>(); // symbols with changes: chips to them are marked
   private held = new Set<string>(); // just saved, caret still in: shown as edited, not redrawn
+  private editingKey: string | null = null; // the card in editing (Enter), if any
   private bases = new Map<string, { file: string; runs: { start: number; end: number }[]; original: Map<number, string> }>();
   private built = false;
   private undo: Snapshot[] = [];
@@ -194,7 +206,7 @@ export class LodeFlow extends HTMLElement {
         <button class="crumb" data-action="undo" aria-label="Undo" title="Undo">←</button>
         <span class="count faint"></span>
         <span class="spacer"></span>
-        <span class="faint" part="toolbar-hint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header</span>
+        <span class="faint" part="toolbar-hint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header · ? for keys</span>
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
         <button class="crumb" data-action="fit" title="Show every card">fit</button>
         <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
@@ -207,7 +219,11 @@ export class LodeFlow extends HTMLElement {
     this.root.addEventListener("focusout", (e) => {
       const code = (e.target as Element).closest?.<HTMLElement>(".code");
       const key = code?.closest<HTMLElement>(".card")?.dataset.key;
-      if (key && !code!.contains((e as FocusEvent).relatedTarget as Node | null)) setTimeout(() => this.release(key), 0);
+      if (key && !code!.contains((e as FocusEvent).relatedTarget as Node | null))
+        setTimeout(() => {
+          this.stopEditing(key);
+          this.release(key);
+        }, 0);
     });
     this.editing = new Editing({
       root: this.root,
@@ -216,6 +232,11 @@ export class LodeFlow extends HTMLElement {
       edited: (key) => this.edited(key),
       save: (key) => void this.saveEdits(key, "key"),
       restored: (key) => this.renumber(key),
+      // Esc out of code: navigate from the line the caret was on.
+      left: (key, line) => {
+        if (line) this.cursor = { key, line, chip: 0 };
+        this.paintCursor();
+      },
     });
     this.setupDrag();
     this.stateKey = this.getAttribute("state") ?? this.stateKey;
@@ -242,6 +263,7 @@ export class LodeFlow extends HTMLElement {
     if (!this.isConnected || !this.offsetParent || this.host?.keys === false) return;
     const typing = e.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
     if (typing) return;
+    if (e.key === "Escape" && this.root.querySelector(".help")) return void this.root.querySelector(".help")!.remove();
     const keys = { ...DEFAULT_KEYS, ...(this.host?.keys || {}) };
     const command = (Object.keys(keys) as FlowCommand[]).find((c) => keys[c]?.some((k) => keyMatches(k, e)));
     if (!command || !this.canRun(command)) return;
@@ -262,6 +284,21 @@ export class LodeFlow extends HTMLElement {
     else if (command === "zoomReset") this.zoomTo(1, this.viewCentre());
     else if (command === "deselect") this.setSelection([]);
     else if (command === "clear") this.clearAll();
+    else if (command === "expand") void this.expand(this.cardMap.get(this.selected!)!);
+    else if (command === "lineDown") this.moveLine(1);
+    else if (command === "lineUp") this.moveLine(-1);
+    else if (command === "follow") void this.follow();
+    else if (command === "back") void this.back();
+    else if (command === "nextChip") this.nextChip();
+    else if (command === "nextCard") this.stepCard(1);
+    else if (command === "prevCard") this.stepCard(-1);
+    else if (command === "nextChange") void this.stepChange(1);
+    else if (command === "prevChange") void this.stepChange(-1);
+    else if (command === "openFold") this.foldAtCursor(true);
+    else if (command === "collapseFold") this.foldAtCursor(false);
+    else if (command === "edit") this.editAtCursor();
+    else if (command === "help") this.toggleHelp();
+    // "search" is the host's (its search box): lode-action tells it.
     return true;
   }
 
@@ -269,7 +306,292 @@ export class LodeFlow extends HTMLElement {
     if (command === "close" || command === "focus" || command === "deselect") return this.group.size > 0;
     if (command === "undo") return this.undo.length > 0;
     if (command === "fit" || command === "clear") return this.cardMap.size > 0;
+    if (command === "expand" || command === "edit" || command === "openFold" || command === "collapseFold" || command === "nextChip") return !!this.selected && this.cardMap.has(this.selected);
+    if (["lineDown", "lineUp", "follow", "back", "nextCard", "prevCard"].includes(command)) return this.cardMap.size > 0;
+    if (command === "nextChange" || command === "prevChange") return this.diffBase !== null && this.cardMap.size > 0;
     return true;
+  }
+
+  // --- moving around with keys ----------------------------------------------------
+  //
+  // The selected card has a line cursor (a visible line of it). Keys move
+  // it, follow what's on its line, go back along arrows, step through cards
+  // in reading order and through git changes. Esc in code comes back to it;
+  // Enter edits there.
+
+  private cursor: { key: string; line: number; chip: number } | null = null;
+
+  // The card's visible lines, as rows (lines added while editing aside).
+  private rowsOf(key: string): HTMLElement[] {
+    return [...(this.cardEl(key)?.querySelectorAll<HTMLElement>(".code > .ln[data-n]") ?? [])];
+  }
+
+  private cursorRow(): HTMLElement | null {
+    if (!this.cursor) return null;
+    const el = this.cardEl(this.cursor.key);
+    return el ? this.rowFor(el, this.cursor.line) : null;
+  }
+
+  // Put the cursor on a card's line (default: its first), select the card,
+  // and keep it in view.
+  private setCursor(key: string, line?: number, chip = 0) {
+    const rows = this.rowsOf(key);
+    if (!rows.length) return;
+    const n = line ?? Number(rows[0].dataset.n);
+    this.cursor = { key, line: n, chip };
+    if (this.selected !== key || this.group.size !== 1) this.select(key);
+    this.paintCursor();
+    const row = this.cursorRow();
+    if (row) this.keepInView(row);
+  }
+
+  // What → can follow on a row: its chips, then its fold. Tab picks.
+  private targetsOf(row: HTMLElement | null): HTMLElement[] {
+    if (!row) return [];
+    const fold = row.querySelector<HTMLElement>(".src > .fold");
+    return [...row.querySelectorAll<HTMLElement>(".chips .chip"), ...(fold && fold.title !== "Fold these lines again" ? [fold] : [])];
+  }
+
+  private paintCursor() {
+    this.root.querySelectorAll(".ln.cursor").forEach((r) => r.classList.remove("cursor"));
+    this.root.querySelectorAll(".kbd").forEach((c) => c.classList.remove("kbd"));
+    if (this.cursor && !this.cardMap.has(this.cursor.key)) this.cursor = null;
+    const row = this.cursorRow();
+    if (!row || this.cursor!.key === this.editingKey) return;
+    row.classList.add("cursor");
+    const targets = this.targetsOf(row);
+    if (targets.length) targets[this.cursor!.chip % targets.length].classList.add("kbd");
+  }
+
+  // Pan just enough to show an element (with a margin).
+  private keepInView(el: HTMLElement) {
+    const view = this.canvas().getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const margin = 48;
+    let dx = 0;
+    let dy = 0;
+    if (r.top < view.top + margin) dy = view.top + margin - r.top;
+    else if (r.bottom > view.bottom - margin) dy = view.bottom - margin - r.bottom;
+    if (r.left < view.left + margin) dx = view.left + margin - r.left;
+    else if (r.right > view.right - margin && r.width < view.width - 2 * margin) dx = view.right - margin - r.right;
+    if (!dx && !dy) return;
+    this.camera = { ...this.camera, x: this.camera.x + dx, y: this.camera.y + dy };
+    this.applyCamera();
+    this.changed();
+  }
+
+  // The card to start from: the cursor's, the selected one, or the first.
+  private here(): string | null {
+    if (this.cursor && this.cardMap.has(this.cursor.key)) return this.cursor.key;
+    if (this.selected && this.cardMap.has(this.selected)) return this.selected;
+    return this.readingOrder()[0] ?? null;
+  }
+
+  private moveLine(step: 1 | -1) {
+    const key = this.here();
+    if (!key) return;
+    if (!this.cursor || this.cursor.key !== key) return this.setCursor(key);
+    const rows = this.rowsOf(key);
+    const at = rows.indexOf(this.cursorRow()!);
+    const next = rows[at + step];
+    if (next) return this.setCursor(key, Number(next.dataset.n));
+    // Past the last line: show 25 more, if there are.
+    const c = this.cardMap.get(key)!;
+    if (step > 0 && this.cardEl(key)?.querySelector('[data-action="more"]') && !this.dirty.has(key)) {
+      this.remember();
+      c.limit += PAGE;
+      this.rerender();
+      const more = this.rowsOf(key);
+      const after = more[more.findIndex((r) => Number(r.dataset.n) === this.cursor!.line) + 1];
+      if (after) this.setCursor(key, Number(after.dataset.n));
+    }
+  }
+
+  private nextChip() {
+    const row = this.cursorRow();
+    if (!row || !this.cursor) return;
+    const targets = this.targetsOf(row).length;
+    if (targets) this.cursor.chip = (this.cursor.chip + 1) % targets;
+    this.paintCursor();
+  }
+
+  // Follow the line: its chosen chip, else its fold (as clicking them).
+  private async follow() {
+    const key = this.here();
+    if (!key) return;
+    if (!this.cursor || this.cursor.key !== key) return this.setCursor(key);
+    const targets = this.targetsOf(this.cursorRow());
+    const target = targets[this.cursor.chip % Math.max(1, targets.length)];
+    if (!target) return;
+    await this.activate(key, target);
+  }
+
+  // Click a chip or fold for the keyboard, then put the cursor in the card
+  // it opened or went to (an in-place fold keeps it where it is).
+  private async activate(key: string, target: HTMLElement) {
+    const before = new Set(this.cardMap.keys());
+    target.click();
+    // Wait for the card it opens (or goes to), then put the cursor there.
+    for (let i = 0; i < 40 && this.selected === key; i++) await new Promise((r) => setTimeout(r, 25));
+    const to = this.selected;
+    if (to && to !== key) this.setCursor(to);
+    else if (to && [...this.cardMap.keys()].some((k) => !before.has(k))) this.setCursor(to, this.cursor?.line);
+  }
+
+  // Back along the arrow into this card, to the line it left from; a card
+  // nothing on the canvas points to opens its first caller.
+  private async back() {
+    const key = this.here();
+    if (!key) return;
+    if (!this.cursor || this.cursor.key !== key) return this.setCursor(key);
+    const arrow = this.arrows.find((a) => a.to === key);
+    if (arrow) return this.setCursor(arrow.from, arrow.line);
+    const caller = this.cardMap.get(key)!.block.callers[0];
+    if (!caller) return;
+    await this.openCaller(key, caller.node.id, caller.line, caller.kind);
+    this.setCursor(caller.node.id, caller.line);
+  }
+
+  // Cards in reading order: each tree (top to bottom), depth first along
+  // its arrows in line order.
+  private readingOrder(): string[] {
+    const incoming = new Set(this.arrows.map((a) => a.to));
+    const byPlace = [...this.cardMap.values()].sort((a, b) => a.y - b.y || a.x - b.x).map((c) => c.key);
+    const order: string[] = [];
+    const seen = new Set<string>();
+    const visit = (k: string) => {
+      if (seen.has(k) || !this.cardMap.has(k)) return;
+      seen.add(k);
+      order.push(k);
+      for (const a of this.arrows.filter((x) => x.from === k).sort((x, y) => x.line - y.line)) visit(a.to);
+    };
+    for (const k of byPlace) if (!incoming.has(k)) visit(k);
+    for (const k of byPlace) visit(k); // cycles with no way in
+    return order;
+  }
+
+  private stepCard(step: 1 | -1) {
+    const order = this.readingOrder();
+    const key = this.here();
+    if (!key) return;
+    const at = order.indexOf(key);
+    const next = this.cursor ? order[at + step] : key;
+    if (next) this.setCursor(next);
+  }
+
+  // A row is a change if it's added, follows removed lines, or folds
+  // (or pages) changes away.
+  private isChange(row: HTMLElement): boolean {
+    const prev = row.previousElementSibling;
+    return row.classList.contains("diff-added") || !!prev?.classList.contains("ln-removed") || !!row.querySelector(".fold.changed");
+  }
+
+  // Next (or previous) change, in reading order. Going forward, a change
+  // folded away is opened (in place, or as a card) and the cursor goes in.
+  private async stepChange(step: 1 | -1): Promise<void> {
+    const order = this.readingOrder();
+    const start = this.here();
+    if (!start) return;
+    const from = order.indexOf(start);
+    const cards = step > 0 ? [...order.slice(from), ...order.slice(0, from)] : [...order.slice(0, from + 1).reverse(), ...order.slice(from + 1).reverse()];
+    for (const [i, key] of cards.entries()) {
+      // Where each change starts: a changed line whose line above isn't one
+      // (or with removed lines just above it, or a fold hiding changes).
+      const all = this.rowsOf(key);
+      let starts = all.filter((r, k) => this.isChange(r) && (k === 0 || !this.isChange(all[k - 1]) || !!r.previousElementSibling?.classList.contains("ln-removed") || !!r.querySelector(".fold.changed")));
+      if (step < 0) starts = starts.reverse();
+      const after = (r: HTMLElement) => i > 0 || !this.cursor || this.cursor.key !== key || (step > 0 ? Number(r.dataset.n) > this.cursor.line : Number(r.dataset.n) < this.cursor.line);
+      const row = starts.find(after);
+      if (row) {
+        this.setCursor(key, Number(row.dataset.n));
+        if (step > 0 && row.querySelector(".fold.changed")) {
+          await this.follow();
+          // Into the card it opened: its first change.
+          const opened = this.cursor?.key;
+          const first = opened && opened !== key ? this.rowsOf(opened).find((r) => this.isChange(r)) : undefined;
+          if (first) this.setCursor(opened!, Number(first.dataset.n));
+        }
+        return;
+      }
+      // Changes past the paging cut: show more and look again.
+      if (step > 0 && this.cardEl(key)?.querySelector(".more-lines.changed") && !this.dirty.has(key)) {
+        this.remember();
+        this.cardMap.get(key)!.limit += PAGE;
+        this.rerender();
+        return this.stepChange(step);
+      }
+    }
+  }
+
+  // Open (or close again) the fold at the cursor: one on its line, or the
+  // in-place one it's inside.
+  private foldAtCursor(open: boolean) {
+    const key = this.here();
+    if (!key) return;
+    if (!this.cursor || this.cursor.key !== key) return this.setCursor(key);
+    const card = this.cardMap.get(key)!;
+    const line = this.cursor.line;
+    if (open) {
+      // The fold itself, never a chip on the line.
+      const fold = this.cursorRow()?.querySelector<HTMLElement>(".src > .fold");
+      if (fold && fold.title !== "Fold these lines again") void this.activate(key, fold);
+      return;
+    }
+    const region = card.block.regions.find((r) => inPlace(r) && card.expanded.has(r.start) && r.start <= line && line <= r.end);
+    if (region) {
+      void this.fold(card, region.start, region.end);
+      this.cursor.line = region.start;
+      this.paintCursor();
+    }
+  }
+
+  // Enter: the card's code becomes editable, with the caret at the cursor
+  // (the end of its line). Until then clicks and keys only read.
+  private editAtCursor() {
+    const key = this.here();
+    const card = key ? this.cardMap.get(key) : undefined;
+    if (!key || !card || !this.isEditable(card) || !this.editing) return;
+    if (this.editingKey && this.editingKey !== key) this.stopEditing(this.editingKey, true);
+    this.editingKey = key;
+    const el = this.cardEl(key)!;
+    const code = el.querySelector<HTMLElement>(".code")!;
+    code.setAttribute("contenteditable", "true");
+    code.setAttribute("spellcheck", "false");
+    el.classList.add("editing");
+    const row = this.cursorRow() ?? this.rowsOf(key)[0];
+    code.focus({ preventScroll: true });
+    if (row) this.editing.caret({ row, offset: row.querySelector(".text")?.textContent?.length ?? 0 });
+    this.paintCursor();
+  }
+
+  // Out of editing (Esc, or the caret left): the code reads only again.
+  // Unsaved edits stay; Enter carries on with them.
+  private stopEditing(key: string, force = false) {
+    if (this.editingKey !== key) return;
+    // Focus "left" only because a redraw moved the card (it's put back).
+    if (!force && this.cardEl(key)?.contains(this.root.activeElement)) return;
+    this.editingKey = null;
+    const el = this.cardEl(key);
+    el?.querySelector(".code")?.removeAttribute("contenteditable");
+    el?.classList.remove("editing");
+    this.paintCursor();
+  }
+
+  private toggleHelp() {
+    const open = this.root.querySelector(".help");
+    if (open) return open.remove();
+    const keys = { ...DEFAULT_KEYS, ...(this.host?.keys || {}) } as Record<FlowCommand, string[]>;
+    const label = (k: string) => k.replace("Mod+", "⌘").replace("Shift+", "⇧").replace("Arrow", "").replace("Up", "↑").replace("Down", "↓").replace("Left", "←").replace("Right", "→");
+    const rows = (Object.keys(COMMAND_HELP) as FlowCommand[])
+      .filter((c) => keys[c]?.length)
+      .map((c) => `<div class="help-row"><span class="help-keys">${keys[c].map((k) => `<kbd>${escape(label(k))}</kbd>`).join(" ")}</span><span>${escape(COMMAND_HELP[c])}</span></div>`)
+      .join("");
+    const help = document.createElement("div");
+    help.className = "help";
+    help.setAttribute("part", "help");
+    help.innerHTML = `<div class="help-title">Keys <span class="faint">(Esc or ? closes)</span></div>${rows}<div class="help-note faint">In code, keys type; Esc comes back here.</div>`;
+    help.addEventListener("click", () => help.remove());
+    this.canvas().append(help);
   }
 
   // Every card on the canvas.
@@ -479,6 +801,14 @@ export class LodeFlow extends HTMLElement {
       const e = event as MouseEvent;
       if (e.metaKey) this.leaveCode(); // ⌘-click selects cards; it doesn't edit
       if (cardEl && (e.metaKey || !String(window.getSelection() ?? ""))) this.select(cardEl.dataset.key!, e.metaKey);
+      // The line cursor follows clicks: the clicked line, or the card's first.
+      if (cardEl && !e.metaKey) {
+        const row = (event.target as Element).closest<HTMLElement>(".ln[data-n]");
+        const key = cardEl.dataset.key!;
+        if (row) this.cursor = { key, line: Number(row.dataset.n), chip: 0 };
+        else if (this.cursor?.key !== key) this.cursor = { key, line: Number(this.rowsOf(key)[0]?.dataset.n ?? 0), chip: 0 };
+        this.paintCursor();
+      }
       return;
     }
     const { action = "", id, line, start, end } = el.dataset;
@@ -667,6 +997,7 @@ export class LodeFlow extends HTMLElement {
 
   // Forget a card's edits and show it fresh from the file.
   private async refreshCard(key: string) {
+    this.stopEditing(key, true); // drawn fresh, not kept as it was
     this.dirty.delete(key);
     this.held.delete(key);
     this.editing?.forget(key);
@@ -1469,14 +1800,14 @@ export class LodeFlow extends HTMLElement {
     }
     // Cards with unsaved edits keep their own rows (and the caret, if it's
     // in one): rendering them from the block would lose the edits.
-    const kept = new Map([...this.dirty, ...this.held].flatMap((k) => (this.cardEl(k) ? [[k, this.cardEl(k)!] as const] : [])));
+    const kept = new Map([...this.dirty, ...this.held, ...(this.editingKey ? [this.editingKey] : [])].flatMap((k) => (this.cardEl(k) ? [[k, this.cardEl(k)!] as const] : [])));
     const focused = [...kept].find(([, el]) => el.contains(this.root.activeElement));
     const caret = focused && this.editing?.selection(focused[1].querySelector<HTMLElement>(".code")!);
     board.innerHTML = [...this.cardMap.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
     for (const [k, el] of kept) {
       const fresh = this.cardEl(k);
       if (!fresh) continue;
-      el.className = fresh.className + (this.dirty.has(k) ? " dirty" : "");
+      el.className = fresh.className + (this.dirty.has(k) ? " dirty" : "") + (k === this.editingKey ? " editing" : "");
       fresh.replaceWith(el);
     }
     if (focused && caret) {
@@ -1484,6 +1815,7 @@ export class LodeFlow extends HTMLElement {
       if (caret.start.row.isConnected) this.editing?.caret(caret.start);
     }
     this.position();
+    this.paintCursor();
     const first = this.cardMap.values().next().value!;
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${first.block.node.name}`, bubbles: true, composed: true }));
   }
@@ -1619,7 +1951,7 @@ export class LodeFlow extends HTMLElement {
         ${hostHeader ? `<div class="host-header" part="host-header">${hostHeader}</div>` : ""}
         <div class="unsaved" part="unsaved"><span class="dot">●</span> unsaved <button data-action="save" title="Save (⌘S)">save</button><button data-action="discard" title="Throw these edits away">discard</button><span class="edit-note"></span></div>
       </header>
-      <div class="code" part="code"${editable ? ' contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off"' : ""}>${rows.join("")}</div>
+      <div class="code" part="code"${editable && this.editingKey === c.key ? ' contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off"' : ""}>${rows.join("")}</div>
       ${hostFooter ? `<div class="host-footer" part="host-footer">${hostFooter}</div>` : ""}
     </section>`;
   }
@@ -1708,6 +2040,9 @@ function keyMatches(spec: string, e: KeyboardEvent): boolean {
   const want = new Set(parts.map((p) => p.toLowerCase()));
   const mod = want.has("mod");
   if (mod ? !(e.metaKey || e.ctrlKey) : e.metaKey !== want.has("meta") || e.ctrlKey !== want.has("ctrl")) return false;
-  if (e.shiftKey !== want.has("shift") || e.altKey !== want.has("alt")) return false;
-  return e.key.toLowerCase() === key.toLowerCase();
+  // Punctuation ("?", "[") is typed with or without Shift depending on the
+  // layout: only letters and named keys check it.
+  const punctuation = key.length === 1 && !/[a-z0-9]/i.test(key);
+  if ((!punctuation && e.shiftKey !== want.has("shift")) || e.altKey !== want.has("alt")) return false;
+  return key === "Space" ? e.key === " " : e.key.toLowerCase() === key.toLowerCase();
 }
