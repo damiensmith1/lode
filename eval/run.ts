@@ -4,6 +4,7 @@
 // front of us.
 //
 //   npx tsx eval/run.ts eval/example.json [more suites…] [--repeat 3] [--only id] [--json out.json]
+//   npx tsx eval/run.ts eval/example.json --check   (every start and include pattern names a real symbol; no judge)
 //
 // Needs TYPESAFE_API_KEY (lode's .env). Suites in eval/local/ are yours and
 // never pushed (private repos, local paths). A suite:
@@ -77,15 +78,16 @@ const flag = (name: string) => {
 const repeat = Number(flag("repeat") ?? 1);
 const only = flag("only");
 const jsonOut = flag("json");
+const check = args.includes("--check") && args.splice(args.indexOf("--check"), 1).length > 0;
 if (!args.length) {
   console.error("usage: npx tsx eval/run.ts <suite.json…> [--repeat n] [--only id] [--json out.json]");
   process.exit(1);
 }
-if (!process.env.TYPESAFE_API_KEY) {
+if (!check && !process.env.TYPESAFE_API_KEY) {
   console.error("eval: needs TYPESAFE_API_KEY (in lode's .env)");
   process.exit(1);
 }
-const judge: Judge = jevJudge({ apiKey: process.env.TYPESAFE_API_KEY });
+const judge: Judge = jevJudge({ apiKey: process.env.TYPESAFE_API_KEY ?? "" });
 
 // A repo's folder: a path, or a pinned git commit fetched once.
 const cacheRoot = path.join(process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), ".cache"), "lode", "eval");
@@ -137,6 +139,12 @@ for (const file of args) {
   for (const q of suite.questions) {
     if (only && q.id !== only) continue;
     const queries = await queriesFor(folderOf(suite.repos[q.repo], path.dirname(path.resolve(file))));
+    if (check) {
+      const ids = [...queries.graph().allNodes()].filter((n) => !n.external).map((n) => n.id);
+      const dead = [...(q.start ?? []), ...(q.include ?? [])].filter((p) => !ids.some((id) => new RegExp(p).test(id)));
+      console.log(`${dead.length ? "✗" : "✓"} ${q.id}${dead.length ? `  matches nothing: ${dead.join("  ")}` : ""}`);
+      continue;
+    }
     for (let r = 0; r < repeat; r++) {
       const plan = await askFlow(q.question, queries, judge);
       const result: Result = { id: q.id, type: q.type, repo: q.repo, ms: plan.ms, requests: plan.requests, ...score(q, plan) };
@@ -149,6 +157,8 @@ for (const file of args) {
     }
   }
 }
+
+if (check) process.exit(0);
 
 // By type and overall: start rate, mean coverage, noise per question, time.
 const groups = new Map<string, Result[]>([["all", results]]);
