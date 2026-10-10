@@ -251,10 +251,7 @@ async function start() {
   setStatus();
   renderTree(await client.call<FileEntry[]>("files"));
   setupSearch();
-  $("toggle-tree").addEventListener("click", () => {
-    const flowMode = document.body.classList.contains("flow-mode");
-    document.body.classList.toggle(flowMode ? "show-tree" : "no-tree");
-  });
+  $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
 
   // Deep links: #token=…&flow=<node id> | file=<path>
   const entries = openView({ kind: "entries" });
