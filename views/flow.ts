@@ -845,27 +845,27 @@ function rect(el: HTMLElement): Box {
 }
 
 // An arrow from a line (at height y0) in card `s` to card `t`, by where they
-// sit: side to side when `t` is clearly left or right (entering by its
-// header), otherwise out of the side facing `t` and into its top (or bottom,
-// when it's above), so it never doubles back across a card.
+// sit: side to side when `t` is clearly left or right (out of the line, into
+// its header); when they overlap across, bottom to top (or top to bottom,
+// when it's above) through the middle of the overlap.
 function route(s: Box, y0: number, t: Box, header: number): string {
   const GAP = 16;
-  if (t.left >= s.right + GAP || t.right <= s.left - GAP) {
-    const rightward = t.left >= s.right + GAP;
-    const x0 = rightward ? s.right : s.left;
-    const x1 = rightward ? t.left - 3 : t.right + 3;
-    const y1 = t.top + header / 2;
-    const bend = Math.max(40, Math.abs(x1 - x0) / 2) * (rightward ? 1 : -1);
-    return `M ${x0} ${y0} C ${x0 + bend} ${y0}, ${x1 - bend} ${y1}, ${x1} ${y1}`;
+  const across = t.left < s.right + GAP && t.right > s.left - GAP;
+  const below = t.top >= s.bottom + GAP;
+  const above = t.bottom <= s.top - GAP;
+  if (across && (below || above)) {
+    const x = (Math.max(s.left, t.left) + Math.min(s.right, t.right)) / 2;
+    const ya = below ? s.bottom : s.top;
+    const yb = below ? t.top - 3 : t.bottom + 3;
+    const bend = Math.max(40, Math.abs(yb - ya) / 2) * (below ? 1 : -1);
+    return `M ${x} ${ya} C ${x} ${ya + bend}, ${x} ${yb - bend}, ${x} ${yb}`;
   }
-  const exitRight = (t.left + t.right) / 2 >= (s.left + s.right) / 2;
-  const x0 = exitRight ? s.right : s.left;
-  const out = exitRight ? 56 : -56;
-  const below = t.top >= y0;
-  const x1 = Math.min(t.right - 28, Math.max(t.left + 28, x0 + out));
-  const y1 = below ? t.top - 3 : t.bottom + 3;
-  const pull = Math.max(48, Math.abs(y1 - y0) / 2) * (below ? -1 : 1);
-  return `M ${x0} ${y0} C ${x0 + out * 1.5} ${y0}, ${x1} ${y1 + pull}, ${x1} ${y1}`;
+  const rightward = (t.left + t.right) / 2 >= (s.left + s.right) / 2;
+  const x0 = rightward ? s.right : s.left;
+  const x1 = rightward ? t.left - 3 : t.right + 3;
+  const y1 = t.top + header / 2;
+  const bend = Math.max(40, Math.abs(x1 - x0) / 2) * (rightward ? 1 : -1);
+  return `M ${x0} ${y0} C ${x0 + bend} ${y0}, ${x1 - bend} ${y1}, ${x1} ${y1}`;
 }
 
 function newCard(key: string, block: CodeBlock): Card {
