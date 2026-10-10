@@ -169,8 +169,16 @@ export class LodeFlow extends HTMLElement {
       const region = here.block.regions.find((r) => r.start === s && r.end === Number(end));
       if (!region) return;
       if (inPlace(region)) {
-        // Comments and imports: open (or close) in place.
-        here.expanded.has(s) ? here.expanded.delete(s) : here.expanded.add(s);
+        // Comments and imports: open (or close) in place. The card grows by
+        // the lines revealed, so what was showing stays showing.
+        const lines = region.end - region.start;
+        if (here.expanded.has(s)) {
+          here.expanded.delete(s);
+          here.limit = Math.max(PAGE, here.limit - lines);
+        } else {
+          here.expanded.add(s);
+          here.limit += lines;
+        }
         return this.render();
       }
       if (region.node) {

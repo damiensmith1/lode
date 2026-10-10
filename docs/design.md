@@ -367,7 +367,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   the TS plugin (`src/ingest/ts/regions.ts`) as plain line ranges on the
   graph (`Region`), so the core stays language-agnostic. On glance,
   `startRecording` goes from 35 lines to 17, `handleAudio` from 97 to 17.
-  A card shows 25 lines, then "show 25 more" (each click another 25), and
+  A card shows 25 lines, then "show 25 more" (each click another 25;
+  expanding a fold in place grows the card by the lines it reveals), and
   always at least down to the line the next card was opened from, so its
   arrow has an anchor. Long flat files (index.ts: runs of one-line
   `ipcMain.handle(…)`) lean on that; grouping runs of similar statements is
