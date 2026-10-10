@@ -75,7 +75,7 @@ export function toGraph(facts: TsFacts): GraphData {
     edges.push({ kind: "references", from: ref.from, to: ref.to, confidence: "exact", loc: ref.loc, access: ref.access, type: ref.type });
   }
 
-  return { nodes: [...nodes.values()], edges, channels: facts.channels };
+  return { nodes: [...nodes.values()], edges, channels: facts.channels, regions: facts.regions };
 }
 
 function declNode(decl: DeclFact): Node {

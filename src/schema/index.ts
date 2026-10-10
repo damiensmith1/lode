@@ -66,10 +66,20 @@ export interface ChannelEndpoint {
   loc: Location;
 }
 
+// A foldable span of source lines (a block, a literal, a comment run…).
+// `start` is the line that stays visible as the fold's header.
+export interface Region {
+  file: string;
+  start: number;
+  end: number;
+  kind: "block" | "literal" | "args" | "comment" | "imports";
+}
+
 export interface GraphData {
   nodes: Node[];
   edges: Edge[];
   channels?: ChannelEndpoint[];
+  regions?: Region[];
 }
 
 export interface LanguagePlugin {

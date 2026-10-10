@@ -255,16 +255,17 @@ export class Queries {
     return { file, text, annotations: annotations.sort((a, b) => a.line - b.line), symbols };
   }
 
-  // A node's code as a block: its lines, which of them lead where, and who
-  // leads to it. Files and classes come back as an outline of their members.
+  // A node's code as a block: its lines (a file: the whole file), which of
+  // them lead where, who leads to it, and the foldable regions inside it.
   block(id: NodeId): CodeBlock | null {
     const g = this.graph();
     const node = g.node(id);
     if (!node?.loc || node.external) return null;
-    const text = this.readText(node.loc.file);
+    const file = node.loc.file;
+    const text = this.readText(file);
     if (text === null) return null;
     const source = text.split("\n");
-    const lineText = (n: number) => source[n - 1] ?? "";
+    while (source.length > 1 && source[source.length - 1].trim() === "") source.pop();
 
     const callers: CodeBlock["callers"] = [];
     const seenCallers = new Set<string>();
@@ -287,61 +288,13 @@ export class Queries {
       callers.push({ node: this.ref(from), line: e.loc.line, ...lead });
     }
 
-    // A file reads as a file: its top-level code in full, each member folded
-    // to its first line (with a chip to open it), a long import block folded.
-    if (node.id === node.loc.file) {
-      const members = g.childrenOf(id).filter((c) => c.loc && c.kind !== "block");
-      const folds: [number, number][] = [];
-      const links: BlockLink[] = [];
-      const seen = new Set<string>();
-      const add = (l: BlockLink) => {
-        const key = `${l.line}|${l.target.id}|${l.kind}`;
-        if (!seen.has(key)) (seen.add(key), links.push(l));
-      };
-      for (const c of members) {
-        const start = c.loc!.line;
-        const end = c.loc!.endLine ?? start;
-        if (end > start) folds.push([start + 1, end]);
-        add({ line: start, kind: "calls", target: this.ref(c), label: "open" });
-      }
-      const imports = leadingImports(source);
-      if (imports >= 4) folds.push([1, imports]);
-      // What the top-level code itself does.
-      for (const e of g.neighbors(id, "down")) {
-        const to = g.node(e.to);
-        if (!to || to.external || !e.loc || e.loc.file !== node.loc.file) continue;
-        if (e.kind === "calls") add({ line: e.loc.line, kind: "calls", target: this.ref(to) });
-        else if (e.kind === "flows" && e.via && !e.reply) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
-        else if (e.kind === "references" && e.access === "write" && to.kind === "value") add({ line: e.loc.line, kind: "state", target: this.ref(to), label: "writes" });
-      }
-      while (source.length > 1 && source[source.length - 1].trim() === "") source.pop();
-      return {
-        node: this.ref(node),
-        outline: true,
-        lines: source.map((text, i) => ({ n: i + 1, text })),
-        links: links.sort((a, b) => a.line - b.line),
-        callers,
-        folds: folds.sort((a, b) => a[0] - b[0]),
-      };
-    }
-
-    if (node.kind === "container") {
-      const members = g.childrenOf(id).filter((c) => c.loc && c.kind !== "block");
-      return {
-        node: this.ref(node),
-        outline: true,
-        lines: members.map((c) => ({ n: c.loc!.line, text: lineText(c.loc!.line) })),
-        links: members.map((c) => ({ line: c.loc!.line, kind: "calls" as const, target: this.ref(c), label: "open" })),
-        callers,
-      };
-    }
-
-    const start = node.loc.line;
-    const end = node.loc.endLine ?? start;
+    const isFile = node.id === file;
+    const start = isFile ? 1 : node.loc.line;
+    const end = isFile ? source.length : (node.loc.endLine ?? start);
     const lines = [];
-    for (let n = start; n <= end; n++) lines.push({ n, text: lineText(n) });
+    for (let n = start; n <= end; n++) lines.push({ n, text: source[n - 1] ?? "" });
 
-    // Links leave from lines in this block, including from callbacks inside it.
+    // Links leave from lines in this block: its own and its nested nodes'.
     const inside = new Set<NodeId>();
     const walk = (n: NodeId) => (inside.add(n), g.childrenOf(n).forEach((c) => walk(c.id)));
     walk(id);
@@ -356,7 +309,7 @@ export class Queries {
     for (const from of inside) {
       for (const e of g.neighbors(from, "down")) {
         const to = g.node(e.to);
-        if (!to || to.external || !e.loc || e.loc.file !== node.loc.file || inside.has(to.id)) continue;
+        if (!to || to.external || !e.loc || e.loc.file !== file || to.id === id) continue;
         if (e.kind === "calls") add({ line: e.loc.line, kind: "calls", target: this.ref(to) });
         else if (e.kind === "flows" && e.via && !e.reply) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
         else if (e.kind === "references" && e.access === "write" && to.kind === "value") add({ line: e.loc.line, kind: "state", target: this.ref(to), label: "writes" });
@@ -370,14 +323,31 @@ export class Queries {
         if (r) add({ line: start, kind: "state", target: this.ref(r), label: "read by" });
       }
     }
+
+    // Foldable regions, tagged with the declaration whose body they are.
+    const declsByEnd = new Map<number, Node[]>();
+    for (const d of inside) {
+      const n = g.node(d)!;
+      if (d === id || !n.loc?.endLine) continue;
+      declsByEnd.set(n.loc.endLine, [...(declsByEnd.get(n.loc.endLine) ?? []), n]);
+    }
+    const regions = g
+      .regions(file)
+      .filter((r) => r.start >= start && r.end <= end)
+      .map((r) => {
+        const decl = declsByEnd.get(r.end)?.find((d) => r.start >= d.loc!.line && r.start <= d.loc!.line + 5);
+        return { start: r.start, end: r.end, kind: r.kind, ...(decl && { node: this.ref(decl) }) };
+      });
+
     const reg = node.detail?.registration as { call: string; key: string | null } | undefined;
     return {
       node: this.ref(node),
-      outline: false,
+      outline: isFile,
       lines,
       links: links.sort((a, b) => a.line - b.line),
       callers,
       ...(reg && { trigger: reg.key ? `${reg.call} ${reg.key}` : reg.call }),
+      regions,
     };
   }
 
@@ -417,24 +387,6 @@ export class Queries {
     for (const e of this.graph().neighbors(value, "up", ["references"])) if (e.access === access) nodes.add(e.from);
     return [...nodes];
   }
-}
-
-// How many lines at the top of a file are imports (including multi-line
-// `import {` … `} from "…"` and blank lines between them).
-function leadingImports(lines: string[]): number {
-  let last = 0;
-  let open = false;
-  for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (open) {
-      if (/\bfrom\s+["']/.test(t) || t.endsWith(";")) open = false;
-      last = i + 1;
-    } else if (/^import\b/.test(t) || /^(const|let|var)\s.*=\s*require\(/.test(t)) {
-      open = !/\bfrom\s+["']|["'];?$/.test(t);
-      last = i + 1;
-    } else if (t !== "" && !t.startsWith("//")) break;
-  }
-  return last;
 }
 
 function rank(order: string[], value: string | null): number {

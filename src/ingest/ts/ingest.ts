@@ -4,6 +4,7 @@ import type { CallFact, DeclFact, FileFacts, FlowFact, Location, RefFact, TsFact
 import { returningFunction, sourceCalls } from "./flows.js";
 import { loadProject, type Project } from "./project.js";
 import { referenceOf } from "./refs.js";
+import { regionsOf } from "./regions.js";
 import { bridgeReceiveOf, bridgeSendOf, channelFactOf, type ChannelFact, keyParamOf, resolveEndpoints } from "./channels.js";
 import { type Registration, registrationOf } from "./registrations.js";
 
@@ -41,6 +42,7 @@ export function mergeFacts(files: FileFacts[]): TsFacts {
     calls,
     flows: files.flatMap((f) => f.flows),
     refs: files.flatMap((f) => f.refs),
+    regions: files.flatMap((f) => f.regions),
     imports: Object.fromEntries(files.map((f) => [f.file, f.imports])),
     channels: resolveEndpoints(files.flatMap((f) => f.channelFacts), calls),
   };
@@ -269,7 +271,7 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sf, visit);
-    return { file: rel(sf.fileName), imports: importsOf(sf), decls, calls, channelFacts, flows, refs: [...refs.values()] };
+    return { file: rel(sf.fileName), imports: importsOf(sf), decls, calls, channelFacts, flows, refs: [...refs.values()], regions: regionsOf(sf, rel(sf.fileName)) };
   };
 
   // Project files this one imports or re-exports from.

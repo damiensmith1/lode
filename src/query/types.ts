@@ -99,14 +99,23 @@ export interface BlockLink {
   label?: string; // channel key, "writes", "read by"
 }
 
+// A foldable span inside a block. When it's exactly a nested declaration's
+// body, `node` is that declaration (open it as its own card).
+export interface BlockRegion {
+  start: number; // the header line, kept visible
+  end: number;
+  kind: "block" | "literal" | "args" | "comment" | "imports";
+  node?: NodeRef;
+}
+
 export interface CodeBlock {
   node: NodeRef;
-  outline: boolean; // a file or class: one line per member instead of a body
+  outline: boolean; // a whole file
   lines: { n: number; text: string }[];
   links: BlockLink[];
   callers: { node: NodeRef; line: number; kind: LinkKind; label?: string }[]; // line is in the caller
   trigger?: string; // a registered callback: what runs it ("addEventListener drop")
-  folds?: [number, number][]; // files: line ranges shown folded (member bodies, imports)
+  regions: BlockRegion[]; // foldable spans inside it, outermost first
 }
 
 // Where to start reading: entry points by runtime and kind, plus a one-line

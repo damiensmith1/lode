@@ -1,4 +1,4 @@
-import type { ChannelEndpoint, Edge, EdgeKind, GraphData, Node, NodeId } from "../schema/index.js";
+import type { ChannelEndpoint, Edge, EdgeKind, GraphData, Node, NodeId, Region } from "../schema/index.js";
 import { containmentLens, folderLens, type Lens, tagLens } from "./lens.js";
 
 export type Direction = "up" | "down"; // up: what feeds a node; down: what it feeds
@@ -11,6 +11,7 @@ export class Graph {
   private readonly withinIndex = new Map<NodeId, Edge[]>();
   private readonly lenses = new Map<string, Lens>();
   private endpoints: ChannelEndpoint[] = [];
+  private regionsByFile = new Map<string, Region[]>();
 
   // Rejects data the core can't trust: duplicate ids, dangling parents or edges.
   static from(data: GraphData): Graph {
@@ -34,6 +35,7 @@ export class Graph {
       if (edge.within) push(graph.withinIndex, edge.within, edge);
     }
     graph.endpoints = (data.channels ?? []).filter((e) => graph.nodes.has(e.node));
+    for (const r of data.regions ?? []) push(graph.regionsByFile, r.file, r);
     return graph;
   }
 
@@ -75,6 +77,11 @@ export class Graph {
     let edges = 0;
     for (const list of this.outgoing.values()) edges += list.length;
     return { nodes: this.nodes.size, edges };
+  }
+
+  // Foldable line ranges in a file, outermost first.
+  regions(file: string): Region[] {
+    return this.regionsByFile.get(file) ?? [];
   }
 
   // Both ends of every string-keyed channel, matched or not.

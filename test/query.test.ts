@@ -142,13 +142,18 @@ describe("block query", () => {
     expect(q.block("src/main.ts#registerIpc.on:notes:clear")!.trigger).toBe("on notes:clear");
   });
 
-  it("gives a file as the whole file, member bodies folded, with top-level chips", () => {
+  it("gives a file as the whole file, with its members' bodies as regions", () => {
     const b = q.block("src/main.ts")!;
     expect(b.outline).toBe(true);
     expect(b.lines.map((l) => l.n)).toEqual(Array.from({ length: 19 }, (_, i) => i + 1));
-    expect(b.links.filter((l) => l.label === "open").map((l) => l.target.name)).toEqual(expect.arrayContaining(["saveNote", "registerIpc"]));
-    // saveNote spans 7–9: its body (8–9) folds under its first line
-    expect(b.folds).toContainEqual([8, 9]);
+    // saveNote spans 7–9: that region is its body, tagged so it opens as its own card
+    expect(b.regions).toContainEqual(expect.objectContaining({ start: 7, end: 9, node: expect.objectContaining({ name: "saveNote" }) }));
+  });
+
+  it("finds foldable regions inside a function: blocks, literals, argument lists", () => {
+    const b = q.block("src/main.ts#registerIpc")!;
+    // the body itself (16–19) is the card's root; the IPC handler on 17 is one line
+    expect(b.regions[0]).toMatchObject({ start: 16, end: 19, kind: "block" });
   });
 });
 
