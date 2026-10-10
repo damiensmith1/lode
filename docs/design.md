@@ -369,7 +369,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   the TS plugin (`src/ingest/ts/regions.ts`) as plain line ranges on the
   graph (`Region`), so the core stays language-agnostic. On glance,
   `startRecording` goes from 35 lines to 17, `handleAudio` from 97 to 17.
-  A card shows 25 lines, then "show 25 more" (each click another 25;
+  A card shows 25 lines, then "show 25 more", "show all" and, once past
+  25, "⌃ collapse" (back 25, or to the first 25 when fully shown;
   expanding a fold in place grows the card by the lines it reveals, and its
   header line keeps a "⌃ collapse" button), and
   always at least down to the line the next card was opened from, so its

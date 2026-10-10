@@ -94,7 +94,8 @@ const CSS = `
 .fold { margin-left: 6px; padding: 0 6px; font: 11px/18px var(--lode-mono); color: var(--lode-muted); background: var(--lode-sunken); border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
 .fold:hover { border-color: var(--lode-outline); color: var(--lode-fg); }
 .fold.active { border-color: var(--lode-local); color: var(--lode-local); }
-.more-lines { display: block; margin: 6px 0 2px 58px; padding: 3px 10px; font: 11.5px var(--lode-font); color: var(--lode-muted); background: var(--lode-sunken); border-radius: 5px; }
+.paging { display: flex; gap: 6px; margin: 6px 0 2px 58px; }
+.more-lines { padding: 3px 10px; font: 11.5px var(--lode-font); color: var(--lode-muted); background: var(--lode-sunken); border-radius: 5px; }
 .more-lines:hover { color: var(--lode-fg); }
 .chips { flex: none; max-width: 170px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; }
 .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font: 10.5px/18px var(--lode-mono); padding: 0 6px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
@@ -235,9 +236,14 @@ export class LodeFlow extends HTMLElement {
     if (action === "fold") return this.fold(here, Number(start), Number(end));
     if (action === "reroot" && id) return this.openCaller(key, id, Number(line), (el.dataset.kind ?? "calls") as LinkKind);
     if (action === "close") return this.close(key);
-    if (action === "more") {
+    if (action === "more" || action === "all" || action === "less") {
+      // Paging: 25 more, everything, or back 25 (to the first 25 from
+      // everything).
       this.remember();
-      here.limit += PAGE;
+      const total = Number(el.dataset.total);
+      if (action === "more") here.limit += PAGE;
+      else if (action === "all") here.limit = total;
+      else here.limit = here.limit >= total ? PAGE : Math.max(PAGE, here.limit - PAGE);
       return this.rerender();
     }
     if (action === "callers") {
@@ -805,7 +811,13 @@ export class LodeFlow extends HTMLElement {
       const classes = ["ln", own.length || rolled.length ? "linked" : "", out.some((a) => a.line === line) ? "active" : ""].filter(Boolean).join(" ");
       rows.push(`<div class="${classes}" data-n="${line}"><span class="no">${line}</span><span class="src">${html[line - first] || " "}${foldHtml}</span>${chips ? `<span class="chips">${chips}</span>` : ""}</div>`);
     }
-    if (remaining) rows.push(`<button class="more-lines" data-action="more">show ${Math.min(PAGE, remaining)} more · ${remaining} left</button>`);
+    const total = shownLines + remaining;
+    const paging = [
+      remaining ? `<button class="more-lines" data-action="more">show ${Math.min(PAGE, remaining)} more</button>` : "",
+      remaining > PAGE ? `<button class="more-lines" data-action="all" data-total="${total}">show all ${remaining}</button>` : "",
+      c.limit > PAGE && shownLines > PAGE ? `<button class="more-lines" data-action="less" data-total="${total}">⌃ collapse</button>` : "",
+    ].join("");
+    if (paging) rows.push(`<div class="paging">${paging}</div>`);
 
     const span = c.range[1] - c.range[0] + 1;
     return `<section class="card${c.key === this.selected ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
