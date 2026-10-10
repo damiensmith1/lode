@@ -200,7 +200,8 @@ crosses them). Typing, Enter (keeps the indent), Backspace/Delete (joining
 lines only where both are visible together), Tab, paste, cut and copy (the
 code only) and ⌘Z / ⌘⇧Z (per card) work inside a card's code. ⌘S saves the
 card; a card with unsaved edits shows "● unsaved · save · discard", and the
-toolbar counts them. Unsaved cards can't be closed, folded or paged until
+toolbar counts them. Undo goes back past a save: the card becomes unsaved
+again, and saving writes the undo. Unsaved cards can't be closed, folded or paged until
 saved or discarded; other re-renders keep their edits and the caret.
 
 Saving sends the card's edits: one per run of visible lines that changed,

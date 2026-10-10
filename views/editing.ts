@@ -21,6 +21,8 @@ export interface EditingHost {
   // A card's rows changed (dirty or not, from comparing with what it showed).
   edited(cardKey: string): void;
   save(cardKey: string): void;
+  // Rows were restored from an undo step (their numbers may be stale).
+  restored(cardKey: string): void;
 }
 
 interface Point {
@@ -67,9 +69,16 @@ export class Editing {
     return runs;
   }
 
-  // Drop a card's undo history (saved, discarded or closed).
+  // Drop a card's undo history (discarded, closed, or no longer lines up).
   forget(cardKey: string) {
     this.history.delete(cardKey);
+  }
+
+  // After a save: keep the history (undo goes back past the save, as
+  // unsaved edits again), but typing next starts a new step.
+  saved(cardKey: string) {
+    const h = this.history.get(cardKey);
+    if (h) h.typedAt = 0;
   }
 
   private keepCaretInText() {
@@ -288,6 +297,7 @@ export class Editing {
     to!.push(this.snapshot(code));
     h.typedAt = 0;
     code.innerHTML = snap.html;
+    this.host.restored(cardKeyOf(code));
     const all = rows(code);
     if (snap.caret && all[snap.caret.row]) this.caret({ row: all[snap.caret.row], offset: snap.caret.offset });
     this.host.edited(cardKeyOf(code));

@@ -144,6 +144,7 @@ export class LodeFlow extends HTMLElement {
   // against and to tell edited from not).
   private editing?: Editing;
   private dirty = new Set<string>();
+  private held = new Set<string>(); // just saved, caret still in: shown as edited, not redrawn
   private bases = new Map<string, { file: string; runs: { start: number; end: number }[]; original: Map<number, string> }>();
   private built = false;
   private undo: Snapshot[] = [];
@@ -178,12 +179,19 @@ export class LodeFlow extends HTMLElement {
       </div>
       <div class="canvas" part="canvas"><div class="board" part="board"></div></div>`;
     this.root.addEventListener("click", (e) => void this.onClick(e));
+    // A just-saved card refreshes once the caret leaves its code.
+    this.root.addEventListener("focusout", (e) => {
+      const code = (e.target as Element).closest?.<HTMLElement>(".code");
+      const key = code?.closest<HTMLElement>(".card")?.dataset.key;
+      if (key && !code!.contains((e as FocusEvent).relatedTarget as Node | null)) setTimeout(() => this.release(key), 0);
+    });
     this.editing = new Editing({
       root: this.root,
       file: (key) => this.cardMap.get(key)?.block.node.file,
       highlight: (text, file) => this.host?.syntax?.(text, file)[0] ?? escape(text),
       edited: (key) => this.edited(key),
       save: (key) => void this.saveEdits(key, "key"),
+      restored: (key) => this.renumber(key),
     });
     this.setupDrag();
     this.stateKey = this.getAttribute("state") ?? this.stateKey;
@@ -431,8 +439,71 @@ export class LodeFlow extends HTMLElement {
       if (note) note.textContent = ` · ${result.message}`;
       return false;
     }
-    await this.refreshCard(key);
+    this.rebase(key);
+    void this.fetch(this.cardMap.get(key)!.block.node.id).then((block) => block && Object.assign(this.cardMap.get(key) ?? {}, { block }));
     return true;
+  }
+
+  // Just saved: the card keeps what it shows (so undo can go back past the
+  // save), renumbered to the file as it now is, and that becomes what it's
+  // compared against. It's held like this, not redrawn from the file, while
+  // the caret is in its code; leaving lets it refresh (see release()).
+  private rebase(key: string) {
+    const base = this.bases.get(key);
+    const code = this.cardEl(key)?.querySelector<HTMLElement>(".code");
+    if (!base || !code || !this.editing) return;
+    const written = this.editing.runs(code);
+    let shift = 0;
+    const runs = base.runs.map((r, i) => {
+      const lines = written.get(i) ?? [];
+      const start = r.start + shift;
+      shift += lines.length - (r.end - r.start + 1);
+      return { start, end: start + lines.length - 1 };
+    });
+    const original = new Map<number, string>();
+    runs.forEach((r, i) => (written.get(i) ?? []).forEach((l, k) => original.set(r.start + k, l)));
+    this.bases.set(key, { file: base.file, runs, original });
+    const c = this.cardMap.get(key);
+    if (c?.fragment) c.range = [c.range[0], c.range[1] + shift];
+    for (const row of code.querySelectorAll<HTMLElement>(":scope > .ln[data-new]")) {
+      delete row.dataset.new;
+      row.classList.remove("added");
+      row.setAttribute("part", "line");
+    }
+    this.renumber(key);
+    this.dirty.delete(key);
+    this.held.add(key);
+    this.editing.saved(key);
+    const el = this.cardEl(key)!;
+    el.classList.remove("dirty");
+    el.querySelector(".edit-note")!.textContent = "";
+    this.emit(DIRTY_EVENT, { card: this.info(key)!, dirty: false });
+    this.updateToolbar();
+    this.drawArrows();
+  }
+
+  // The caret left a held card: show it fresh from the file. Its undo
+  // history stays if the fresh card shows the same lines in the same runs.
+  private release(key: string) {
+    if (!this.held.has(key) || this.dirty.has(key)) return;
+    // Focus "left" only because a redraw moved the card (it's put back).
+    if (this.cardEl(key)?.contains(this.root.activeElement)) return;
+    const code = this.cardEl(key)?.querySelector<HTMLElement>(".code");
+    const shown = code && this.editing ? this.editing.runs(code) : null;
+    this.held.delete(key);
+    const c = this.cardMap.get(key);
+    if (c && !c.fragment) c.range = fullRange(c.block);
+    this.rerender();
+    const base = this.bases.get(key);
+    const linesUp =
+      !!shown &&
+      !!base &&
+      base.runs.length === shown.size &&
+      base.runs.every((r, i) => {
+        const lines = shown.get(i) ?? [];
+        return lines.length === r.end - r.start + 1 && lines.every((l, k) => l === base.original.get(r.start + k));
+      });
+    if (!linesUp) this.editing?.forget(key);
   }
 
   private async discardEdits(key: string) {
@@ -443,12 +514,29 @@ export class LodeFlow extends HTMLElement {
   // Forget a card's edits and show it fresh from the file.
   private async refreshCard(key: string) {
     this.dirty.delete(key);
+    this.held.delete(key);
     this.editing?.forget(key);
     const c = this.cardMap.get(key);
     const block = c && (await this.fetch(c.block.node.id));
     if (c && block) Object.assign(c, { block, ...(c.fragment ? {} : { range: fullRange(block) }) });
     this.emit(DIRTY_EVENT, { card: this.info(key)!, dirty: false });
     this.rerender();
+  }
+
+  // Number a card's rows from the lines it shows: rows that were lines get
+  // their run's numbers in order, added rows "+".
+  private renumber(key: string) {
+    const base = this.bases.get(key);
+    const code = this.cardEl(key)?.querySelector<HTMLElement>(".code");
+    if (!base || !code) return;
+    const next = base.runs.map((r) => r.start);
+    for (const row of code.querySelectorAll<HTMLElement>(":scope > .ln")) {
+      if (row.dataset.new !== undefined) continue;
+      const run = Number(row.dataset.run);
+      const n = next[run]++;
+      row.dataset.n = String(n);
+      row.querySelector(".no")!.textContent = String(n);
+    }
   }
 
   // Unsaved cards can't be closed, folded or paged (that would lose or
@@ -554,7 +642,7 @@ export class LodeFlow extends HTMLElement {
     for (const k of gone) this.cardMap.delete(k);
     this.arrows = this.arrows.filter((a) => !gone.has(a.from) && !gone.has(a.to));
     if (this.selected && gone.has(this.selected)) this.selected = null;
-    for (const k of gone) (this.group.delete(k), this.bases.delete(k), this.editing?.forget(k));
+    for (const k of gone) (this.group.delete(k), this.bases.delete(k), this.held.delete(k), this.editing?.forget(k));
     this.render();
     this.emit(CLOSE_EVENT, { cards: [...gone] });
     this.changed();
@@ -971,6 +1059,7 @@ export class LodeFlow extends HTMLElement {
       // Empty canvas: drag to move around.
       if (!target.closest(".card") && target.closest(".canvas")) {
         e.preventDefault(); // no text selection while panning
+        this.leaveCode(); // a click on the canvas leaves the code too
         window.getSelection()?.removeAllRanges();
         pan = { x: e.clientX, y: e.clientY, cam: { ...this.camera } };
         canvas.setPointerCapture(e.pointerId);
@@ -1073,14 +1162,14 @@ export class LodeFlow extends HTMLElement {
     }
     // Cards with unsaved edits keep their own rows (and the caret, if it's
     // in one): rendering them from the block would lose the edits.
-    const kept = new Map([...this.dirty].flatMap((k) => (this.cardEl(k) ? [[k, this.cardEl(k)!] as const] : [])));
+    const kept = new Map([...this.dirty, ...this.held].flatMap((k) => (this.cardEl(k) ? [[k, this.cardEl(k)!] as const] : [])));
     const focused = [...kept].find(([, el]) => el.contains(this.root.activeElement));
     const caret = focused && this.editing?.selection(focused[1].querySelector<HTMLElement>(".code")!);
     board.innerHTML = [...this.cardMap.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
     for (const [k, el] of kept) {
       const fresh = this.cardEl(k);
       if (!fresh) continue;
-      el.className = fresh.className + " dirty";
+      el.className = fresh.className + (this.dirty.has(k) ? " dirty" : "");
       fresh.replaceWith(el);
     }
     if (focused && caret) {
@@ -1185,7 +1274,7 @@ export class LodeFlow extends HTMLElement {
       c.limit > PAGE && shownLines > PAGE ? `<button part="paging-button" class="more-lines" data-action="less" data-total="${total}">⌃ collapse</button>` : "",
     ].join("");
     if (paging) rows.push(`<div class="paging" part="paging" contenteditable="false">${paging}</div>`);
-    if (!this.dirty.has(c.key)) this.bases.set(c.key, { file: n.file ?? "", runs, original });
+    if (!this.dirty.has(c.key) && !this.held.has(c.key)) this.bases.set(c.key, { file: n.file ?? "", runs, original });
     const editable = this.isEditable(c);
 
     const span = c.range[1] - c.range[0] + 1;

@@ -367,7 +367,12 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   pastes and multi-line deletes rebuild a run's rows. ⌘S saves through
   `editFile` (or `host.saveEdits`) with each changed run's original lines,
   refused if the file no longer matches; it re-indexes, so the graph
-  follows. Unsaved cards show it, keep their rows through re-renders, and
+  follows. After a save the card isn't redrawn while the caret is in it:
+  it keeps its rows, renumbered to the file and taken as the new base, so
+  undo can go back past the save (as unsaved edits). Leaving the code
+  refreshes it from the file; its undo history stays only if the fresh
+  card shows the same lines in the same runs (a saved line that now folds
+  away ends it). Unsaved cards show it, keep their rows through re-renders, and
   can't be closed, folded or paged until saved or discarded. Selection
   gestures (⌘-click, header) take the caret out of code so keys act on
   cards again.
