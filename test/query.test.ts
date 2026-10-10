@@ -136,6 +136,13 @@ describe("block query", () => {
     expect(b.callers).toContainEqual(expect.objectContaining({ node: expect.objectContaining({ name: "handle:notes:save" }), line: 17 }));
   });
 
+  it("counts passing a function along as leading to it, from both ends", () => {
+    const basic = GraphStore.open(tsPlugin, "test/fixtures/basic", { cacheDir: path.join(cacheDir, "basic") });
+    const qb = new Queries(() => basic.graph, basic.root);
+    expect(qb.block("src/state.ts#wire")!.links).toContainEqual(expect.objectContaining({ label: "passes", target: expect.objectContaining({ name: "setCurrent" }) }));
+    expect(qb.block("src/state.ts#setCurrent")!.callers).toContainEqual(expect.objectContaining({ label: "passes it", node: expect.objectContaining({ name: "wire" }) }));
+  });
+
   it("gives files as an outline of their members", () => {
     const b = q.block("src/main.ts")!;
     expect(b.outline).toBe(true);

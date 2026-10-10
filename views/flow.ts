@@ -11,6 +11,7 @@ interface Column {
   fromLine?: number; // the line in the previous column that opened it
   unfolded: Set<number>; // folds the reader opened (by first hidden line)
   showAll: boolean;
+  allCallers?: boolean;
 }
 
 const CSS = `
@@ -28,6 +29,7 @@ const CSS = `
 .callers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11.5px; color: var(--lode-faint); margin-bottom: 4px; }
 .caller { font: 11.5px var(--lode-mono); color: var(--lode-muted); padding: 1px 6px; border: 1px dashed var(--lode-outline); border-radius: 5px; }
 .caller:hover { border-style: solid; color: var(--lode-fg); }
+.caller.open { border-style: solid; border-color: var(--lode-local); color: var(--lode-local); }
 .code { padding: 6px 0 8px; font: 12px/20px var(--lode-mono); overflow-x: auto; }
 .ln { display: flex; align-items: flex-start; padding-right: 8px; }
 .ln .no { flex: none; width: 46px; padding-right: 12px; text-align: right; color: #a3a09a; user-select: none; }
@@ -181,14 +183,17 @@ export class LodeFlow extends HTMLElement {
       this.select(this.columns.length - 1);
       this.scrollToColumn(this.columns.length - 1);
     } else if (action === "reroot" && id) {
+      // The caller goes to the left of this block, with an arrow from its line.
       const block = await this.fetch(id);
       if (!block) return;
       this.rootHistory.push(this.columns);
-      const [first, ...rest] = this.columns;
-      this.columns = [{ block, unfolded: new Set(), showAll: false }, { ...first, fromLine: Number(line) }, ...rest];
+      this.columns = [{ block, unfolded: new Set(), showAll: false }, { ...this.columns[c], fromLine: Number(line) }, ...this.columns.slice(c + 1)];
       this.render();
       this.select(0);
       this.scrollToColumn(0);
+    } else if (action === "callers") {
+      this.columns[c].allCallers = true;
+      this.render();
     } else if (action === "unfold") {
       this.columns[c].unfolded.add(Number(gap));
       this.render();
@@ -237,13 +242,24 @@ export class LodeFlow extends HTMLElement {
     const activeLine = next?.fromLine;
     const activeTarget = next?.block.node.id;
 
-    const callers =
-      i === 0 && b.callers.length
-        ? `<div class="callers">called by ${b.callers
-            .slice(0, MAX_CALLERS)
-            .map((cl) => `<button class="caller" data-action="reroot" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(cl.node.name)}${cl.label ? ` ⇢ ${escape(cl.label)}` : ""}</button>`)
-            .join("")}${b.callers.length > MAX_CALLERS ? ` +${b.callers.length - MAX_CALLERS}` : ""}</div>`
-        : "";
+    // Every block says what leads to it; the one open to its left is marked.
+    const left = this.columns[i - 1]?.block.node.id;
+    const shownCallers = c.allCallers ? b.callers : b.callers.slice(0, MAX_CALLERS);
+    const allCalls = b.callers.every((cl) => cl.kind === "calls" && !cl.label);
+    const callers = b.callers.length
+      ? `<div class="callers">${allCalls ? "called by" : "used by"} ${shownCallers
+          .map(
+            (cl) =>
+              `<button class="caller${cl.node.id === left ? " open" : ""}" data-action="reroot" data-col="${i}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(cl.node.name)}${
+                cl.kind === "channel" ? ` ⇢ ${escape(cl.label ?? "")}` : cl.label ? ` · ${escape(cl.label)}` : ""
+              }</button>`,
+          )
+          .join("")}${
+          b.callers.length > shownCallers.length ? `<button class="crumb" data-action="callers" data-col="${i}">+${b.callers.length - shownCallers.length} more</button>` : ""
+        }</div>`
+      : b.outline
+        ? ""
+        : `<div class="callers">nothing in the project calls this</div>`;
 
     const linksByLine = new Map<number, BlockLink[]>();
     for (const l of b.links) linksByLine.set(l.line, [...(linksByLine.get(l.line) ?? []), l]);
@@ -359,6 +375,7 @@ function isComment(text: string): boolean {
 function chipText(l: BlockLink): string {
   if (l.kind === "channel") return `ipc ⇢ ${l.target.name}`;
   if (l.kind === "state") return `${l.label === "read by" ? "read by" : "writes"} ${l.target.name}`;
+  if (l.label === "passes") return `passes ${l.target.name}`;
   return l.label === "open" ? l.target.name : `→ ${l.target.name}`;
 }
 

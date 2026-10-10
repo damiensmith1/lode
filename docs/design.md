@@ -347,16 +347,15 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   Prior art: Code Bubbles and the Haystack editor; lode's difference is that
   the graph picks which blocks and lines matter. Next idea: a model-written
   one-line summary above each block.
-- **Flow + focus together.** Focus works best next to the code it
-  summarises, and in flow mode the flow *is* the code. So the app puts a
-  focus view beside the flow that follows the selected block (click a block
-  to select it; opening a chip or re-rooting selects the new one). Focus's
-  steps and cards don't navigate focus itself there: they call the host's
-  `reveal(id, from)`, which opens that node in the flow (next column from
-  the line that leads to it, a re-root for a caller, or back to it if it's
-  open). Hovering a step marks its line in the block, without scrolling.
-  Focus also covers types ("uses it") and values ("writes it" / "reads
-  it"). In flow mode the file tree hides by default to give the flow room.
+- **What leads here, on every block.** Tried a focus panel beside the flow
+  that followed the selected block; it duplicated the flow and was dropped.
+  Its one useful part, who reaches this code, now sits in every block's
+  header: callers, IPC senders, code passing it as a callback ("passes
+  it"), writers of a value, users of a type. Clicking one puts it to the
+  left of that block with an arrow from the calling line; the one already
+  open to the left is marked. Passing a function (`rows.map(toTranscript)`)
+  is also a chip on the passing line. Focus remains as the code pane's
+  linked tab, where it works well.
 - **Host syntax hook**: hosts may pass `syntax(text, file)` (escaped HTML per
   line) and `syntaxCss`; views put the CSS inside their shadow root. Views
   never bundle a highlighter.

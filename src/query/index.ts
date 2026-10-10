@@ -273,12 +273,23 @@ export class Queries {
 
     const callers: CodeBlock["callers"] = [];
     const seenCallers = new Set<string>();
+    // What leads here: calls, IPC senders, code passing it as a callback,
+    // writers of a value, users of a type.
+    const leadsHere = (e: Edge): { kind: LinkKind; label?: string } | null => {
+      if (e.kind === "calls") return { kind: "calls" };
+      if (e.kind === "flows" && e.via) return { kind: "channel", label: e.via.key };
+      if (e.kind !== "references") return null;
+      if (e.access === "read" && node.kind === "callable") return { kind: "calls", label: "passes it" };
+      if (e.access === "write" && node.kind === "value") return { kind: "state", label: "writes it" };
+      if (e.access === "type" && node.kind === "type") return { kind: "calls", label: "uses it" };
+      return null;
+    };
     for (const e of g.neighbors(id, "up")) {
-      const kind = e.kind === "calls" ? "calls" : e.kind === "flows" && e.via ? "channel" : null;
+      const lead = leadsHere(e);
       const from = g.node(e.from);
-      if (!kind || !from || from.external || !e.loc || seenCallers.has(from.id)) continue;
+      if (!lead || !from || from.external || !e.loc || seenCallers.has(from.id)) continue;
       seenCallers.add(from.id);
-      callers.push({ node: this.ref(from), line: e.loc.line, kind, ...(e.via && { label: e.via.key }) });
+      callers.push({ node: this.ref(from), line: e.loc.line, ...lead });
     }
 
     if (node.kind === "container") {
@@ -316,6 +327,7 @@ export class Queries {
         if (e.kind === "calls") add({ line: e.loc.line, kind: "calls", target: this.ref(to) });
         else if (e.kind === "flows" && e.via) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
         else if (e.kind === "references" && e.access === "write" && to.kind === "value") add({ line: e.loc.line, kind: "state", target: this.ref(to), label: "writes" });
+        else if (e.kind === "references" && e.access === "read" && to.kind === "callable") add({ line: e.loc.line, kind: "calls", target: this.ref(to), label: "passes" });
       }
     }
     // A value leads to whoever reads it.

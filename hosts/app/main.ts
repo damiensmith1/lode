@@ -142,8 +142,7 @@ function openView(request: ViewRequest, options: { linked?: boolean } = {}): Tab
     syntaxCss: SYNTAX_CSS,
     highlight: (h) => {
       tab.highlight = h;
-      // The flow's selection drives the side summary; other views drive the code pane.
-      if (tab.view.tagName === "LODE-FLOW") return void (h && sideFocus.setAttribute("node", h.node));
+      if (tab.view.tagName === "LODE-FLOW") return; // the flow is the code; nothing else to highlight
       if (button.getAttribute("aria-selected") === "true") applyHighlight(h);
     },
   };
@@ -233,26 +232,6 @@ async function openFile(file: string) {
   await showSource(file);
   $("code").scrollTop = 0;
 }
-
-// --- Side summary: focus next to the flow ------------------------------------
-//
-// In flow mode a focus view sits beside the flow and follows its selected
-// block. Its cards and steps open things *in the flow* (reveal), and hovering
-// a step marks its line in the block.
-
-type FlowElement = HTMLElement & { reveal(id: string, from: string): Promise<void>; mark(id: string, line?: number): void };
-const flowElement = () => tabs.find((t) => t.view.tagName === "LODE-FLOW")?.view as FlowElement | undefined;
-
-const sideFocus = createView({ kind: "focus", id: "" }, client, {
-  openSource: (file, line) => {
-    document.body.classList.remove("flow-mode"); // show the code pane until the flow tab is picked again
-    void showSource(file, line);
-  },
-  openView: (r) => void openView(r),
-  reveal: (id, from) => void flowElement()?.reveal(id, from),
-  highlight: (h) => h && flowElement()?.mark(h.node, h.hover),
-});
-$("side").append(sideFocus);
 
 // Point the flow view at a node, if the flow tab is the one showing.
 function startFlow(id: string): boolean {
