@@ -600,6 +600,40 @@ Views depend on core and query only through their public APIs; an adapter
 only maps host concepts (open tab, editor decorations, sidebar, SCM action)
 onto view mounts.
 
+## Asking for a flow (planned)
+
+Typing "/" in the top bar's box turns symbol search into a question: "show
+me how we create the tabs", "what most likely breaks from these changes".
+The answer is a flow, laid out in a new tab: real cards, arrows, a reading
+path, and a one-line note per card.
+
+**Jev is the core, not an LLM.** Building a flow is selection and ranking
+over the graph, which is what TypeSafe's Jev (a System One model: typed
+judgments and probabilities, no generated text) is for. Code owns the
+workflow; the graph supplies candidates; Jev judges them:
+
+1. **Route.** A Choice judgment picks the kind of question (how X works,
+   what breaks, where X is handled, what calls X, …).
+2. **Start.** Lode finds candidate symbols (name search, entry points,
+   changed symbols); Jev scores each one's relevance to the question.
+3. **Follow.** From the best starts, lode walks the graph in the routed
+   direction (callees, callers, or downstream of changes); Jev judges
+   whether each next symbol belongs, within a step budget (about 5-15
+   cards).
+4. **Breakage.** Lode collects everything downstream of the changed
+   symbols; Jev scores how likely each is to break given the diff.
+5. **Render.** A flow plan (cards, arrows, path, notes built from facts
+   and scores: "reads the changed `ViewRequest` · risk high") opens in a
+   new tab with the "open all" layout; cards stay live.
+
+Every card is a real graph node that code chose, scores are data (so
+thresholds, budgets and "show more" are settings), and judgments run in
+parallel, so it's fast. **An LLM is optional** and only writes a short
+summary over the finished flow (and could take questions that fit no
+route). The judging step is an interface: Jev by default, an LLM or a
+heuristic where TypeSafe isn't available. The Jev key lives in `.env`
+(git-ignored), server-side only.
+
 ## Build vs buy: existing code graphs
 
 Joern (code property graph) and CodeQL were considered as the core and
