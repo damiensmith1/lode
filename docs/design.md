@@ -405,7 +405,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   (two fingers, or the wheel; shift for sideways) pans, a pinch or
   ⌘-scroll zooms around the pointer (20–200%), dragging empty space pans, dragging a card's header moves the card (scaled, so it tracks the
   pointer at any zoom). Going to a card pans only if it's off screen. The
-  toolbar shows the zoom (click for 100%) and "focus" (brings the selected
+  toolbar shows the zoom (click for 100%), "fit" (every card in view, at
+  most 100%) and "focus" (brings the selected
   card to the left of the view at up to 100%; off when nothing is selected). The camera is saved
   with the layout, in canvas coordinates; a startup link to a card that's
   already on the restored canvas selects it without moving the view.

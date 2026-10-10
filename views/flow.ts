@@ -151,6 +151,7 @@ export class LodeFlow extends HTMLElement {
         <span class="spacer"></span>
         <span class="faint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header</span>
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
+        <button class="crumb" data-action="fit" title="Show every card">fit</button>
         <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
@@ -224,6 +225,7 @@ export class LodeFlow extends HTMLElement {
     const here = this.cards.get(key);
 
     if (action === "undo") return this.popUndo();
+    if (action === "fit") return this.fit();
     if (action === "focus") return this.selected && this.frame(this.selected);
     if (action === "zoom-reset") return this.zoomTo(1, this.viewCentre());
     if (action === "clear") {
@@ -370,6 +372,7 @@ export class LodeFlow extends HTMLElement {
 
   private select(key: string) {
     this.selected = key;
+    this.root.querySelector<HTMLButtonElement>('[data-action="fit"]')!.disabled = !this.cards.size;
     this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = false;
     this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", c.dataset.key === key));
     const c = this.cards.get(key);
@@ -435,6 +438,21 @@ export class LodeFlow extends HTMLElement {
   // Bring a card to the left of the view at a readable zoom: no closer than
   // 100%, further out only if it wouldn't fit otherwise. Vertically centred
   // when it fits, else from its top.
+  // Zoom and pan so every card is in view (at most 100%).
+  private fit() {
+    const els = [...this.root.querySelectorAll<HTMLElement>(".card")];
+    if (!els.length) return;
+    const minX = Math.min(...els.map((e) => e.offsetLeft));
+    const minY = Math.min(...els.map((e) => e.offsetTop));
+    const maxX = Math.max(...els.map((e) => e.offsetLeft + e.offsetWidth));
+    const maxY = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight));
+    const view = this.canvas().getBoundingClientRect();
+    const k = Math.max(ZOOM.min, Math.min(1, (view.width - 48) / (maxX - minX), (view.height - 48) / (maxY - minY)));
+    this.camera = { k, x: (view.width - (maxX - minX) * k) / 2 - minX * k, y: (view.height - (maxY - minY) * k) / 2 - minY * k };
+    this.applyCamera();
+    this.changed();
+  }
+
   private frame(key: string) {
     const el = this.cardEl(key);
     if (!el) return;
