@@ -698,7 +698,8 @@ top-level declarations and methods, matched on name and path words
 one- or two-letter names) need a 0.9 noul to get in, others 0.6; 12 cards
 and 2 hops at most ("where" follows 1). The service's `ask` method uses
 `options.judge`, or Jev when `TYPESAFE_API_KEY` is set (the CLI loads
-just that key from a `.env` in the working directory or lode's folder;
+lode's own settings from the `.env` in lode's folder only, never the
+working directory, since `OPENAI_BASE_URL` decides where keys are sent;
 nothing else a `.env` holds is read). In the views,
 `flow.ask(question)` (or `ViewRequest.ask`) shows a banner, asks, and
 lays the plan out by step, left to right; notes show under each card's
@@ -767,6 +768,17 @@ burst (Haiku streams it), so the panel shows "thinking…" and the model's
 reads while waiting, and writes text out as it arrives at a steady rate
 (whatever is waiting shows in about 0.8s): real streaming passes straight
 through, a burst types out instead of appearing at once.
+Providers: several at once, by name (`src/explain/providers.ts`): Anthropic
+(`anthropicModel`) and any OpenAI-compatible API (`openaiModel`: Chat
+Completions with streaming and function calls; lode's conversation stays
+Anthropic-shaped and is mapped to OpenAI messages, tool results becoming
+"tool" messages, and back), each with the models it offers. A question
+names `"provider:model"`, so Claude direct and Claude through OpenRouter
+stay apart. A host's `providers` are the only ones used; otherwise every
+provider the environment has a key for (OpenAI-compatible ones once their
+models are listed: lode can't guess ids). The service's `explainModels`
+gives the picker its groups. A model that doesn't stream still works: its
+text comes with the turn.
 `LODE_EXPLAIN_MODEL` sets the server's default model; the panel picks one
 per question (`ExplainRequest.model`, passed to `ChatModel.chat`; a
 host's `models` option limits it, `explainModels` sets the picker).

@@ -7,7 +7,8 @@ import { askFlow } from "../ask/index.js";
 import { jevJudge, type Judge } from "../ask/judge.js";
 import { contextFor, type ContextRequest } from "../context/index.js";
 import { explain, type ExplainRequest } from "../explain/index.js";
-import { anthropicModel, type ChatModel } from "../explain/model.js";
+import type { ChatModel } from "../explain/model.js";
+import { chooseModel, providersFromEnv, type ExplainProviders } from "../explain/providers.js";
 
 // lode's methods with no transport attached: what views call, as plain async
 // functions. The WebSocket server is one way to reach them; a host that runs
@@ -23,11 +24,19 @@ export interface ServiceOptions {
   // What judges "/" questions (see src/ask). Default: Jev, when
   // TYPESAFE_API_KEY is set (read when a question comes in).
   judge?: Judge;
-  // What explains flows (see src/explain). Default: Claude over the
-  // Anthropic API, when ANTHROPIC_API_KEY is set (model: LODE_EXPLAIN_MODEL,
-  // default claude-sonnet-5-5).
+  // What explains flows (see src/explain): exactly these providers, by
+  // name, each a ChatModel and the models it offers; a question picks one
+  // as "provider:model". Unset: every provider the environment has a key
+  // for (see providersFromEnv: Anthropic, OpenAI or a compatible server,
+  // OpenRouter), so a host that passes providers decides alone what's used.
+  providers?: ExplainProviders;
+  // Shorthand for one provider ("default") answering with its own default.
   model?: ChatModel;
-  // Which models a request may ask for (ExplainRequest.model); unset: any.
+  // The model a question gets when it doesn't pick one ("provider:model").
+  // Default: LODE_EXPLAIN_MODEL, else the first provider's first model.
+  defaultModel?: string;
+  // Which models a request may ask for ("provider:model"); unset: any the
+  // providers offer, or name.
   models?: string[];
   // Where views' saved state goes when they use the service for it (the
   // default storage). Defaults to the store's cache directory.
@@ -124,6 +133,15 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     return { ok: true, files: files.length ? files : [String(file)] };
   };
 
+  // The providers that explain: the host's, or the environment's (read
+  // when needed, so .env changes show after a restart).
+  const explainProviders = (): { providers: ExplainProviders; notes: string[]; fallback?: string } => {
+    if (options.providers) return { providers: options.providers, notes: [], fallback: options.defaultModel };
+    if (options.model) return { providers: { default: { label: "Default", model: options.model, models: (options.models ?? []).map((id) => ({ id: id.replace(/^default:/, ""), label: id.replace(/^default:/, "") })) } }, notes: [], fallback: options.defaultModel };
+    const { providers, notes } = providersFromEnv();
+    return { providers, notes, fallback: options.defaultModel ?? process.env.LODE_EXPLAIN_MODEL };
+  };
+
   // The judge for "/" questions and judged context: the host's, or Jev
   // when a key is set (read when needed).
   const judgeOf = () => options.judge ?? (process.env.TYPESAFE_API_KEY ? jevJudge({ apiKey: process.env.TYPESAFE_API_KEY }) : null);
@@ -173,16 +191,23 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     // Explain cards, answer follow-ups, add cards; streamed as "explain"
     // events tagged with the caller's `stream` id.
     explain: (p) => {
-      const model = options.model ?? (process.env.ANTHROPIC_API_KEY ? anthropicModel({ apiKey: process.env.ANTHROPIC_API_KEY, ...(process.env.LODE_EXPLAIN_MODEL && { model: process.env.LODE_EXPLAIN_MODEL }) }) : null);
-      if (!model) throw new Error("Explaining needs a model: set ANTHROPIC_API_KEY in the environment or lode's .env");
       const request = p.request as ExplainRequest;
       if (!Array.isArray(request?.messages) || !request.messages.length) throw new Error("explain: no messages");
-      if (request.model !== undefined && (typeof request.model !== "string" || !/^[\w.:/-]{1,100}$/.test(request.model))) throw new Error("explain: bad model name");
-      if (request.model && options.models && !options.models.includes(request.model)) throw new Error(`explain: model ${request.model} isn't allowed here (${options.models.join(", ")})`);
+      if (request.model !== undefined && (typeof request.model !== "string" || !/^[\w.:/-]{1,120}$/.test(request.model))) throw new Error("explain: bad model name");
+      const { providers, notes, fallback } = explainProviders();
+      if (!Object.keys(providers).length)
+        throw new Error(["Explaining needs a model: set ANTHROPIC_API_KEY, OPENAI_API_KEY (+ LODE_OPENAI_MODELS) or OPENROUTER_API_KEY (+ LODE_OPENROUTER_MODELS) in lode's .env", ...notes].join(". "));
+      const choice = chooseModel(providers, request.model, fallback);
+      if (!choice) throw new Error(`explain: no provider offers ${request.model} (${Object.keys(providers).join(", ")})`);
+      const ref = `${choice.provider}:${choice.model}`;
+      if (options.models && !options.models.includes(ref)) throw new Error(`explain: model ${ref} isn't allowed here (${options.models.join(", ")})`);
+      const model = providers[choice.provider].model;
       const stream = String(p.stream ?? "");
       const abort = new AbortController();
       if (stream) running.set(stream, abort);
-      return explain(request, queries, model, (event) => emit("explain", { stream, event }), abort.signal).finally(() => running.delete(stream));
+      return explain({ ...request, ...(choice.model && { model: choice.model }) }, queries, model, (event) => emit("explain", { stream, event }), abort.signal)
+        .then((result) => ({ ...result, model: ref }))
+        .finally(() => running.delete(stream));
     },
     // Which names (as written in prose: "addTab", "Queries.changes",
     // "this.save()") are real symbols: { name: id }. A name several symbols
@@ -209,6 +234,16 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
         if (pick) out[raw] = pick.id;
       }
       return out;
+    },
+    // What the explain panel can offer, by provider: { providers: [{ id,
+    // label, models: [{ id: "provider:model", label }] }], default, notes }.
+    // No keys or URLs.
+    explainModels: () => {
+      const { providers, notes, fallback } = explainProviders();
+      const allowed = (ref: string) => !options.models || options.models.includes(ref);
+      const list = Object.entries(providers).map(([id, p]) => ({ id, label: p.label, models: p.models.map((m) => ({ id: `${id}:${m.id}`, label: m.label })).filter((m) => allowed(m.id)) }));
+      const choice = chooseModel(providers, undefined, fallback);
+      return { providers: list.filter((p) => p.models.length), default: choice ? `${choice.provider}:${choice.model}` : undefined, notes };
     },
     // Stop an explanation that's still running (its `stream` id).
     explainCancel: (p) => {

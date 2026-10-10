@@ -15,6 +15,8 @@ export { createService, serveMessages, type LodeService, type ServiceOptions } f
 export { askFlow, lexicalCandidates, type AskOptions } from "./ask/index.js";
 export { contextFor, type ContextItem, type ContextRequest, type ContextResult } from "./context/index.js";
 export { explain, type ExplainEvent, type ExplainRequest, type ExplainResult } from "./explain/index.js";
+export { openaiModel, type OpenAIOptions } from "./explain/openai.js";
+export { chooseModel, parseModelList, providersFromEnv, type ExplainProvider, type ExplainProviders, type ModelChoice } from "./explain/providers.js";
 export { anthropicModel, type AnthropicOptions, type ChatBlock, type ChatMessage, type ChatModel, type ChatTool, type ChatTurn } from "./explain/model.js";
 export { jevJudge, type Judge, type JudgeAnswer, type JudgeQuestion, type JevOptions } from "./ask/judge.js";
 export { ENV_KEYS, loadEnv } from "./ask/env.js";

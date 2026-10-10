@@ -33,10 +33,11 @@ export interface LodeHost {
   // and what they became (`lines`); refuse with ok:false if they don't
   // match the file any more.
   saveEdits?(request: { file: string; edits: LineEdit[] }): Promise<EditResult>;
-  // Optional: the models the explain panel offers ({ id, label }; the first
-  // is the default). Default: Claude Sonnet, Haiku and Opus. [] hides the
-  // picker (the server's default model answers).
-  explainModels?: { id: string; label: string }[];
+  // Optional: the models the explain panel offers ({ id, label, group? };
+  // ids as the server takes them, "provider:model"; the first is the
+  // default). Default: what the server's providers offer, grouped by
+  // provider. [] hides the picker (the server's default answers).
+  explainModels?: { id: string; label: string; group?: string }[];
   // Optional: extra markup in cards (see CardRender).
   render?: CardRender;
   // Optional: where views keep their state, per view (see ViewRequest's

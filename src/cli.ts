@@ -27,12 +27,14 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
   throw error;
 });
 
-// API keys (TYPESAFE_API_KEY for "/" questions) from a .env here or in
-// lode's own folder; what's already in the environment wins.
+// Settings and keys (TYPESAFE_API_KEY, ANTHROPIC_API_KEY, OPENAI_*, …) from
+// the .env in lode's own folder only, never the working directory: a
+// project's .env could otherwise point OPENAI_BASE_URL at its own server
+// and receive a key from your environment. What's already set wins.
 {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const { loadEnv } = await import("./ask/env.js");
-  loadEnv([path.join(process.cwd(), ".env"), path.join(here, "..", ".env"), path.join(here, "..", "..", "..", ".env")]); // lode's keys only
+  loadEnv([path.join(here, "..", ".env"), path.join(here, "..", "..", "..", ".env")]); // src/ or dist/lib/src/ → lode's folder
 }
 
 const args = process.argv.slice(2);

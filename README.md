@@ -54,11 +54,12 @@ get saved") and the model searches and reads lode's graph, then **adds the
 cards** to your canvas, linked like any other. Flows built with **/** get
 an "explain this flow" button. Conversations are saved with the tab.
 
-Claude does the explaining (`ANTHROPIC_API_KEY` in `.env`), and you pick
-the model per question in the panel (Sonnet by default, Haiku for speed,
-Opus for depth; `LODE_EXPLAIN_MODEL` sets the server's default). It sits
-behind a small `ChatModel` interface any model can implement, and a host
-can offer its own list of models or limit which are allowed.
+Explaining works with Claude (Anthropic API) and anything OpenAI-compatible
+(OpenAI, OpenRouter, Groq, Together, Ollama, LM Studio, vLLM), all at once:
+every provider you have a key for appears in the panel's model picker,
+grouped by provider, and you pick per question. It sits behind a small `ChatModel`
+interface any model can implement, and a host can offer its own list of
+models or limit which are allowed.
 
 ### Git changes
 
@@ -127,13 +128,20 @@ is always included (ESM, CommonJS, JSDoc types). The graph is cached in
 `~/.cache/lode/` (`--cache <dir>` to change it); nothing is written into
 the project unless you save an edit.
 
-For **/** questions and the explain panel, add keys to a `.env` in lode's
-folder (it's git-ignored, and lode reads only these keys from it):
+For **/** questions and the explain panel, copy `.env.example` to `.env`
+(every setting is explained there) and add keys. In short, a `.env` in lode's
+folder (it's git-ignored; lode reads only its own settings from it, and
+only from its own folder, never a project's):
 
 ```sh
-TYPESAFE_API_KEY=your-key        # / questions (Jev)
-ANTHROPIC_API_KEY=your-key       # explain (Claude)
-# LODE_EXPLAIN_MODEL=claude-haiku-5-5   # optional: faster, streams after tool calls
+TYPESAFE_API_KEY=your-key                 # / questions (Jev)
+
+# explain: every provider with a key is offered, picked per question
+ANTHROPIC_API_KEY=your-key                # Claude (Sonnet, Haiku, Opus)
+OPENAI_API_KEY=your-key                   # OpenAI, or a compatible server via OPENAI_BASE_URL
+LODE_OPENAI_MODELS=model-id=Label,…
+OPENROUTER_API_KEY=your-key               # OpenRouter
+LODE_OPENROUTER_MODELS=vendor/model=Label,…
 ```
 
 Other commands:

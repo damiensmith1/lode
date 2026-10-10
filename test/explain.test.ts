@@ -65,22 +65,50 @@ describe("explaining", () => {
     expect(sent[2].content[0].content).toContain("### registerIpc");
   });
 
-  it("passes the question's model choice to the model, within what the host allows", async () => {
-    const asked: (string | undefined)[] = [];
-    const model: ChatModel = { async chat({ model: m }) { asked.push(m); return { content: [{ type: "text", text: "ok" }], stop: "end" }; } };
-    const service = createService(store, { model, models: ["claude-haiku-5-5", "claude-sonnet-5-5"] });
-    await service.call("explain", { request: { messages: [{ role: "user", text: "x" }], model: "claude-haiku-5-5" } });
-    await service.call("explain", { request: { messages: [{ role: "user", text: "x" }] } });
-    expect(asked).toEqual(["claude-haiku-5-5", undefined]);
-    await expect(service.call("explain", { request: { messages: [{ role: "user", text: "x" }], model: "claude-opus-5-5" } })).rejects.toThrow(/isn't allowed/);
-    await expect(service.call("explain", { request: { messages: [{ role: "user", text: "x" }], model: "bad name!" } })).rejects.toThrow(/bad model/);
+  it("routes each question to the provider it names, within what the host allows", async () => {
+    const asked: string[] = [];
+    const fake = (name: string): ChatModel => ({ async chat({ model: m }) { asked.push(`${name}:${m}`); return { content: [{ type: "text", text: "ok" }], stop: "end" }; } });
+    const service = createService(store, {
+      providers: {
+        anthropic: { label: "Anthropic", model: fake("anthropic"), models: [{ id: "claude-haiku-5-5", label: "Haiku" }] },
+        openrouter: { label: "OpenRouter", model: fake("openrouter"), models: [{ id: "meta-llama/llama-3:free", label: "Llama" }] },
+      },
+      models: ["anthropic:claude-haiku-5-5", "openrouter:meta-llama/llama-3:free"],
+    });
+    const ask = (model?: string) => service.call("explain", { request: { messages: [{ role: "user", text: "x" }], ...(model && { model }) } }) as Promise<{ model: string }>;
+    expect((await ask("openrouter:meta-llama/llama-3:free")).model).toBe("openrouter:meta-llama/llama-3:free");
+    expect((await ask("claude-haiku-5-5")).model).toBe("anthropic:claude-haiku-5-5"); // a bare id: whoever offers it
+    expect((await ask()).model).toBe("anthropic:claude-haiku-5-5"); // the default
+    expect(asked).toEqual(["openrouter:meta-llama/llama-3:free", "anthropic:claude-haiku-5-5", "anthropic:claude-haiku-5-5"]);
+    await expect(ask("anthropic:claude-opus-5-5")).rejects.toThrow(/isn't allowed/);
+    await expect(ask("nobody:x")).rejects.toThrow(/no provider offers/);
+    await expect(ask("bad name!")).rejects.toThrow(/bad model/);
+    expect(await service.call("explainModels")).toEqual({
+      providers: [
+        { id: "anthropic", label: "Anthropic", models: [{ id: "anthropic:claude-haiku-5-5", label: "Haiku" }] },
+        { id: "openrouter", label: "OpenRouter", models: [{ id: "openrouter:meta-llama/llama-3:free", label: "Llama" }] },
+      ],
+      default: "anthropic:claude-haiku-5-5",
+      notes: [],
+    });
+  });
+
+  it("a host's providers are the only ones used, whatever keys are in the environment", async () => {
+    const saved = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-from-env";
+    const mine: ChatModel = { async chat() { return { content: [{ type: "text", text: "mine" }], stop: "end" }; } };
+    const service = createService(store, { providers: { mine: { label: "Mine", model: mine, models: [{ id: "m1", label: "M1" }] } } });
+    expect(((await service.call("explainModels")) as { providers: { id: string }[] }).providers.map((p) => p.id)).toEqual(["mine"]);
+    expect(await service.call("explain", { request: { messages: [{ role: "user", text: "x" }] } })).toMatchObject({ text: "mine", model: "mine:m1" });
+    if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = saved;
   });
 
   it("needs a model: says how to add one", async () => {
-    const saved = process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
+    const saved = { ...process.env };
+    for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENROUTER_API_KEY"]) delete process.env[k];
     await expect(createService(store).call("explain", { request: { messages: [{ role: "user", text: "x" }] } })).rejects.toThrow(/ANTHROPIC_API_KEY/);
-    if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+    process.env = saved;
   });
 
   it("streams through the service as events tagged with the caller's stream", async () => {

@@ -131,17 +131,27 @@ export async function explain(request: ExplainRequest, queries: Queries, model: 
   const messages: ChatMessage[] = request.messages.slice(-16).map((m) => ({ role: m.role, content: m.text }));
   let text = "";
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    let streamed = false;
     const turn = await model.chat({
       system: [SYSTEM, about],
       messages,
       tools: round < MAX_ROUNDS - 1 ? tools : [], // the last round answers
       ...(request.model && { model: request.model }),
       onText: (delta) => {
+        streamed = true;
         text += delta;
         onEvent({ type: "text", text: delta });
       },
       signal,
     });
+    // A model that doesn't stream: its text comes with the turn.
+    if (!streamed) {
+      const said = turn.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+      if (said) {
+        text += said;
+        onEvent({ type: "text", text: said });
+      }
+    }
     // Empty text blocks (a turn that went straight to a tool) can't be sent back.
     const said = turn.content.filter((b) => b.type !== "text" || b.text.trim());
     if (said.length) messages.push({ role: "assistant", content: said });

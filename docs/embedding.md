@@ -337,13 +337,30 @@ the context is marked for prompt caching). Pass `createService(store, {
 model })` with anything implementing `ChatModel.chat({ system, messages,
 tools, model, onText })` to use another.
 
-**Per question:** `ExplainRequest.model` picks the model for one question;
-it reaches `ChatModel.chat` as `model` (the Anthropic one uses it as the
-API model; yours may map or ignore it). `createService(store, { models:
-[...] })` limits which may be asked for. The panel's picker offers
-`LodeHost.explainModels` (`{ id, label }[]`, first is the default;
-default Sonnet, Haiku, Opus; `[]` hides it), remembers the choice per
-browser, and labels each answer with its model. `renderMarkdown` (in `lode/views`) is the
+**Providers:** explaining runs on named providers, each a `ChatModel` and
+the models it offers; a question picks one as `"provider:model"`.
+`createService(store, { providers: { anthropic: { label, model:
+anthropicModel({ apiKey }), models: [{ id, label }] }, openrouter: { label,
+model: openaiModel({ apiKey, baseURL, model }), models } } })` uses exactly
+those, whatever keys the environment has, so a host decides alone what's
+used. Without `providers`, the environment's: `ANTHROPIC_API_KEY`
+(`LODE_ANTHROPIC_MODELS`, default Sonnet, Haiku, Opus), `OPENAI_API_KEY` and/or
+`OPENAI_BASE_URL` (`LODE_OPENAI_MODELS`), `OPENROUTER_API_KEY`
+(`LODE_OPENROUTER_MODELS`); OpenAI-compatible providers are offered once
+their models are listed (`id=Label,…`). `defaultModel` (or
+`LODE_EXPLAIN_MODEL`) is what a question gets before one is picked;
+`models` limits which may be. `openaiModel` speaks Chat Completions
+(streaming, function calls) for OpenAI, OpenRouter, Groq, Together,
+Ollama, LM Studio, vLLM. The service's `explainModels` gives views `{
+providers: [{ id, label, models: [{ id: "provider:model", label }] }],
+default, notes }` (no secrets); the panel's picker groups by provider
+unless the host passes `explainModels`.
+
+**Per question:** `ExplainRequest.model` (`"provider:model"`, or a bare id
+any provider offers) picks the provider and model for one question; the
+provider's `ChatModel.chat` gets the model id as `model`. The picker
+remembers the choice per browser and labels each answer with its model
+(and provider, when there are several). `renderMarkdown` (in `lode/views`) is the
 panel's safe Markdown, with code names as links.
 
 ## 12. Look

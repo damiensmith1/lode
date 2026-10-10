@@ -40,13 +40,9 @@ interface Card {
   y: number;
 }
 
-// What the explain panel's model picker offers by default (the first is
-// the default); a host passes its own as LodeHost.explainModels.
-const DEFAULT_EXPLAIN_MODELS = [
-  { id: "claude-sonnet-5-5", label: "Sonnet" },
-  { id: "claude-haiku-5-5", label: "Haiku" },
-  { id: "claude-opus-5-5", label: "Opus" },
-];
+// What the explain panel's model picker offers until the server says (it
+// asks: explainModels); a host passes its own as LodeHost.explainModels.
+const DEFAULT_EXPLAIN_MODELS: { id: string; label: string; group?: string }[] = [];
 
 // The explain panel's conversation: what was asked, and what came back
 // (with what the model read and the cards it added).
@@ -908,7 +904,9 @@ export class LodeFlow extends HTMLElement {
       ...(this.explainModel() && { model: this.explainModel() }),
     };
     this.chat.push({ role: "user", text, ...(this.cardMap.size && { scope: label }) });
-    const label2 = this.explainModels().find((m) => m.id === this.explainModel())?.label;
+    const chosen = this.explainModels().find((m) => m.id === this.explainModel());
+    const several = new Set(this.explainModels().map((m) => m.group ?? "")).size > 1;
+    const label2 = chosen && (several && chosen.group ? `${chosen.label} · ${chosen.group}` : chosen.label);
     const answer: ChatEntry = { role: "assistant", text: "", notes: [], ...(label2 && { model: label2 }) };
     this.chat.push(answer);
     this.explaining = true;
@@ -987,9 +985,13 @@ export class LodeFlow extends HTMLElement {
     };
   }
 
-  // The models the picker offers, and the one chosen (remembered per browser).
+  // The models the picker offers (the host's list, else the server's), and
+  // the one chosen (remembered per browser).
+  private serverModels: { id: string; label: string; group?: string }[] | null = null;
+  private serverDefault: string | undefined;
+
   private explainModels() {
-    return this.host?.explainModels ?? DEFAULT_EXPLAIN_MODELS;
+    return this.host?.explainModels ?? this.serverModels ?? DEFAULT_EXPLAIN_MODELS;
   }
 
   private explainModel(): string | undefined {
@@ -1001,15 +1003,37 @@ export class LodeFlow extends HTMLElement {
 
   private setupModelPicker() {
     const select = this.root.querySelector<HTMLSelectElement>(".model")!;
-    const models = this.explainModels();
-    select.hidden = models.length < 2;
-    select.innerHTML = models.map((m) => `<option value="${escape(m.id)}">${escape(m.label)}</option>`).join("");
-    try {
-      const saved = localStorage.getItem("lode:explain-model");
-      if (saved && models.some((m) => m.id === saved)) select.value = saved;
-    } catch {
-      // No storage: the first model.
-    }
+    const fill = () => {
+      const models = this.explainModels();
+      select.hidden = models.length < 2;
+      // Grouped by provider when there are several.
+      const groups = [...new Set(models.map((m) => m.group ?? ""))];
+      const option = (m: { id: string; label: string }) => `<option value="${escape(m.id)}">${escape(m.label)}</option>`;
+      select.innerHTML =
+        groups.length > 1
+          ? groups.map((g) => `<optgroup label="${escape(g || "Other")}">${models.filter((m) => (m.group ?? "") === g).map(option).join("")}</optgroup>`).join("")
+          : models.map(option).join("");
+      if (this.serverDefault && models.some((m) => m.id === this.serverDefault)) select.value = this.serverDefault;
+      try {
+        const saved = localStorage.getItem("lode:explain-model");
+        if (saved && models.some((m) => m.id === saved)) select.value = saved;
+      } catch {
+        // No storage: the default.
+      }
+    };
+    fill();
+    // Unless the host lists them, offer what the server's provider has.
+    if (!this.host?.explainModels && this.client)
+      void this.client
+        .call<{ providers: { id: string; label: string; models: { id: string; label: string }[] }[]; default?: string }>("explainModels")
+        .then((info) => {
+          const models = (info.providers ?? []).flatMap((p) => p.models.map((m) => ({ ...m, group: p.label })));
+          if (!models.length) return;
+          this.serverModels = models;
+          this.serverDefault = info.default;
+          fill();
+        })
+        .catch(() => {});
     select.addEventListener("change", () => {
       try {
         localStorage.setItem("lode:explain-model", select.value);
