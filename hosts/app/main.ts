@@ -54,8 +54,8 @@ function openView(request: ViewRequest): Tab {
   const tab = { key, button } as Tab;
 
   const host: LodeHost = {
-    // There's no separate editor here: "open source" reads the file in the flow.
-    openSource: (file) => readInFlow(file),
+    // No openSource: there's no separate editor, so the flow opens the file
+    // as a card next to the one it came from.
     openView: (r) => void openView(r),
     syntax: highlightLines,
     syntaxCss: SYNTAX_CSS,

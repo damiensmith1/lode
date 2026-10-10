@@ -258,7 +258,11 @@ export class LodeFlow extends HTMLElement {
     }
     if (action === "source") {
       const n = here.block.node;
-      if (n.file) this.host?.openSource(n.file, here.range[0]);
+      if (!n.file) return;
+      if (this.host?.openSource) return this.host.openSource(n.file, here.range[0]);
+      // No editor: the file goes on the canvas, left of the card like a
+      // caller, with an arrow from where the card's code starts in it.
+      if (n.id !== n.file) return this.openCaller(key, n.file, here.range[0], "local");
     }
   }
 

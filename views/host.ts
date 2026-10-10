@@ -1,8 +1,9 @@
 // What a host (an IDE, Clance, the standalone app) provides to lode views.
 // Views call these; they never touch the host's UI directly.
 export interface LodeHost {
-  // Show a source location in the host's editor.
-  openSource(file: string, line?: number): void;
+  // Optional: show a source location in the host's editor. Without one
+  // (no editor, as in the standalone app), the flow opens the file as a card.
+  openSource?(file: string, line?: number): void;
   // Open another lode view, usually as a new tab.
   openView(view: ViewRequest): void;
   // Optional: mark source lines in the host's editor for what the view
