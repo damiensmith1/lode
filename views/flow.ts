@@ -250,6 +250,10 @@ export class LodeFlow extends HTMLElement {
     const hidden = new Set<number>();
     for (const f of folds) for (let k = f.start + 1; k <= f.end; k++) hidden.add(k);
     const foldAt = new Map(folds.map((f) => [f.start, f]));
+    // Folds opened in place keep a button on their header line to close them.
+    const openedAt = new Map(
+      b.regions.filter((r) => c.expanded.has(r.start) && inPlace(r) && r.start >= c.range[0] && r.end <= c.range[1]).map((r) => [r.start, r]),
+    );
 
     const linksByLine = new Map<number, BlockLink[]>();
     for (const l of b.links) linksByLine.set(l.line, [...(linksByLine.get(l.line) ?? []), l]);
@@ -274,6 +278,10 @@ export class LodeFlow extends HTMLElement {
       const own = linksByLine.get(line) ?? [];
       const fold = foldAt.get(line);
       let foldHtml = "";
+      const opened = openedAt.get(line);
+      if (opened && !fold) {
+        foldHtml = `<button class="fold" data-action="fold" data-col="${i}" data-start="${opened.start}" data-end="${opened.end}" title="Fold these lines again">⌃ collapse ${opened.end - opened.start} lines</button>`;
+      }
       let rolled: BlockLink[] = [];
       if (fold) {
         const count = fold.end - fold.start;
