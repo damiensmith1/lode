@@ -1,4 +1,4 @@
-import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, LinkKind } from "../src/query/types.js";
+import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, FlowPlan, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
 import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, COMMAND_HELP, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
@@ -33,6 +33,7 @@ interface Card {
   expanded: Set<number>; // comment/import folds opened in place
   limit: number; // lines shown before "show more"
   allCallers?: boolean;
+  note?: string; // why it's here (a flow built for a question)
   x: number;
   y: number;
 }
@@ -54,7 +55,8 @@ interface Snapshot {
 // What's saved with the project (blocks are refetched on load).
 interface SavedLayout {
   v: 1;
-  cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; x: number; y: number }[];
+  cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; note?: string; x: number; y: number }[];
+  banner?: string; // the question this flow answers, and how
   arrows: Arrow[];
   selected: string | null;
   camera?: Camera; // x, y: where the canvas origin (0, 0) sits on screen
@@ -111,6 +113,8 @@ const CSS = `
 .help-keys { flex: none; width: 150px; }
 .help kbd { display: inline-block; min-width: 18px; padding: 0 5px; margin-right: 2px; border-radius: 4px; background: var(--lode-sunken); box-shadow: inset 0 -1px 0 var(--lode-border); font: 11px var(--lode-mono); text-align: center; }
 .help-note { margin-top: 8px; }
+.banner { padding: 7px 14px; border-bottom: 1px solid var(--lode-border); font: 12.5px var(--lode-mono); color: var(--lode-fg); background: color-mix(in srgb, var(--lode-local) 6%, var(--lode-bg)); }
+.note { align-self: flex-start; margin-top: 2px; padding: 2px 8px; border-radius: 4px; font-size: 11.5px; color: var(--lode-local); background: color-mix(in srgb, var(--lode-local) 8%, transparent); }
 .card-actions { display: flex; gap: 6px; align-self: flex-start; }
 .card-actions:empty { display: none; }
 .expand { margin-left: 0; padding: 0 7px; border-radius: 4px; font-size: 11px; color: var(--lode-muted); box-shadow: inset 0 0 0 1px var(--lode-border); }
@@ -213,6 +217,7 @@ export class LodeFlow extends HTMLElement {
         <button class="crumb diff-toggle" data-action="diff" title="Show what changed since the last commit (git)">changes</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
+      <div class="banner" part="banner" hidden></div>
       <div class="canvas" part="canvas"><div class="board" part="board"></div></div>`;
     this.root.addEventListener("click", (e) => void this.onClick(e));
     // A just-saved card refreshes once the caret leaves its code.
@@ -249,6 +254,7 @@ export class LodeFlow extends HTMLElement {
       else if (id) void this.show(id);
       else this.render();
       if (this.pendingIds.length) void this.showAll(this.pendingIds.splice(0));
+      if (this.pendingAsk) void this.ask(this.pendingAsk.trim()).then(() => (this.pendingAsk = ""));
     });
   }
 
@@ -640,6 +646,75 @@ export class LodeFlow extends HTMLElement {
   }
 
   // Show a node: select its card if it's open, else add it as a new tree.
+  // --- asking ------------------------------------------------------------------
+
+  private banner = "";
+  // A question to ask once connected (ViewRequest.ask).
+  pendingAsk = "";
+
+  // A line above the canvas: the question this flow answers (or "").
+  setBanner(text: string) {
+    this.banner = text;
+    const el = this.root.querySelector<HTMLElement>(".banner");
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text;
+  }
+
+  // Ask a question and lay out the flow that answers it here (the server
+  // builds it: see src/ask). Its cards come with a note on why each is in.
+  async ask(question: string) {
+    await this.ready;
+    if (!this.client) return;
+    this.setBanner(`/ ${question} · asking…`);
+    this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `/ ${question}`, bubbles: true, composed: true }));
+    let plan: FlowPlan;
+    try {
+      plan = await this.client.call<FlowPlan>("ask", { question });
+    } catch (error) {
+      this.setBanner(`/ ${question} · ${error instanceof Error ? error.message : String(error)}`);
+      return this.changed();
+    }
+    this.loadPlan(plan);
+  }
+
+  // Lay out a flow plan (from ask(), or a host's own): its cards, linked
+  // where they call each other, each with its note.
+  async loadPlan(plan: FlowPlan) {
+    const ids = plan.cards.map((c) => c.id);
+    const how = `${plan.route} · ${plan.cards.length} card${plan.cards.length === 1 ? "" : "s"} · ${(plan.ms / 1000).toFixed(1)}s`;
+    this.setBanner(plan.answered ? `/ ${plan.question} · ${how}` : `/ ${plan.question} · ${plan.message ?? "nothing found"}`);
+    if (!ids.length) return this.changed();
+    await this.showAll(ids);
+    for (const c of plan.cards) {
+      const card = this.cardMap.get(c.id);
+      if (card) card.note = c.note;
+    }
+    this.render();
+    // Laid out by the plan's steps: where to start in the first column,
+    // each hop one further right, in the plan's order down each column.
+    if (plan.cards.some((c) => c.step)) {
+      const columns: string[][] = [];
+      for (const c of plan.cards) if (this.cardMap.has(c.id)) (columns[c.step ?? 0] ??= []).push(c.id);
+      const others = [...this.cardMap.values()].filter((c) => !ids.includes(c.key));
+      const left = others.length ? Math.min(...others.map((c) => c.x)) : 0;
+      const top0 = others.length ? Math.max(...others.map((c) => c.y + (this.cardEl(c.key)?.offsetHeight ?? 0))) + 120 : 0;
+      let x = left;
+      for (const col of columns.filter(Boolean)) {
+        let y = top0;
+        for (const id of col) {
+          Object.assign(this.cardMap.get(id)!, { x, y });
+          y += (this.cardEl(id)?.offsetHeight ?? 200) + 32;
+        }
+        x += Math.max(...col.map((id) => this.cardEl(id)?.offsetWidth ?? 480)) + GAP + 24;
+      }
+      this.position();
+    }
+    this.fit(ids.filter((id) => this.cardMap.has(id)));
+    this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `/ ${plan.question}`, bubbles: true, composed: true }));
+    this.changed();
+  }
+
   // Open several nodes at once (one is just show()). They link up with
   // arrows where they call each other, and are laid out as a flow: callers
   // left of what they call, a column per step, unconnected groups below
@@ -1356,12 +1431,14 @@ export class LodeFlow extends HTMLElement {
         expanded: [...c.expanded],
         limit: c.limit,
         ...(c.allCallers && { allCallers: true }),
+        ...(c.note && { note: c.note }),
         x: Math.round(c.x),
         y: Math.round(c.y),
       })),
       arrows: this.arrows,
       selected: this.selected,
       diff: this.diffBase,
+      ...(this.banner && { banner: this.banner }),
       // Saved in canvas coordinates, independent of the board's padding origin.
       camera: {
         x: Math.round(this.camera.x + this.offset.x * this.camera.k),
@@ -1384,6 +1461,7 @@ export class LodeFlow extends HTMLElement {
       // Unreadable: start empty.
     }
     if (saved?.diff !== undefined && this.diffBase === null) this.diffBase = saved.diff;
+    if (saved?.banner && !this.banner) this.setBanner(saved.banner);
     await this.loadDiff();
     if (!saved || saved.v !== 1) return;
     const ids = [...new Set(saved.cards.map((c) => c.node))];
@@ -1399,6 +1477,7 @@ export class LodeFlow extends HTMLElement {
         expanded: new Set(c.expanded),
         limit: c.limit,
         ...(c.allCallers && { allCallers: true }),
+        ...(c.note && { note: c.note }),
         x: c.x,
         y: c.y,
       });
@@ -1946,6 +2025,7 @@ export class LodeFlow extends HTMLElement {
         ${header}
         <button class="title" part="card-title" data-action="source" title="Open the source">${titleHtml(c)}</button>
         <span class="meta" part="card-meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
+        ${c.note ? `<div class="note" part="note">${escape(c.note)}</div>` : ""}
         <div class="card-actions">${expandable ? `<button class="expand" part="expand" data-action="expand" title="Show all its lines and open everything it leads to (one level)">${expandable > 0 ? `expand · ${expandable} →` : "expand"}</button>` : ""}
         ${changedFolds.length ? `<button class="open-changes" part="open-changes" data-action="open-changes" title="Open every folded part with changes as a card">open ${changedFolds.length} change${changedFolds.length === 1 ? "" : "s"} →</button>` : ""}</div>
         ${hostHeader ? `<div class="host-header" part="host-header">${hostHeader}</div>` : ""}

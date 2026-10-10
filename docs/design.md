@@ -600,7 +600,7 @@ Views depend on core and query only through their public APIs; an adapter
 only maps host concepts (open tab, editor decorations, sidebar, SCM action)
 onto view mounts.
 
-## Asking for a flow (planned)
+## Asking for a flow
 
 Typing "/" in the top bar's box turns symbol search into a question: "show
 me how we create the tabs", "what most likely breaks from these changes".
@@ -633,6 +633,77 @@ summary over the finished flow (and could take questions that fit no
 route). The judging step is an interface: Jev by default, an LLM or a
 heuristic where TypeSafe isn't available. The Jev key lives in `.env`
 (git-ignored), server-side only.
+
+### How it maps onto Jev (from the TypeSafe docs, jev-1.13)
+
+**The API.** One endpoint, `POST https://api.typesafe.ai/v1/systemone`
+(Bearer key), body `{ model: "jev-latest", state, questions }`. `state` is
+text or JSON (an object with named fields is best); `questions` is a map
+of named questions, all answered in parallel against the same state, so
+several judgments cost one round trip ("speculative fan-out": ask
+everything a step might need, use what applies). Three question types:
+**Choice** (one of up to 255 options, with a probability for each and a
+confidence), **Noul** (probability of yes, independent of other
+candidates) and **Score** (2-10 ordered levels, probability-weighted).
+Limits: 64k tokens per request (32k for the state plus the longest
+question), 80 requests/s; price $0.042 per million input tokens (output
+free), so a flow costs a fraction of a cent. 429/529 mean retry with
+backoff. Plain `fetch` behind a small `Judge` interface (an LLM or a
+heuristic can implement it too); the key is `TYPESAFE_API_KEY`, from the
+environment or `.env`, used only on the server.
+
+**What Jev is bad at, and how the design avoids it.** It reads literally
+(questions state exact conditions, with criteria for each answer); it
+loses accuracy with indirection and with large states full of irrelevant
+detail (code picks and trims what goes in: a name, kind, signature and
+the line that connects it, not whole files); it can't count or do maths
+(code does all ranking arithmetic and thresholds); Choice answers can
+shift with option order (Nouls per candidate where scores must be
+comparable); it doesn't generate (notes are built by code).
+
+**The pipeline, in 2-4 requests:**
+
+1. **Route + start** (one request). Code builds a shortlist of up to ~200
+   candidate symbols cheaply: lexical match of the question's words
+   against names, file paths and first doc-comment lines; entry points;
+   for change questions, the changed symbols. Each is tagged `S017|
+   addTab (function) hosts/app/main.ts:96 — addTab(request, at)`. State:
+   `{ question, candidates }`. Questions: a Choice routing the question
+   (how X works / what breaks / where X is handled / what calls X / what
+   changed / other); a Choice over the candidate ids for the best place
+   to start; a Noul per top-30 candidate for "is this about the
+   question?" (the re-ranking pattern), and a Noul for "does anything here
+   answer it?" so an unanswerable question says so instead of guessing.
+2. **Follow** (one request per hop, two or three hops). From the chosen
+   symbols, the graph gives the next ones in the routed direction
+   (callees for "how", callers for "what calls", dependents for
+   breakage). State: the question, the flow so far by name, and each
+   candidate with the line that leads to it. One Noul per candidate
+   ("does following into `candidates[i]` help answer the question?");
+   code keeps those over a threshold, within a card budget.
+3. **Breakage** (one request). Changed symbols (from `changes`) and what
+   depends on them up to two hops, each dependent with the line that uses
+   the changed symbol and the diff of that symbol; one Score per
+   dependent: unaffected / might be affected / likely breaks.
+4. **Plan.** Code turns the kept symbols into cards, arrows (graph edges
+   between them), a reading path (graph order from the start) and notes
+   from facts and buckets ("calls `addTab`", "reads the changed
+   `ViewRequest` · likely breaks"), and opens it in a new flow tab.
+
+**As built** (`src/ask`): `askFlow(question, queries, judge)` returns a
+`FlowPlan` (route, cards with a note and a step: 0 for where to start,
+then each hop), typically in 2-3 requests and 0.3-0.6s. Candidates are
+top-level declarations and methods, matched on name and path words
+(words that exactly name a symbol count most); utilities (12+ callers, or
+one- or two-letter names) need a 0.9 noul to get in, others 0.6; 12 cards
+and 2 hops at most ("where" follows 1). The service's `ask` method uses
+`options.judge`, or Jev when `TYPESAFE_API_KEY` is set (the CLI loads
+just that key from a `.env` in the working directory or lode's folder;
+nothing else a `.env` holds is read). In the views,
+`flow.ask(question)` (or `ViewRequest.ask`) shows a banner, asks, and
+lays the plan out by step, left to right; notes show under each card's
+header and are saved with the tab. In the app, "/" in the top box asks in
+a new flow tab, and a flow's "/" key starts a question there.
 
 ## Build vs buy: existing code graphs
 

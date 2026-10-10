@@ -3,6 +3,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GraphStore } from "../graph/store.js";
 import { Queries } from "../query/index.js";
+import { askFlow } from "../ask/index.js";
+import { jevJudge, type Judge } from "../ask/judge.js";
 
 // lode's methods with no transport attached: what views call, as plain async
 // functions. The WebSocket server is one way to reach them; a host that runs
@@ -15,6 +17,9 @@ import { Queries } from "../query/index.js";
 //   service.onChanged((files) => webview.postMessage({ method: "changed", params: { files } }));
 
 export interface ServiceOptions {
+  // What judges "/" questions (see src/ask). Default: Jev, when
+  // TYPESAFE_API_KEY is set (read when a question comes in).
+  judge?: Judge;
   // Where views' saved state goes when they use the service for it (the
   // default storage). Defaults to the store's cache directory.
   stateDir?: string;
@@ -139,6 +144,14 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     block: (p) => queries.block(String(p.id)),
     entries: () => queries.entries(),
     changes: (p) => queries.changes(typeof p.base === "string" && p.base ? p.base : "HEAD"),
+    // Build a flow for a question ("how do we create tabs?").
+    ask: (p) => {
+      const question = String(p.question ?? "").trim().slice(0, 500);
+      if (!question) throw new Error("ask: no question");
+      const judge = options.judge ?? (process.env.TYPESAFE_API_KEY ? jevJudge({ apiKey: process.env.TYPESAFE_API_KEY }) : null);
+      if (!judge) throw new Error("Asking needs a model: set TYPESAFE_API_KEY (Jev) in the environment or lode's .env");
+      return askFlow(question, queries, judge, { base: typeof p.base === "string" && p.base ? p.base : "HEAD" });
+    },
     symbolAt: (p) => queries.symbolAt(String(p.file), Number(p.line)),
   };
 

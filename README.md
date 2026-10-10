@@ -40,6 +40,7 @@ src/ingest/ts   TypeScript + JavaScript plugin: facts from the compiler API, map
 src/derive      core analysis: channel matching (tier 3), shared-state flows (tier 2)
 src/graph       Graph (validation, traversal), lenses, GraphStore (cache)
 src/query      deterministic queries views need (block, entries, search, source, git changes)
+src/ask        a flow for a question: graph candidates judged by Jev (or any Judge)
 src/service    those queries as methods with no transport; serveMessages for message channels
 src/server     the service over JSON-RPC on a WebSocket (`/rpc`), file watching
 views/         web components (<lode-entries>, <lode-flow>, <lode-changes>), connections, storage, themes, host contract

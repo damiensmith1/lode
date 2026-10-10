@@ -173,3 +173,17 @@ export interface ChangesResult {
   error?: string; // not a git repository, unknown base, …
   files: FileChange[];
 }
+
+// A flow built for a question (see src/ask): cards to open, each with why
+// it's there, in reading order.
+export type FlowRoute = "how" | "breakage" | "changes" | "callers" | "where" | "other";
+
+export interface FlowPlan {
+  question: string;
+  route: FlowRoute;
+  answered: boolean; // false: nothing in the code seems to answer it (see message)
+  message?: string;
+  cards: { id: string; note: string; score?: number; step?: number }[]; // in reading order; step: 0 for where to start, then each hop
+  requests: number; // model calls it took
+  ms: number;
+}

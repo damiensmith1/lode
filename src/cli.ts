@@ -24,6 +24,14 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
   throw error;
 });
 
+// API keys (TYPESAFE_API_KEY for "/" questions) from a .env here or in
+// lode's own folder; what's already in the environment wins.
+{
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const { loadEnv } = await import("./ask/env.js");
+  loadEnv([path.join(process.cwd(), ".env"), path.join(here, "..", ".env"), path.join(here, "..", "..", "..", ".env")]); // lode's keys only
+}
+
 const args = process.argv.slice(2);
 const option = (name: string) => {
   const i = args.indexOf(`--${name}`);

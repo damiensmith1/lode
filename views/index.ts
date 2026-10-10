@@ -61,6 +61,7 @@ export function createView(view: ViewRequest, client: LodeConnection, host: Lode
     if (view.state) flow.stateKey = view.state;
     if (view.diff) flow.setDiffOnConnect(view.diff);
     if (view.ids?.length) flow.pendingIds = [...view.ids];
+    if (view.ask) flow.pendingAsk = view.ask;
   }
   if (view.kind === "changes" && view.base) (el as LodeChanges).base = view.base;
   return el;

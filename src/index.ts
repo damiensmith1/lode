@@ -12,6 +12,9 @@ export { Graph, type Direction } from "./graph/graph.js";
 export { tsPlugin } from "./ingest/ts/index.js";
 export { Queries } from "./query/index.js";
 export { createService, serveMessages, type LodeService, type ServiceOptions } from "./service/index.js";
+export { askFlow, type AskOptions } from "./ask/index.js";
+export { jevJudge, type Judge, type JudgeAnswer, type JudgeQuestion, type JevOptions } from "./ask/judge.js";
+export { ENV_KEYS, loadEnv } from "./ask/env.js";
 export type * from "./schema/index.js";
 export type * from "./query/types.js";
 export type { NodeKind } from "./schema/index.js"; // the same in both

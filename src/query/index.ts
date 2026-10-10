@@ -451,6 +451,12 @@ export class Queries {
 
   // A project file's text; real paths on both sides, so neither `..` nor a
   // symlink can leave the project.
+  // A project file's lines (null if it can't be read), for callers that
+  // need a few of them (e.g. a symbol's first line).
+  linesOf(file: string): string[] | null {
+    return this.readText(file)?.split(/\r?\n/) ?? null;
+  }
+
   private readText(file: string): string | null {
     try {
       const root = realpathSync(this.root);

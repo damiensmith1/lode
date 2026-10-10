@@ -1,4 +1,4 @@
-import type { ChangesResult, CodeBlock, EntriesResult, FileEntry, FileView, NodeRef, ProjectInfo } from "../src/query/types.js";
+import type { ChangesResult, CodeBlock, FlowPlan, EntriesResult, FileEntry, FileView, NodeRef, ProjectInfo } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 
 // Typed calls for building a host's own UI around the views: a file tree,
@@ -16,6 +16,9 @@ export function lodeApi(connection: LodeConnection) {
     // Symbols by name (best first); open one with flow.show(node.id).
     search: (query: string) => connection.call<NodeRef[]>("search", { query }),
     entries: () => connection.call<EntriesResult>("entries"),
+    // A flow built for a question ("how do we create tabs?"); needs a judge
+    // (Jev) on the server.
+    ask: (question: string) => connection.call<FlowPlan>("ask", { question }),
     // What changed since `base` (git; default HEAD), by file and symbol.
     changes: (base?: string) => connection.call<ChangesResult>("changes", base ? { base } : {}),
     block: (id: string) => connection.call<CodeBlock | null>("block", { id }),

@@ -276,7 +276,15 @@ function setupSearch() {
   const input = $<HTMLInputElement>("search");
   const results = $<HTMLUListElement>("results");
   let timer: number | undefined;
+  // "/" first: a question, not a symbol name. Enter asks it in a new flow.
+  const asking = () => input.value.startsWith("/");
   input.addEventListener("input", () => {
+    input.classList.toggle("asking", asking());
+    if (asking()) {
+      clearTimeout(timer);
+      results.hidden = true;
+      return;
+    }
     clearTimeout(timer);
     timer = window.setTimeout(async () => {
       const found = await api.search(input.value);
@@ -299,6 +307,15 @@ function setupSearch() {
   });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape") results.hidden = true;
+    if (e.key === "Enter" && asking()) {
+      const question = input.value.slice(1).trim();
+      if (!question) return;
+      openView({ kind: "flow", ask: question, newTab: true });
+      input.value = "";
+      input.classList.remove("asking");
+      input.blur();
+      return;
+    }
     if (e.key === "Enter") results.querySelector<HTMLButtonElement>("button")?.click();
   });
   document.addEventListener("click", (e) => {
@@ -324,7 +341,11 @@ async function start() {
   document.addEventListener(ACTION_EVENT, (e) => {
     if ((e as CustomEvent).detail?.action !== "search") return;
     e.preventDefault();
-    $<HTMLInputElement>("search").focus();
+    // From a flow, "/" starts a question.
+    const box = $<HTMLInputElement>("search");
+    box.value = "/";
+    box.classList.add("asking");
+    box.focus();
   });
   setupChanges();
   const side = (await storage.load(SIDE_KEY)) as { mode?: "files" | "changes"; base?: string } | null;

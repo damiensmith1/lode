@@ -283,7 +283,19 @@ shows down to its last changed line. (`action: "open-changes"` in
 `lode-action`; part `open-changes`.) `lodeApi(connection).changes(base)` gives the same data to a
 host's own UI (`ChangesResult`: files → hunks and symbols).
 
-## 9. Look
+## 9. Asking for a flow
+
+`flow.ask("how do we create the tabs?")` (or `{ kind: "flow", ask }`)
+builds the flow that answers a question on the server and lays it out:
+cards in steps from where to start, linked where they call each other,
+each with a note on why it's there; a banner above the canvas shows the
+question. The server needs a judge: Jev by default (`TYPESAFE_API_KEY` in
+the environment or lode's `.env`), or pass `createService(store, { judge
+})` with anything implementing `Judge` (Choice, Noul and Score answers),
+e.g. an LLM. `lodeApi(connection).ask(question)` returns the `FlowPlan`
+for a host's own UI, and `flow.loadPlan(plan)` lays one out.
+
+## 10. Look
 
 - **Tokens.** Every colour and font is a `--lode-*` custom property, set on
   any ancestor of a view (or on the view). Ready-made: `LIGHT_THEME` (the
