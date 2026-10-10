@@ -403,8 +403,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   on the canvas that it calls and from those that call it, from the first
   line that does; whole-file cards don't, or they'd point at everything. Entry points, search and
   the file tree add new trees below what's open. Cards drag by their header
-  and arrows follow. × closes a card and every card only reachable through
-  it. ← is undo: it reverses the last open, close, move, fold or "show
+  and arrows follow. × closes just that card (the cards it opened
+  stay; to close a branch, ⌘-click its cards and press Delete). ← is undo: it reverses the last open, close, move, fold or "show
   more".
 - **Camera.** The canvas is a viewport over a transformed board: scrolling
   (two fingers, or the wheel; shift for sideways) pans, a pinch or
@@ -421,7 +421,7 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   already on the restored canvas selects it without moving the view.
   Panning and moving cards never select text. Keys (while the flow is
   showing, not while typing in a field): Delete/Backspace closes the
-  selected cards alone (unlike ×, the cards they opened stay), ⌘Z / Ctrl+Z undoes.
+  selected cards (like ×, the cards they opened stay), ⌘Z / Ctrl+Z undoes.
 - **Layouts are saved with the project.** The server keeps a view's layout
   (`loadLayout` / `saveLayout`, `layout-<name>.json` in the project's cache
   dir, name-checked and size-capped), so it survives restarts in any host;

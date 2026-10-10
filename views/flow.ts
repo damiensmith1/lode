@@ -184,7 +184,7 @@ export class LodeFlow extends HTMLElement {
     if (typing) return;
     if ((e.key === "Delete" || e.key === "Backspace") && this.group.size) {
       e.preventDefault();
-      this.close([...this.group], true);
+      this.close([...this.group]);
     } else if (e.key === "z" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
       e.preventDefault();
       this.popUndo();
@@ -334,19 +334,11 @@ export class LodeFlow extends HTMLElement {
   }
 
   // Close a card, and every card that was only reachable through it.
-  // × closes a card and every card only reachable through it; the Delete
-  // key (`alone`) closes just the selected cards, leaving what they opened.
-  private close(keys: string[], alone = false) {
+  // Close just these cards (× or Delete); what they opened stays. To close
+  // a branch, ⌘-click its cards and press Delete.
+  private close(keys: string[]) {
     this.remember();
     const gone = new Set(keys);
-    for (let grew = !alone; grew; ) {
-      grew = false;
-      for (const k of this.cards.keys()) {
-        if (gone.has(k)) continue;
-        const incoming = this.arrows.filter((a) => a.to === k);
-        if (incoming.length && incoming.every((a) => gone.has(a.from))) (gone.add(k), (grew = true));
-      }
-    }
     for (const k of gone) this.cards.delete(k);
     this.arrows = this.arrows.filter((a) => !gone.has(a.from) && !gone.has(a.to));
     if (this.selected && gone.has(this.selected)) this.selected = null;
