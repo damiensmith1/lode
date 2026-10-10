@@ -261,7 +261,8 @@ export async function contextFor(request: ContextRequest, queries: Queries, judg
       out.push(`${String(l).padStart(width)} ${mark}${text}${fold ? ` ⋯ ${fold - l} lines` : ""}`);
       if (fold) l = fold;
     }
-    const lang = /\.(m?tsx?|cts)$/.test(n.file ?? "") ? "ts" : /\.(m?jsx?|cjs)$/.test(n.file ?? "") ? "js" : (n.file ?? "").split(".").pop() ?? "";
+    const file = n.file ?? "";
+    const lang = /\.(m?tsx?|cts)$/.test(file) ? "ts" : /\.(m?jsx?|cjs)$/.test(file) ? "js" : /\.(rb|rake|gemspec|ru)$|(^|\/)(Gemfile|Rakefile)$/.test(file) ? "ruby" : file.split(".").pop() ?? "";
     return [`### ${n.name} — ${where}${n.endLine && n.endLine !== n.line ? `-${n.endLine}` : ""} (${kind})`, ...(via ? [`_${via}_`] : []), "```" + lang, ...out, "```"].join("\n");
   }
 }

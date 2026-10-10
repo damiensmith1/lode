@@ -796,6 +796,70 @@ text comes with the turn.
 per question (`ExplainRequest.model`, passed to `ChatModel.chat`; a
 host's `models` option limits it, `explainModels` sets the picker).
 
+## Languages
+
+A language is a plugin; everything above the graph (queries, views, ask,
+context, explain, MCP) is language-agnostic. `pluginFor(folder)` picks
+plugins from what's there: TypeScript/JavaScript (a tsconfig/jsconfig, or
+.ts/.js files) gets `tsPlugin` exactly as before; Ruby (a Gemfile,
+gemspec, Rakefile or config.ru, or 3+ .rb files, not counting test
+fixtures) gets `rubyPlugin` with `railsPack`; both, `combinePlugins`,
+which merges their graphs and re-indexes only the plugin whose files
+changed.
+
+**Why tree-sitter, and not each language's own tools.** TS's compiler is a
+Node library, so lode runs it in-process and gets type-checked links.
+Other languages' analysers are written in those languages (Go's in Go,
+Ruby's in Ruby) and would need the toolchain installed and a process per
+language. Tree-sitter parses every language in-process from WASM
+(`@vscode/tree-sitter-wasm`, which bundles the runtime and grammars), with
+nothing to install, so a language is a small extractor and linker. The
+price is that links are resolved by rules, not types. The plan for TS-level
+precision where it matters: language servers (gopls, jdtls, Pyright,
+ruby-lsp) answering "where does this call go?" for each call site when
+they're installed, falling back to the rules when they aren't. Ruby's
+metaprogramming stays out of reach even for its own tools.
+
+**The tree-sitter base** (`plugins/treesitter`): a language gives `owns`,
+`extract` (one file's syntax → facts, independent of other files, cached
+per file by content hash) and `link` (all facts → the graph). An update
+re-parses only changed files and re-links the project, which is cheap.
+
+**Ruby** (`plugins/ruby`). Ids follow TS's: `file#Admin::UsersController`,
+`file#User.greet`, class methods `file#User.self.find`. A class reopened
+in several files is one class with several declarations (the canonical one
+is where Rails' autoloader would look: `admin/users_controller.rb`).
+Calls resolve as a reader would:
+- no receiver or `self`: the class, its prepended/included modules, its
+  superclasses (exact); a bare name that isn't a local is a call;
+- a constant: its class method; `.new`: `initialize` (exact);
+- a variable: what it was assigned (`@user = User.find(…)`, per class for
+  instance variables), else its name (`user`, `current_user` → `User`)
+  (inferred);
+- otherwise the one project method with that name, only if there's exactly
+  one, it isn't a common or core-library name or a test helper, and the
+  receiver isn't a known class (whose method would have been found), an
+  unknown chain or a library constant (inferred).
+A call that can't be resolved gets no arrow: missing beats wrong. Folds:
+class, module, method and block bodies, control flow, multi-line literals
+and argument lists, comment runs, the requires.
+
+**Packs** add framework conventions, only where detected
+(`{ name, detect, prepare, link }`, see embedding.md). `railsPack`
+(Rails, or ActiveRecord alone, as in a gem): routes (namespaces, scopes,
+nested and singular resources, member/collection, `to:`, `root`) → actions,
+registered as entries by verb and path; callbacks and their `if:`
+conditions; associations (with `class_name:`); `scope` as a class method;
+concerns' `class_methods`; finders returning instances; mailer class
+methods → instance methods; `perform_later`/`perform_async` → `perform`
+(jobs are entries); rake tasks in namespaces (entries). Files are tagged
+web / jobs / tasks, the runtime lens for entries.
+
+Measured: keepr (an ActiveRecord gem, 35 files) 0.13s; sinatra (plain
+Ruby, ~200 files) 0.4s; rubygems.org (Rails + JS, 1,400 .rb files) ~4s
+with its TypeScript. Sampled name-only links there are mostly right; the
+misses were library and core methods, now excluded.
+
 ## Build vs buy: existing code graphs
 
 Joern (code property graph) and CodeQL were considered as the core and

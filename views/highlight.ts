@@ -10,12 +10,13 @@ import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
 import markdown from "highlight.js/lib/languages/markdown";
 import python from "highlight.js/lib/languages/python";
+import ruby from "highlight.js/lib/languages/ruby";
 import scss from "highlight.js/lib/languages/scss";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 
-for (const [name, language] of Object.entries({ bash, css, ini, javascript, json, markdown, python, scss, typescript, xml, yaml })) hljs.registerLanguage(name, language);
+for (const [name, language] of Object.entries({ bash, css, ini, javascript, json, markdown, python, ruby, scss, typescript, xml, yaml })) hljs.registerLanguage(name, language);
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
@@ -24,13 +25,14 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   css: "css", scss: "scss", html: "xml", htm: "xml", xml: "xml", svg: "xml",
   yml: "yaml", yaml: "yaml", sh: "bash", zsh: "bash", bash: "bash",
   toml: "ini", ini: "ini", py: "python",
+  rb: "ruby", rake: "ruby", gemspec: "ruby", ru: "ruby", thor: "ruby", erb: "xml", Gemfile: "ruby", Rakefile: "ruby",
 };
 
 // One HTML string per source line. highlight.js escapes the source text; its
 // spans can cross line breaks (block comments, template strings), so each
 // line closes the spans still open and the next line reopens them.
 export function highlightLines(text: string, file: string): string[] {
-  const language = LANGUAGE_BY_EXTENSION[file.split(".").pop() ?? ""];
+  const language = LANGUAGE_BY_EXTENSION[file.split("/").pop()!.split(".").pop() ?? ""]; // an extension, or a name (Gemfile)
   const html = language ? hljs.highlight(text, { language, ignoreIllegals: true }).value : escapeHtml(text);
 
   const lines: string[] = [];

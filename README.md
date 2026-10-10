@@ -1,7 +1,8 @@
 # ◇ lode
 
 **Read a codebase as a flow of real code.** lode builds a live graph of how
-your TypeScript and JavaScript fits together and lets you read it as cards
+your code fits together (TypeScript, JavaScript, and Ruby with Rails) and
+lets you read it as cards
 of actual code on a canvas, connected by arrows: what calls what, what
 flows where, what reads and writes which state, across processes. Ask it a
 question and it lays out the answer. Point it at your git changes and it
@@ -114,9 +115,23 @@ open and fold, **Space** focus, **f** fit, **/** ask, **?** every key.
 
 ### Entry points
 Where to start reading an unfamiliar codebase: what the outside world calls
-into (IPC handlers, messages between processes, events, exports nothing in
-the project calls), grouped by runtime, with a line on how the runtimes
+into (IPC handlers, messages between processes, events, Rails routes by
+verb and path, jobs, rake tasks, exports nothing in the project calls),
+grouped by runtime, with a line on how the runtimes
 talk (`renderer → preload: 230 · preload → main: 139`).
+
+### Languages
+- **TypeScript and JavaScript** through the TypeScript compiler: exact,
+  type-checked links, plus Electron IPC and events across processes.
+- **Ruby** through tree-sitter (no Ruby install needed): calls resolved the
+  way Ruby looks them up (self, constants, `new`, mixins, superclasses,
+  what a variable was assigned), name-matched only when there's exactly one
+  candidate, and marked as inferred.
+- **Rails**, detected automatically: routes to controller actions (entry
+  points by verb and path), callbacks, associations, scopes, concerns,
+  finders, mailers, jobs and rake tasks.
+- Mixed repos get both. Python, Go and Java are next, on the same
+  tree-sitter base.
 
 ## Quick start
 
@@ -171,7 +186,8 @@ node dist/lib/src/cli.js mcp <project>                       # MCP server on std
   deterministic, incremental graph of a project: containment, calls,
   references, and data flows in three tiers (within a function, through
   shared state, across process boundaries such as Electron IPC). Language
-  support is a plugin.
+  support is a plugin: TypeScript in `src/ingest/ts`; Ruby and Rails in
+  `plugins/` on a shared tree-sitter base (`plugins/treesitter`).
 - **Queries** (`src/query`): what the views need, all deterministic: code
   blocks with their links and callers, entry points, search, file lists,
   git changes mapped to symbols.
@@ -206,9 +222,9 @@ where their state lives, how they look, which keys do what, and what
 **Run the core** in Node, on any folder, and keep it current:
 
 ```ts
-import { GraphStore, tsPlugin, createService } from "lode";
+import { GraphStore, pluginFor, createService } from "lode";
 
-const service = createService(GraphStore.open(tsPlugin, folder));
+const service = createService(GraphStore.open(await pluginFor(folder), folder)); // TS/JS, Ruby, or both
 service.watch(); // re-index as files change; views update
 ```
 

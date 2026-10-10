@@ -10,8 +10,9 @@ lode is three layers, and a host picks how to join them:
 ```
 
 - **Core** (`lode`): reads a folder into a graph with a language plugin
-  (`tsPlugin`: TypeScript and JavaScript; a directory, `tsconfig.json` or
-  `jsconfig.json`), caches it, and answers queries. Runs in Node.
+  (`pluginFor(folder)` picks them: `tsPlugin` for TypeScript and
+  JavaScript, `rubyPlugin` with `railsPack` for Ruby, both combined in a
+  mixed repo), caches it, and answers queries. Runs in Node.
 - **Views** (`lode/views`): framework-free web components that render the
   graph as cards, arrows, folds and callers, and do the reading mechanics
   (drag, zoom, fold, page, select, undo). They touch nothing outside their
@@ -22,9 +23,9 @@ lode is three layers, and a host picks how to join them:
 ## 1. Run the core
 
 ```ts
-import { GraphStore, tsPlugin, createService } from "lode";
+import { GraphStore, pluginFor, createService } from "lode";
 
-const store = GraphStore.open(tsPlugin, folder);   // cache: ~/.cache/lode/<hash>, or { cacheDir }
+const store = GraphStore.open(await pluginFor(folder), folder);   // cache: ~/.cache/lode/<hash>, or { cacheDir }
 const service = createService(store);              // the methods views call
 const stop = service.watch();                      // re-index as files change; views update
 // or, with your own watcher (an editor's file events): service.refresh()
@@ -400,4 +401,29 @@ panel's safe Markdown, with code names as links.
 A language is a `LanguagePlugin` (`src/schema`): it reads a project's
 files into nodes, edges, channel endpoints and fold regions, and the core
 does the rest. `GraphStore.open(yourPlugin, folder)` uses it in place of
-`tsPlugin`.
+`tsPlugin`; `combinePlugins([a, b])` runs several on one repo (each
+re-indexes only when its own files change).
+
+**Ruby:** `await rubyPlugin({ packs: [railsPack] })` (async: the grammar
+is WASM). A pack adds what a framework does by convention, and runs only
+where it detects its framework: `{ name, detect(project), prepare?(project),
+link?(project) }`. `prepare` runs before calls are resolved (turn a DSL
+block into a method with `project.promote`, add what calls return to
+`instanceReturns`, answer `Const.name` another way with
+`singletonFallbacks`); `link` after (`project.addEdge`, `project.register`
+an entry point with a `category`, `project.tag` a file's runtime). It has
+the project's classes, `resolveConst`, `findMethod`, `inherits` and every
+file's facts (declarations, calls with their receivers and DSL arguments,
+assignments). `railsPack` is one: routes, callbacks, associations, scopes,
+concerns, finders, mailers, jobs and rake tasks.
+
+**Another tree-sitter language:** `treeSitterPlugin({ name, version,
+grammar, owns(file), extract(tree, file, text), link(facts, root) })`.
+`extract` sees one file's syntax and returns its facts (kept per file
+between runs); `link` turns every file's facts into the graph. Grammars
+come from `@vscode/tree-sitter-wasm` (Ruby, Python, Go, Java, Rust, C#,
+C++, PHP, Bash).
+
+Entry points: a node's `detail.registration` (`{ call, key, category }`)
+lists it under `category` ("routes", "jobs", "tasks"; default "events"),
+grouped by its file's `runtime` tag.

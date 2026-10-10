@@ -189,12 +189,13 @@ export class Queries {
       if (node) add(category, node, e.key);
     }
 
-    // Other registered callbacks: app events, hotkeys, listeners. Timers and
+    // Other registered callbacks: app events, hotkeys, listeners, and what a
+    // plugin files under its own category (routes, jobs, tasks). Timers and
     // tests aren't ways in.
     const NOT_ENTRIES = /^(setTimeout|setInterval|setImmediate|queueMicrotask|nextTick|requestAnimationFrame|requestIdleCallback|describe|it|test|before\w*|after\w*|then|exposeIn\w*World)$/;
     for (const n of g.allNodes()) {
-      const reg = n.detail?.registration as { call: string; key: string | null } | undefined;
-      if (reg && !NOT_ENTRIES.test(reg.call)) add("events", n, reg.key ? `${reg.call} ${reg.key}` : reg.call);
+      const reg = n.detail?.registration as { call: string; key: string | null; category?: string } | undefined;
+      if (reg && !NOT_ENTRIES.test(reg.call)) add(reg.category ?? "events", n, reg.key ? `${reg.call} ${reg.key}` : reg.call);
     }
 
     // Functions nothing in the project reaches: called by a framework, HTML,
@@ -205,12 +206,13 @@ export class Queries {
       if (!reached) add("not called in the project", n, `${n.name}()`);
     }
 
-    const ORDER = ["on load", "ipc handlers", "messages from main", "bridge api", "events", "channels", "not called in the project"];
-    const RUNTIME_ORDER = ["main", "preload", "renderer", "shared"];
+    const ORDER = ["on load", "routes", "ipc handlers", "messages from main", "bridge api", "jobs", "tasks", "events", "channels", "not called in the project"];
+    const RUNTIME_ORDER = ["main", "preload", "renderer", "web", "jobs", "tasks", "shared"];
     const groups = [...byRuntime]
       .map(([runtime, cats]) => ({
         runtime,
-        categories: ORDER.filter((c) => cats.has(c)).map((name): EntryCategory => ({ name, collapsed: name === "not called in the project", entries: cats.get(name)! })),
+        // A plugin's own categories go before the unreached ones.
+        categories: [...ORDER.slice(0, -1), ...[...cats.keys()].filter((c) => !ORDER.includes(c)), ORDER[ORDER.length - 1]].filter((c) => cats.has(c)).map((name): EntryCategory => ({ name, collapsed: name === "not called in the project", entries: cats.get(name)! })),
       }))
       .sort((a, b) => rank(RUNTIME_ORDER, a.runtime) - rank(RUNTIME_ORDER, b.runtime));
 

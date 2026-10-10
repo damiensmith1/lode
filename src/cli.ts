@@ -18,7 +18,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GraphStore } from "./graph/store.js";
-import { tsPlugin } from "./ingest/ts/index.js";
+import { pluginFor } from "../plugins/index.js";
 import type { Edge } from "./schema/index.js";
 
 // Exit quietly when piped into something that stops reading (`| head`).
@@ -64,7 +64,7 @@ if (!project || !COMMANDS.includes(command) || (command === "node" && !nodeId)) 
 }
 
 const start = performance.now();
-const store = GraphStore.open(tsPlugin, project, { cacheDir });
+const store = GraphStore.open(await pluginFor(project), project, { cacheDir }); // TS/JS, Ruby (+ Rails), or both
 const ms = Math.round(performance.now() - start);
 const { graph } = store;
 

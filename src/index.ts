@@ -3,13 +3,14 @@
 // views. The views live in "lode/views"; the WebSocket server in
 // "lode/server".
 //
-//   import { GraphStore, tsPlugin, createService, serveMessages } from "lode";
-//   const store = GraphStore.open(tsPlugin, folder);   // any folder
+//   import { GraphStore, pluginFor, createService, serveMessages } from "lode";
+//   const store = GraphStore.open(await pluginFor(folder), folder);   // any folder
 //   const service = createService(store);
 //   serveMessages(service, { send, listen });           // e.g. a webview
 export { GraphStore, type StoreOptions } from "./graph/store.js";
 export { Graph, type Direction } from "./graph/graph.js";
 export { tsPlugin } from "./ingest/ts/index.js";
+export { pluginFor, combinePlugins, rubyPlugin, railsPack, treeSitterPlugin, loadParser, type RubyPack, type RubyProject, type TreeSitterLanguage } from "../plugins/index.js";
 export { Queries } from "./query/index.js";
 export { createService, serveMessages, type LodeService, type ServiceOptions } from "./service/index.js";
 export { askFlow, lexicalCandidates, type AskOptions } from "./ask/index.js";
