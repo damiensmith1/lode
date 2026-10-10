@@ -203,6 +203,7 @@ export class LodeFlow extends HTMLElement {
     if (!block) return;
     this.remember();
     this.cards.set(id, newCard(id, block));
+    this.connect(id);
     this.render();
     this.placeRoot(id);
     this.goTo(id);
@@ -288,6 +289,7 @@ export class LodeFlow extends HTMLElement {
       this.cards.set(key, card);
     }
     this.addArrow({ from, line, to: key, kind });
+    if (!existing) this.connect(key);
     this.render();
     if (!existing) this.placeBeside(key, from, line);
     this.goTo(key);
@@ -302,6 +304,7 @@ export class LodeFlow extends HTMLElement {
     this.remember();
     if (!existing) this.cards.set(callerId, newCard(callerId, block!));
     this.addArrow({ from: callerId, line, to: cardKey, kind });
+    if (!existing) this.connect(callerId);
     this.render();
     if (!existing) this.placeLeft(callerId, cardKey, line);
     this.goTo(callerId);
@@ -350,6 +353,27 @@ export class LodeFlow extends HTMLElement {
     for (const k of gone) this.group.delete(k);
     this.render();
     this.changed();
+  }
+
+  // A card that arrives (again) links up with what's already on the canvas:
+  // an arrow to each card it calls and from each card that calls it, from
+  // the first line that does, unless there's an arrow between them already.
+  // Whole files don't, or one would point at everything it contains.
+  private connect(key: string) {
+    const card = this.cards.get(key);
+    if (!card) return;
+    const isFile = (c: Card) => c.block.node.id === c.block.node.file;
+    if (isFile(card)) return;
+    const link = (from: Card, to: string) => {
+      if (isFile(from) || this.arrows.some((a) => a.from === from.key && a.to === to)) return;
+      const l = from.block.links.find((l) => l.target.id === to && l.line >= from.range[0] && l.line <= from.range[1]);
+      if (l) this.addArrow({ from: from.key, line: l.line, to, kind: l.kind });
+    };
+    for (const other of this.cards.values()) {
+      if (other === card) continue;
+      if (this.cards.has(other.block.node.id) && other.key === other.block.node.id) link(card, other.key);
+      if (key === card.block.node.id) link(other, key);
+    }
   }
 
   private addArrow(a: Arrow) {

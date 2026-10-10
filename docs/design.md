@@ -398,7 +398,10 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   right; callers to the left), level with the line, nudged down until it
   overlaps nothing, with an arrow from that line. Opening from several
   places branches; opening something already on the canvas adds an arrow to
-  the existing card and goes to it (no duplicates). Entry points, search and
+  the existing card and goes to it (no duplicates). A card that arrives
+  (opened fresh or again, from anywhere) gets arrows to the cards already
+  on the canvas that it calls and from those that call it, from the first
+  line that does; whole-file cards don't, or they'd point at everything. Entry points, search and
   the file tree add new trees below what's open. Cards drag by their header
   and arrows follow. × closes a card and every card only reachable through
   it. ← is undo: it reverses the last open, close, move, fold or "show
