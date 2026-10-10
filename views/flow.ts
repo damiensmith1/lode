@@ -123,6 +123,7 @@ export class LodeFlow extends HTMLElement {
   private cards = new Map<string, Card>();
   private arrows: Arrow[] = [];
   private selected: string | null = null;
+  private built = false;
   private undo: Snapshot[] = [];
   private offset = { x: PAD, y: PAD }; // board origin, so negative positions fit
   private camera: Camera = { x: 0, y: 0, k: 1 };
@@ -131,6 +132,13 @@ export class LodeFlow extends HTMLElement {
   private unsubscribe?: () => void;
 
   connectedCallback() {
+    document.addEventListener("keydown", this.onKey);
+    this.unsubscribe = this.client?.onChanged(() => void this.reload());
+    // Hosts move views around (switching tabs reattaches them): build and
+    // wire up once, or every reattach adds another set of listeners and a
+    // click acts twice.
+    if (this.built) return;
+    this.built = true;
     this.root.innerHTML = `<style>${BASE_CSS}${CSS}${this.host?.syntaxCss ?? ""}</style>
       <div class="toolbar">
         <button class="crumb" data-action="undo" aria-label="Undo" title="Undo">←</button>
@@ -143,9 +151,7 @@ export class LodeFlow extends HTMLElement {
       </div>
       <div class="canvas"><div class="board"></div></div>`;
     this.root.addEventListener("click", (e) => void this.onClick(e));
-    document.addEventListener("keydown", this.onKey);
     this.setupDrag();
-    this.unsubscribe = this.client?.onChanged(() => void this.reload());
     this.ready = this.restore();
     void this.ready.then(() => {
       const id = this.getAttribute("node");

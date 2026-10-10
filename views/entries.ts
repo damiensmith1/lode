@@ -34,8 +34,13 @@ export class LodeEntries extends HTMLElement {
   private filter = "";
   private opened = new Set<string>(); // "runtime|category" shown in full
   private unsubscribe?: () => void;
+  private built = false;
 
   connectedCallback() {
+    this.unsubscribe = this.client?.onChanged(() => this.load());
+    // Build and wire up once: switching tabs reattaches the view.
+    if (this.built) return;
+    this.built = true;
     this.root.innerHTML = `<style>${BASE_CSS}${CSS}</style>
       <div class="page">
         <p class="lede">Where to start reading: what calls into this code from outside.</p>
@@ -48,7 +53,6 @@ export class LodeEntries extends HTMLElement {
       this.filter = (e.target as HTMLInputElement).value.trim().toLowerCase();
       this.renderList();
     });
-    this.unsubscribe = this.client?.onChanged(() => this.load());
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: "entry points", bubbles: true, composed: true }));
     void this.load();
   }
