@@ -1,15 +1,17 @@
+#!/usr/bin/env node
 // A project is a directory, a tsconfig.json or a jsconfig.json.
 //
 // lode index <project> [--json <out>] [--cache <dir>]
 //   Build (or refresh) the graph and print a summary.
 // lode node <project> <node-id> [--cache <dir>]
 //   Print one node, its place in each lens, and its edges one hop up and down.
-// lode serve <project> [--port <n>] [--cache <dir>]
-//   Run the lode server for a host to connect to (ws://…/rpc).
+// lode serve <project> [--port <n>] [--cache <dir>] [--origin <url>]…
+//   Run the lode server for a host to connect to (ws://…/rpc). --origin
+//   allows a browser page from another origin (a host's webview) to connect.
 // lode open <project> [--port <n>] [--cache <dir>]
 //   Run the server with the standalone app, and open it in the browser.
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GraphStore } from "./graph/store.js";
@@ -27,6 +29,8 @@ const option = (name: string) => {
   const i = args.indexOf(`--${name}`);
   return i === -1 ? undefined : args.splice(i, 2)[1];
 };
+const origins: string[] = [];
+for (let o = option("origin"); o; o = option("origin")) origins.push(o);
 const json = option("json");
 const cacheDir = option("cache");
 const port = Number(option("port") ?? 0);
@@ -38,7 +42,7 @@ if (!project || !COMMANDS.includes(command) || (command === "node" && !nodeId)) 
     [
       "usage: lode index <project> [--json out] [--cache dir]",
       "       lode node <project> <node-id> [--cache dir]",
-      "       lode serve <project> [--port n] [--cache dir]",
+      "       lode serve <project> [--port n] [--cache dir] [--origin url]…",
       "       lode open <project> [--port n] [--cache dir]",
     ].join("\n"),
   );
@@ -54,11 +58,18 @@ if (command === "serve" || command === "open") {
   const { startServer } = await import("./server/index.js");
   let staticDir: string | undefined;
   if (command === "open") {
-    const { buildApp } = await import("../hosts/app/build.js");
-    staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dist", "app");
-    await buildApp(staticDir);
+    // An installed package ships the app prebuilt (dist/app, beside
+    // dist/lib); from source, bundle it now.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const prebuilt = path.join(here, "..", "..", "app");
+    if (here.endsWith(path.join("dist", "lib", "src")) && existsSync(path.join(prebuilt, "index.html"))) staticDir = prebuilt;
+    else {
+      const { buildApp } = await import("../hosts/app/build.js");
+      staticDir = path.join(here, "..", "dist", "app");
+      await buildApp(staticDir);
+    }
   }
-  const server = await startServer({ store, port, staticDir, watch: true });
+  const server = await startServer({ store, port, staticDir, watch: true, allowedOrigins: origins });
   console.log(`lode · ${graph.size.nodes} nodes, ${graph.size.edges} edges (${ms}ms) · ${store.root}`);
   console.log(command === "open" ? `open ${server.url}` : `serving ${server.rpcUrl}`);
   if (command === "open") spawn(process.platform === "darwin" ? "open" : "xdg-open", [server.url], { stdio: "ignore", detached: true }).unref();

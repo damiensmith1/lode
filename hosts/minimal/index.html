@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  The smallest lode host: one page, the prebuilt view bundles, no build step.
+  Run a server for a folder (`lode serve <folder> --port 4600 --origin <this
+  page's origin>`), serve this page from beside node_modules, and open it
+  with the server's RPC URL:
+    index.html#rpc=ws://127.0.0.1:4600/rpc?token=…
+  It keeps its canvas in memory, uses the dark theme, and has no editor, so
+  card titles open files as cards. Swap any of those for your own.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>lode · minimal host</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  lode-flow { height: 100%; }
+</style>
+</head>
+<body>
+<script type="module">
+  import { createView, DARK_THEME, LodeClient, memoryStorage, themeCss } from "./node_modules/lode/dist/views/lode-views.js";
+  import { highlightJs } from "./node_modules/lode/dist/views/lode-highlight.js";
+
+  const rpc = new URLSearchParams(location.hash.slice(1)).get("rpc");
+  const connection = new LodeClient(rpc);
+  document.head.insertAdjacentHTML("beforeend", `<style>${themeCss(DARK_THEME)}</style>`);
+  const host = {
+    openView: (request) => request.kind === "flow" && request.id && flow.show(request.id),
+    storage: memoryStorage(),
+    ...highlightJs,
+  };
+  const flow = createView({ kind: "flow", state: "minimal" }, connection, host);
+  document.body.append(flow);
+  const [first] = (await connection.call("entries")).groups[0]?.categories[0]?.entries ?? [];
+  if (first) flow.show(first.node.id);
+</script>
+</body>
+</html>

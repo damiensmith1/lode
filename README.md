@@ -20,6 +20,11 @@ npm run lode -- open path/to/project     # standalone app in the browser
 npm run lode -- serve path/to/project    # just the server, for another host
 ```
 
+To embed lode in an editor or app (VS Code, Electron, a web page), see
+[`docs/embedding.md`](docs/embedding.md). `npm run build` makes the package:
+`lode` (core), `lode/server`, `lode/views` (+ self-contained bundles in
+`dist/views`) and the `lode` command.
+
 The graph is cached in `~/.cache/lode/<project hash>/` (override with
 `--cache <dir>`); nothing is written into the indexed project.
 
@@ -34,10 +39,12 @@ src/schema      the contract between plugins and the core (nodes, edges, channel
 src/ingest/ts   TypeScript + JavaScript plugin: facts from the compiler API, mapped to the schema
 src/derive      core analysis: channel matching (tier 3), shared-state flows (tier 2)
 src/graph       Graph (validation, traversal), lenses, GraphStore (cache)
-src/query      deterministic queries views need (focus, map, search, source)
-src/server     JSON-RPC over WebSocket (`/rpc`), file watching
-views/         web components (<lode-entries>, <lode-flow>), client, host contract
+src/query      deterministic queries views need (block, entries, search, source)
+src/service    those queries as methods with no transport; serveMessages for message channels
+src/server     the service over JSON-RPC on a WebSocket (`/rpc`), file watching
+views/         web components (<lode-entries>, <lode-flow>), connections, storage, themes, host contract
 hosts/app      the standalone host (`lode open`)
+hosts/minimal  a whole host in one HTML page, from the package's bundles
 src/cli.ts     the commands above
 ```
 

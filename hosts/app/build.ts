@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export async function buildApp(outDir: string): Promise<void> {
   mkdirSync(outDir, { recursive: true });
   await build({
-    entryPoints: [path.join(here, "main.ts")],
+    entryPoints: [path.join(here, existsSync(path.join(here, "main.ts")) ? "main.ts" : "main.js")], // source or compiled
     outfile: path.join(outDir, "app.js"),
     bundle: true,
     format: "esm",

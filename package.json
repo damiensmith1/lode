@@ -1,13 +1,51 @@
 {
   "name": "lode",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Read a codebase as a flow of real code: a code graph, language plugins, and embeddable views any editor or app can host.",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "lode": "dist/lib/src/cli.js"
+  },
+  "types": "./dist/lib/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib/src/index.d.ts",
+      "import": "./dist/lib/src/index.js"
+    },
+    "./server": {
+      "types": "./dist/lib/src/server/index.d.ts",
+      "import": "./dist/lib/src/server/index.js"
+    },
+    "./views": {
+      "types": "./dist/lib/views/index.d.ts",
+      "import": "./dist/lib/views/index.js"
+    },
+    "./views/highlight": {
+      "types": "./dist/lib/views/highlight.d.ts",
+      "import": "./dist/lib/views/highlight.js"
+    },
+    "./views/bundle": "./dist/views/lode-views.js",
+    "./views/bundle/highlight": "./dist/views/lode-highlight.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/lib",
+    "dist/app",
+    "dist/views",
+    "hosts/minimal",
+    "README.md",
+    "docs/embedding.md"
+  ],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lode": "tsx src/cli.ts",
-    "build:web": "tsx hosts/app/build.ts"
+    "build:web": "tsx hosts/app/build.ts",
+    "build": "tsx scripts/build.ts"
   },
   "dependencies": {
     "esbuild": "0.28.2",

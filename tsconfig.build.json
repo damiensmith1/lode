@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "sourceMap": true,
+    "rootDir": ".",
+    "outDir": "dist/lib"
+  },
+  "include": ["src", "views", "hosts/app"],
+  "exclude": ["test"]
+}

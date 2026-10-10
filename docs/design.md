@@ -323,15 +323,39 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
 - **Focus** It showed one symbol's steps and links as names;
   flow shows the same links on the real code (callers in each block header,
   calls / IPC / state as chips on lines), so focus added nothing.
-- **Host contract** (`views/host.ts`): a host passes a `LodeClient` and a
-  `LodeHost` (`openView`, optional `openSource`, `highlight`, `syntax`,
-  `syntaxCss`) and listens for
-  `lode-title` to name tabs. That's all an adapter (VS Code, Clance) has to
-  implement. Without `openSource` (the standalone app has no editor), a
-  card's title opens its file as a card to its left, with an arrow from the
-  line where the card's code starts. `highlight` reports the lines a view is about (the focused
-  node's range, its step lines, the line under the pointer); the host
-  decides how to show them, which in an IDE maps to editor decorations.
+- **Host contract** (`views/host.ts`; how-to in `embedding.md`): lode
+  provides the mechanics (cards, arrows, folds, paging, drag, zoom, select,
+  undo) and the host everything around them. A host passes a connection
+  (`LodeConnection`: `call`, `onChanged`) and a `LodeHost` (`openView`,
+  optional `openSource`, `highlight`, `syntax`/`syntaxCss`, `storage`,
+  `css`) and listens for `lode-title` to name tabs. That's all an adapter
+  (VS Code, Clance) has to implement. Without `openSource` (the standalone
+  app has no editor), a card's title opens its file as a card to its left,
+  with an arrow from the line where the card's code starts. `highlight`
+  reports the lines a view is about; the host decides how to show them,
+  which in an IDE maps to editor decorations.
+- **Transport is the host's.** The core's methods live in a service with no
+  transport (`src/service`). The WebSocket server is one way to reach it;
+  `serveMessages` + `MessageConnection` are another, over any message
+  channel (a webview's postMessage, Electron IPC), with no server or port.
+- **State is the host's.** Each flow saves its canvas (cards, arrows,
+  camera, selection) under its own key (`ViewRequest.state`) in
+  `host.storage`: lode's cache through the connection by default, or
+  localStorage, memory, or the host's own store. The standalone app keeps
+  any number of flow tabs this way, plus its tab list (`app-tabs`); the
+  first flow keeps the key `flow`, so canvases saved before tabs still load.
+- **Look is the host's.** Every colour and font is a `--lode-*` token with
+  its default as a `var()` fallback, so a host sets tokens on any ancestor
+  (declaring defaults on `:host` would shadow inherited ones). Syntax
+  colours are tokens too. `LIGHT_THEME` / `DARK_THEME` / `themeCss` are
+  exported; pieces carry `part` names for `::part()`; `host.css` goes last
+  inside every view for the rest.
+- **Packaging.** `npm run build`: `dist/lib` (ESM + .d.ts for core, server,
+  views, the app), `dist/app` (the app prebuilt, which an installed
+  `lode open` serves), `dist/views` (self-contained bundles for pages
+  without a bundler). Exports: `lode`, `lode/server`, `lode/views`,
+  `lode/views/highlight`, `lode/views/bundle`. Checked by installing the
+  packed tarball into an empty project and running a host from it.
 - **No separate code pane.** It was dropped: the flow reads code better, and
   the one thing the pane did that the flow didn't, reading a file's
   top-level code, is now how a file block works. A file opens in the flow as
