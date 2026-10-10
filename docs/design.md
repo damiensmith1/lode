@@ -737,11 +737,24 @@ The explain panel is a conversation about the canvas, run on the server
 selection, which also becomes what "these" means), plus the question the
 flow was built for and the diff when shown. The model (`ChatModel`;
 Claude over the Anthropic API by default, streaming SSE, the context
-block marked for prompt caching) gets three tools: `search`, `read` (a
-`contextFor` around one symbol) and `add_to_flow`, so it builds the flow
-out only with real graph nodes, at most 10 per message, which the view
-opens as they're added. Names resolve to a symbol in a file already on
-the canvas first. Up to 6 model turns per message. The system prompt asks
+block marked for prompt caching) gets tools to read the graph (`search`,
+`read`: a `contextFor` around one symbol) and to work the canvas the way
+the user does: `add_cards` (at most 12 a message), `build_flow` (Jev's
+`askFlow` for a question, laid out like a / flow), `expand`, `open_fold` /
+`close_fold` (by the card and the line the fold starts on), `close_cards`,
+`select`, `focus`, `fit`, `show_changes`, and `open_tab`. The LLM drives
+and Jev is one of its tools: Jev is fast and good at "where does this
+start and what follows", the LLM at deciding what the user wants done.
+Canvas tools don't touch anything on the server: each is checked (real
+symbols; cards that are on the canvas, by name or id; folds that exist in
+that card's lines) and becomes a `CanvasAction` event; the view runs them
+in order as they arrive. The first action that changes cards takes an
+undo snapshot and the rest hold undo, so ⌘Z takes back a whole message
+(moving the view and showing changes aren't undone). At most 16 actions a
+message. New tabs only when the user's last message asks for one: the
+tools refuse otherwise, not just the prompt. No editing yet. Names
+resolve to a symbol in a file already on the canvas first. Up to 8 model
+turns per message. The system prompt asks
 for grounded, concise answers with names in backticks (rendered as links
 to their cards) and to read folded code before describing it. Answers
 stream as service events, forwarded by both transports; conversations
@@ -749,8 +762,8 @@ are saved with the flow's state.
 
 The panel: a header saying what the next question is about (all cards,
 or the selection); each exchange as the question (with its scope), the
-model's steps as compact chips (searched, read, "+ added N cards", which
-frames them), then the answer, kept short (a lead sentence or two, then a
+model's steps as compact chips (searched, read, "+ added …" and "↳
+expanded …", which frame the cards they touched), then the answer, kept short (a lead sentence or two, then a
 few bullets) with code names as quiet links that light up their card on
 hover. Only real symbols are links: once an answer is written, its code
 names go to the service's `resolve` (exact names, qualified ids like

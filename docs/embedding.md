@@ -325,11 +325,21 @@ cancels an answer (`explainCancel`). Parts: `explain`, `explain-log`,
 `explain-composer`, `explain-input`. The service's `explain` method (`explain(request, queries, model,
 onEvent)` in Node) builds the context from the cards (or the selection)
 with `contextFor`, sends it with the conversation to a `ChatModel`, and
-gives the model three tools: `search`, `read` and `add_to_flow`. Cards it
-adds open on the canvas as they're added. The answer streams as `explain`
-events (`{ stream, event: text | tool | add }`) through
-`LodeConnection.onEvent` (WebSocket and message channels both forward
-them); without `onEvent`, it arrives whole.
+gives the model tools to read the graph (`search`, `read`) and to work the
+canvas: `add_cards`, `build_flow` (a whole flow for a question, with Jev:
+pass `explain(…, { judge })`; the service uses `TYPESAFE_API_KEY`),
+`expand`, `open_fold` / `close_fold`, `close_cards`, `select`, `focus`,
+`fit`, `show_changes` and `open_tab`. Canvas tools change nothing on the
+server: each becomes a `CanvasAction` (`add`, `plan`, `expand`, `fold`,
+`close`, `select`, `focus`, `fit`, `changes`, `tab`), checked against the
+graph and the cards it was sent (`ExplainRequest.cards`: every card's
+key), which the view carries out in order as they arrive, as one undo
+step per message. New tabs only when the user's message asks for one
+(enforced, not just prompted); a tab action calls the host's
+`openView({ kind: "flow", newTab: true, ask })`. No editing. The answer
+streams as `explain` events (`{ stream, event: text | tool | action }`)
+through `LodeConnection.onEvent` (WebSocket and message channels both
+forward them); without `onEvent`, it arrives whole, with `actions`.
 
 The default model is Claude over the Anthropic API (`anthropicModel`:
 `ANTHROPIC_API_KEY`, `LODE_EXPLAIN_MODEL`, default `claude-sonnet-5-5`;

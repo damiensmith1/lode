@@ -51,18 +51,61 @@ describe("explaining", () => {
         ],
         stop: "tool_use",
       },
-      { content: [{ type: "tool_use", id: "t2", name: "add_to_flow", input: { symbols: ["registerIpc", "noSuchSymbolAnywhere"] } }], stop: "tool_use" },
+      { content: [{ type: "tool_use", id: "t2", name: "add_cards", input: { symbols: ["registerIpc", "noSuchSymbolAnywhere"] } }], stop: "tool_use" },
       { content: [{ type: "text", text: "Added `registerIpc`." }], stop: "end" },
     ]);
     const events: ExplainEvent[] = [];
     const r = await explain({ messages: [{ role: "user", text: "Show what registers it." }], canvas }, queries, model, (e) => events.push(e));
     expect(r.added).toEqual(["src/main.ts#registerIpc"]);
-    expect(events.filter((e) => e.type === "add")).toEqual([{ type: "add", ids: ["src/main.ts#registerIpc"] }]);
+    expect(events.filter((e) => e.type === "action").map((e) => e.type === "action" && e.action)).toEqual([{ kind: "add", ids: ["src/main.ts#registerIpc"] }]);
     expect(events.some((e) => e.type === "tool" && e.summary.includes("registerIpc"))).toBe(true);
     // The second request carries the first turn (without its empty text) and the tool result.
     const sent = model.seen[1].messages as { role: string; content: { type: string; text?: string; content?: string }[] }[];
     expect(sent[1].content.every((b) => b.type !== "text" || b.text)).toBe(true);
     expect(sent[2].content[0].content).toContain("### registerIpc");
+  });
+
+  it("works the canvas: checks every action against the cards and the graph", async () => {
+    const block = queries.block("src/main.ts#saveNote")!;
+    const fold = block.regions.find((r) => r.start > block.lines[0].n);
+    const call = (id: string, name: string, input: Record<string, unknown>) => ({ type: "tool_use" as const, id, name, input });
+    const model = scripted([
+      {
+        content: [
+          call("a", "expand", { card: "saveNote" }),
+          call("b", "expand", { card: "notOnTheCanvas" }),
+          call("c", "add_cards", { symbols: ["registerIpc"] }),
+          call("d", "focus", { cards: ["registerIpc", "saveNote"] }),
+          call("e", "open_fold", { card: "saveNote", line: fold?.start ?? 1 }),
+          call("f", "open_fold", { card: "saveNote", line: 9999 }),
+          call("g", "close_cards", { cards: ["registerIpc"] }),
+          call("h", "show_changes", { on: true }),
+          call("i", "open_tab", {}),
+          call("j", "build_flow", { question: "how are notes saved", new_tab: true }),
+          call("k", "build_flow", { question: "how are notes saved" }),
+        ],
+        stop: "tool_use",
+      },
+      { content: [{ type: "text", text: "Done." }], stop: "end" },
+    ]);
+    const r = await explain({ messages: [{ role: "user", text: "Walk me through it." }], canvas }, queries, model);
+    expect(r.actions.map((a) => a.kind)).toEqual(["expand", "add", "focus", ...(fold ? ["fold"] : []), "close", "changes"]);
+    expect(r.actions.find((a) => a.kind === "focus")).toEqual({ kind: "focus", cards: ["src/main.ts#registerIpc", "src/main.ts#saveNote"] });
+    if (fold) expect(r.actions.find((a) => a.kind === "fold")).toEqual({ kind: "fold", card: "src/main.ts#saveNote", start: fold.start, end: fold.end, open: true });
+    const results = (model.seen[1].messages as { content: { content?: string }[] }[]).at(-1)!.content.map((b) => b.content);
+    expect(results[1]).toMatch(/No card notOnTheCanvas/);
+    expect(results[5]).toMatch(/no fold starting on line 9999/);
+    expect(results[8]).toMatch(/didn't ask for a new tab/); // open_tab, unasked
+    expect(results[9]).toMatch(/didn't ask for a new tab/); // build_flow in a new tab, unasked
+    expect(results[10]).toMatch(/isn't available here/); // no judge
+    // The model is told which cards it can act on.
+    expect(model.seen[0].system[1]).toContain("- saveNote: src/main.ts#saveNote");
+  });
+
+  it("opens a new tab only when the user asks for one", async () => {
+    const model = scripted([{ content: [{ type: "tool_use", id: "t", name: "open_tab", input: { question: "how are notes saved" } }], stop: "tool_use" }]);
+    const r = await explain({ messages: [{ role: "user", text: "Show how notes are saved in a new tab" }], canvas }, queries, model);
+    expect(r.actions).toEqual([{ kind: "tab", question: "how are notes saved" }]);
   });
 
   it("routes each question to the provider it names, within what the host allows", async () => {

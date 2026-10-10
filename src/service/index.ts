@@ -205,7 +205,7 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
       const stream = String(p.stream ?? "");
       const abort = new AbortController();
       if (stream) running.set(stream, abort);
-      return explain({ ...request, ...(choice.model && { model: choice.model }) }, queries, model, (event) => emit("explain", { stream, event }), abort.signal)
+      return explain({ ...request, ...(choice.model && { model: choice.model }) }, queries, model, (event) => emit("explain", { stream, event }), { signal: abort.signal, judge: judgeOf() ?? undefined })
         .then((result) => ({ ...result, model: ref }))
         .finally(() => running.delete(stream));
     },

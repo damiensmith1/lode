@@ -50,8 +50,11 @@ Every flow has an **explain** panel (**i**): explain the whole flow, the
 selected cards, or ask follow-ups ("why does closeTab call select?"). The
 answer streams in, grounded in the exact code on the canvas, and every
 name in it is a link to its card. Ask for more ("also show where the tabs
-get saved") and the model searches and reads lode's graph, then **adds the
-cards** to your canvas, linked like any other. Flows built with **/** get
+get saved") and the model searches and reads lode's graph, then **works the
+canvas for you**: adds cards, builds a whole flow (with Jev), expands
+cards, opens folds, closes cards, focuses, shows changes. One ⌘Z undoes
+everything it did in a message, and it opens new tabs only when you ask for
+one. Flows built with **/** get
 an "explain this flow" button. Conversations are saved with the tab.
 
 Explaining works with Claude (Anthropic API) and anything OpenAI-compatible
@@ -177,7 +180,8 @@ node dist/lib/src/cli.js mcp <project>                       # MCP server on std
 - **Context** (`src/context`, `src/mcp`): slices of the graph formatted
   for language models, and an MCP server that serves them.
 - **Explain** (`src/explain`): a conversation about the canvas with a
-  `ChatModel` (Claude by default) that can search, read and add cards.
+  `ChatModel` (Claude by default) that can search and read the graph and
+  work the canvas (add cards, build flows, expand, fold, close, focus).
 - **Service and server** (`src/service`, `src/server`): the queries as
   methods with no transport, a file watcher, and an optional localhost
   WebSocket server.

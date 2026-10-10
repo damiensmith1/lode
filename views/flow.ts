@@ -6,6 +6,7 @@ import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
 import { codeNames, renderMarkdown } from "./markdown.js";
 import type { ContextResult } from "../src/context/index.js";
+import type { CanvasAction } from "../src/explain/index.js";
 
 const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
@@ -50,7 +51,7 @@ interface ChatEntry {
   role: "user" | "assistant";
   text: string;
   scope?: string; // a question: what it was about ("2 selected cards")
-  notes?: { text: string; added?: boolean; ids?: string[] }[]; // what the model did: searched, read, added
+  notes?: { text: string; added?: boolean; ids?: string[] }[]; // what the model did: searched, read, added cards (added), acted on cards (ids)
   links?: Record<string, string>; // names in the answer that are real symbols: name → id
   model?: string; // which model answered (its label)
   error?: string;
@@ -106,6 +107,8 @@ const CSS = `
 .q .scope { font-weight: 400; color: var(--lode-faint); font-size: 12px; }
 .steps { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
 .step { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 10px; background: var(--lode-sunken); color: var(--lode-muted); font-size: 11.5px; line-height: 18px; }
+.step.acted { color: var(--lode-local); }
+.step.acted[data-action] { cursor: pointer; }
 .step.added { background: color-mix(in srgb, var(--lode-added) 12%, transparent); color: var(--lode-added); cursor: pointer; }
 .step.thinking { background: none; color: var(--lode-faint); padding-left: 0; }
 .step.thinking i { display: inline-block; width: 4px; height: 4px; margin: 0 1px; border-radius: 50%; background: currentColor; animation: dot 1.2s infinite ease-in-out; }
@@ -898,6 +901,7 @@ export class LodeFlow extends HTMLElement {
     const request = {
       messages: [...this.chat.filter((m) => m.text && !m.error).map((m) => ({ role: m.role, text: m.text })), { role: "user" as const, text }],
       canvas: { cards: keys.map(card), arrows: this.arrows.filter((a) => inScope.has(a.from) && inScope.has(a.to)) },
+      cards: [...this.cardMap.keys()], // what it may act on
       ...(this.diffBase !== null && { changes: this.diffBase }),
       ...(picked.length && { focus: picked }),
       ...(this.banner.startsWith("/ ") && { question: this.banner.slice(2).split(" · ")[0] }),
@@ -935,26 +939,32 @@ export class LodeFlow extends HTMLElement {
         const wait = () => ((this.shown.get(answer) ?? Infinity) >= answer.text.length || answer.stopped ? done() : requestAnimationFrame(wait));
         wait();
       });
+    // What the model does to the canvas runs in order, as it does it, and
+    // undoes in one step (see act).
+    let acting = Promise.resolve();
+    let remembered = false;
+    const perform = (action: CanvasAction) => {
+      acting = acting.then(async () => void (await this.act(action, () => remembered || ((remembered = true), false)))).catch(() => {});
+    };
     const stop = this.client.onEvent?.((name, payload) => {
-      const p = payload as { stream: string; event: { type: string; text?: string; summary?: string; ids?: string[] } };
+      const p = payload as { stream: string; event: { type: string; text?: string; summary?: string; action?: CanvasAction } };
       if (name !== "explain" || p.stream !== stream || answer.stopped) return;
       const e = p.event;
       if (e.type === "text") answer.text += e.text ?? "";
       else if (e.type === "tool") answer.notes!.push({ text: (e.summary ?? "").replace(/`/g, "") });
-      else if (e.type === "add" && e.ids?.length) {
-        answer.notes!.push({ text: `added ${e.ids.length === 1 ? prettyName(e.ids[0]) : `${e.ids.length} cards`}`, added: true, ids: e.ids });
-        for (const id of e.ids) this.freshCards.set(id, Date.now());
-        void this.showAll(e.ids);
+      else if (e.type === "action" && e.action) {
+        answer.notes!.push(actionNote(e.action, e.summary ?? e.action.kind));
+        perform(e.action);
       }
       redraw();
     });
     try {
-      const result = await this.client.call<{ text: string; added: string[] }>("explain", { request, stream });
+      const result = await this.client.call<{ text: string; actions?: CanvasAction[] }>("explain", { request, stream });
       if (!answer.stopped) answer.text = result.text || answer.text;
+      // Without streaming, the actions arrive with the answer.
+      if (!stop && !answer.stopped) for (const a of result.actions ?? []) (answer.notes!.push(actionNote(a, a.kind)), perform(a));
       redraw();
-      await Promise.all([this.linkAnswer(answer), revealed()]);
-      // Without streaming, the cards arrive with the answer.
-      if (!stop && result.added.length) void this.showAll(result.added);
+      await Promise.all([this.linkAnswer(answer), revealed(), acting]);
     } catch (error) {
       if (!answer.stopped) answer.error = error instanceof Error ? error.message : String(error);
     } finally {
@@ -963,6 +973,56 @@ export class LodeFlow extends HTMLElement {
       this.explaining = false;
       this.renderChat();
       this.changed();
+    }
+  }
+
+  // Do what the model asked to the canvas. The server has checked it
+  // against the cards it was sent; the canvas may have changed since, so
+  // what's gone is skipped. The first action of a message is remembered for
+  // undo (`once` says whether it was); the rest hold undo, so ⌘Z takes the
+  // whole message back.
+  private async act(a: CanvasAction, once: () => boolean) {
+    const has = (keys: string[]) => keys.filter((k) => this.cardMap.has(k));
+    if (a.kind === "tab") return this.host?.openView({ kind: "flow", newTab: true, ...(a.question && { ask: a.question }) });
+    // Moving the view and showing changes aren't undone; the rest is.
+    if (a.kind !== "focus" && a.kind !== "fit" && a.kind !== "changes" && !once()) this.remember();
+    this.holdUndo = true;
+    try {
+      switch (a.kind) {
+        case "add":
+        case "plan": {
+          const ids = a.kind === "add" ? a.ids : a.plan.cards.map((c) => c.id);
+          for (const id of ids) this.freshCards.set(id, Date.now());
+          return await (a.kind === "add" ? this.showAll(ids) : this.loadPlan(a.plan));
+        }
+        case "expand": {
+          const card = this.cardMap.get(a.card);
+          return card && (await this.expand(card));
+        }
+        case "fold": {
+          const card = this.cardMap.get(a.card);
+          const region = card?.block.regions.find((r) => r.start === a.start && r.end === a.end);
+          if (!card || !region) return;
+          // In place: open or close it. Otherwise opening opens its card,
+          // and closing closes the card it opened.
+          if (inPlace(region)) return card.expanded.has(a.start) !== a.open && (await this.fold(card, a.start, a.end));
+          if (a.open) return await this.fold(card, a.start, a.end);
+          const opened = this.arrows.find((r) => r.from === card.key && r.line === a.start)?.to;
+          return opened && this.close([opened]);
+        }
+        case "close":
+          return this.close(has(a.cards));
+        case "select":
+          return this.setSelection(has(a.cards));
+        case "focus":
+          return this.fit(has(a.cards));
+        case "fit":
+          return this.fit([...this.cardMap.keys()]);
+        case "changes":
+          return await this.setDiff(a.base);
+      }
+    } finally {
+      this.holdUndo = false;
     }
   }
 
@@ -1106,12 +1166,16 @@ export class LodeFlow extends HTMLElement {
       }
       const live = this.explaining && i === this.chat.length - 1;
       const text = this.shown.has(m) ? m.text.slice(0, this.shown.get(m)) : m.text;
-      const added = (m.notes ?? []).flatMap((n) => n.ids ?? []);
+      const added = (m.notes ?? []).flatMap((n) => (n.added && n.ids) || []);
       const steps = [
         ...(m.notes ?? []).map((n) =>
           n.added
             ? `<span class="step added" data-action="explain-focus" data-ids="${escape((n.ids ?? []).join(" "))}" title="${escape((n.ids ?? []).map(prettyName).join(", "))}">＋ ${escape(n.text)}</span>`
-            : `<span class="step">${escape(n.text)}</span>`,
+            : n.ids?.length
+              ? `<span class="step acted" data-action="explain-focus" data-ids="${escape(n.ids.join(" "))}">↳ ${escape(n.text)}</span>`
+              : n.ids
+                ? `<span class="step acted">↳ ${escape(n.text)}</span>`
+                : `<span class="step">${escape(n.text)}</span>`,
         ),
         ...(live && !text ? ['<span class="step thinking">thinking <i></i><i></i><i></i></span>'] : []),
       ];
@@ -1764,7 +1828,10 @@ export class LodeFlow extends HTMLElement {
 
   // --- undo ----------------------------------------------------------------
 
+  private holdUndo = false; // while the model acts: one undo step a message
+
   private remember() {
+    if (this.holdUndo) return;
     this.undo.push(this.snapshot());
     if (this.undo.length > UNDO_LIMIT) this.undo.shift();
   }
@@ -2648,6 +2715,15 @@ function keyMatches(spec: string, e: KeyboardEvent): boolean {
 
 // A symbol id as a person reads it: "src/a.ts#Cls.method" → "Cls.method";
 // a callback "start.addEventListener:click" → "addEventListener:click in start".
+// How the model's action shows in its answer: cards it added (＋, click to
+// see them), cards it acted on (↳, click to see them), or what it did.
+function actionNote(a: CanvasAction, summary: string): { text: string; added?: boolean; ids: string[] } {
+  if (a.kind === "add") return { text: summary, added: true, ids: a.ids };
+  if (a.kind === "plan") return { text: summary, added: true, ids: a.plan.cards.map((c) => c.id) };
+  const ids = a.kind === "expand" || a.kind === "fold" ? [a.card] : a.kind === "select" || a.kind === "focus" ? a.cards : [];
+  return { text: summary, ids };
+}
+
 function prettyName(id: string): string {
   const name = id.replace(/@\d+-\d+$/, "").replace(/^.*#/, "");
   const dot = name.indexOf(".");
