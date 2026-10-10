@@ -1,15 +1,16 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { GraphStore } from "../graph/store.js";
-import { Queries } from "../query/index.js";
+import { createService, type LodeService } from "../service/index.js";
 
-// The lode server: the graph and its queries over JSON-RPC on a WebSocket
-// (`/rpc`), so views can run anywhere a host can open a web page. Optionally
-// serves a host's static files too (the standalone app).
+// The lode server: the service's methods (../service) over JSON-RPC on a
+// WebSocket (`/rpc`), so views can run anywhere a host can open a web page.
+// Optionally serves a host's static files too (the standalone app). Hosts
+// that run Node themselves can skip it and call the service directly.
 //
 // Security: localhost only, and every WebSocket must present the session's
 // random token (`/rpc?token=…`), come from an allowed Origin (or none, for
@@ -26,6 +27,7 @@ export interface ServerOptions {
   watch?: boolean; // re-index when project files change
   token?: string; // defaults to a fresh random one
   allowedOrigins?: string[]; // extra browser origins, e.g. a host's webview
+  service?: LodeService; // defaults to createService(store)
 }
 
 export interface LodeServer {
@@ -51,40 +53,7 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
   const isLocalHost = (host: string | undefined) => !!host && localHosts().includes(host);
   const tokenMatches = (given: string | null) =>
     !!given && given.length === token.length && timingSafeEqual(Buffer.from(given), Buffer.from(token));
-  const queries = new Queries(() => store.graph, store.root);
-
-  // Views can keep a layout (e.g. the flow's cards) with the project's cache,
-  // so it survives restarts whatever host shows them.
-  const layoutPath = (name: unknown) => {
-    if (typeof name !== "string" || !/^[a-z0-9-]{1,40}$/.test(name)) throw new Error("bad layout name");
-    return path.join(store.cacheDir, `layout-${name}.json`);
-  };
-
-  const methods: Record<string, (params: Record<string, unknown>) => unknown> = {
-    loadLayout: async (p) => {
-      try {
-        return JSON.parse(await readFile(layoutPath(p.name), "utf8"));
-      } catch {
-        return null;
-      }
-    },
-    saveLayout: async (p) => {
-      const text = JSON.stringify(p.data ?? null);
-      if (text.length > 2_000_000) throw new Error("layout too large");
-      await mkdir(store.cacheDir, { recursive: true });
-      await writeFile(layoutPath(p.name), text);
-      return true;
-    },
-    info: () => queries.info(),
-    files: () => queries.files(),
-    search: (p) => queries.search(String(p.query ?? "")),
-    map: (p) => queries.map(String(p.lens ?? "runtime"), (p.parent as string | undefined) ?? null, Boolean(p.includeExternal)),
-    source: (p) => queries.source(String(p.file)),
-    graph: (p) => queries.tree(String(p.lens ?? "runtime")),
-    block: (p) => queries.block(String(p.id)),
-    entries: () => queries.entries(),
-    symbolAt: (p) => queries.symbolAt(String(p.file), Number(p.line)),
-  };
+  const service = options.service ?? createService(store);
 
   const http: Server = createServer(async (req, res) => {
     if (!options.staticDir || !isLocalHost(req.headers.host)) return void res.writeHead(404).end();
@@ -119,31 +88,22 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
       } catch {
         return;
       }
-      const { id } = request;
-      const method = typeof request.method === "string" ? methods[request.method] : undefined;
-      if (!method) return void socket.send(JSON.stringify({ id, error: `unknown method ${String(request.method)}` }));
-      Promise.resolve()
-        .then(() => method((request.params as Record<string, unknown>) ?? {}))
-        .then(
-          (result) => socket.send(JSON.stringify({ id, result })),
-          (error) => socket.send(JSON.stringify({ id, error: error instanceof Error ? error.message : String(error) })),
-        );
+      void service.handle(request.method, request.params).then((reply) => socket.send(JSON.stringify({ id: request.id, ...reply })));
     });
   });
 
   // Re-index on change, debounced, and tell every connected view.
+  const unsubscribe = service.onChanged((files) => {
+    const message = JSON.stringify({ method: "changed", params: { files } });
+    for (const s of sockets) s.send(message);
+  });
   let watcher: FSWatcher | undefined;
   if (options.watch) {
     let timer: NodeJS.Timeout | undefined;
     watcher = watch(store.root, { recursive: true }, (_event, name) => {
       if (!name || /(^|[\\/])(node_modules|\.git|dist|out)([\\/]|$)/.test(name)) return;
       clearTimeout(timer);
-      timer = setTimeout(() => {
-        const files = store.refresh();
-        if (!files.length) return;
-        const message = JSON.stringify({ method: "changed", params: { files } });
-        for (const s of sockets) s.send(message);
-      }, 250);
+      timer = setTimeout(() => service.refresh(), 250);
     });
   }
 
@@ -156,6 +116,7 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     token,
     close: async () => {
       watcher?.close();
+      unsubscribe();
       for (const s of sockets) s.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve) => http.close(() => resolve()));

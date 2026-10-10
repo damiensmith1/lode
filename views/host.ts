@@ -1,3 +1,5 @@
+import type { LodeStorage } from "./storage.js";
+
 // What a host (an IDE, Clance, the standalone app) provides to lode views.
 // Views call these; they never touch the host's UI directly.
 export interface LodeHost {
@@ -14,6 +16,12 @@ export interface LodeHost {
   syntax?(text: string, file: string): string[];
   // CSS for the classes `syntax` emits; views put it inside their shadow root.
   syntaxCss?: string;
+  // Optional: CSS added last inside every view's shadow root, to restyle
+  // anything (themes are better set as --lode-* tokens; see theme.ts).
+  css?: string;
+  // Optional: where views keep their state, per view (see ViewRequest's
+  // `state`). Defaults to the project's cache, through the connection.
+  storage?: LodeStorage;
 }
 
 export interface SourceHighlight {
@@ -24,9 +32,12 @@ export interface SourceHighlight {
   hover?: number; // the line under the pointer, if in this file
 }
 
+// A view to show. `state` names where a flow keeps its canvas in the host's
+// storage: give each flow tab its own to keep them apart, and the same one
+// again to bring a tab back as it was. Defaults to "flow".
 export type ViewRequest =
   | { kind: "entries" }
-  | { kind: "flow"; id?: string };
+  | { kind: "flow"; id?: string; state?: string };
 
 // Views dispatch this (bubbling, composed) when their title changes, so the
 // host can label the tab.

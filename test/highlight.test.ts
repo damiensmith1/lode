@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { highlightLines } from "../hosts/app/highlight.js";
+import { highlightLines } from "../views/highlight.js";
 
 describe("highlightLines", () => {
   it("returns one balanced HTML line per source line, even across block comments", () => {

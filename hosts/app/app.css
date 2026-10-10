@@ -46,3 +46,5 @@ body.no-tree #tree { display: none; }
 #view > * { height: 100%; }
 
 #status { display: flex; gap: 16px; padding: 4px 14px; background: var(--chrome); font-size: 11.5px; }
+.tab.new { padding: 8px 12px; border-right: 0; }
+.tab.new:hover { color: var(--fg); }

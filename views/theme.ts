@@ -1,23 +1,87 @@
-// Base styles for every view, inside its shadow root. Hosts theme lode by
-// setting these custom properties on any ancestor (they inherit through the
-// shadow boundary); the defaults are a quiet light theme.
+import type { LodeHost } from "./host.js";
+
+// Themes. Every colour and font in the views is a `--lode-*` custom
+// property; a host themes lode by setting them on any ancestor of a view (or
+// the view itself), e.g. with themeCss(DARK_THEME). Unset ones fall back to
+// LIGHT_THEME. For more than colours, LodeHost.css is added last inside
+// every view, and the main pieces carry `part` names for ::part() styling.
+export type LodeTheme = Record<string, string>;
+
+export const LIGHT_THEME: LodeTheme = {
+  "--lode-bg": "#fafaf7",
+  "--lode-surface": "#ffffff",
+  "--lode-sunken": "#f4f3ee",
+  "--lode-fg": "#171614",
+  "--lode-muted": "#5f5d57",
+  "--lode-faint": "#75726b",
+  "--lode-line-number": "#a3a09a",
+  "--lode-border": "#e9e8e3",
+  "--lode-outline": "#b8b5ad",
+  "--lode-shadow": "#171614",
+  "--lode-calls": "#75726b",
+  "--lode-local": "#2f5fa8",
+  "--lode-channel": "#e2632f",
+  "--lode-channel-text": "#a8461b",
+  "--lode-state": "#8a3b6b",
+  "--lode-font": '"Geist", -apple-system, BlinkMacSystemFont, sans-serif',
+  "--lode-mono": '"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace',
+  // Syntax colours, for highlighters that use them (see ./highlight.ts).
+  "--lode-syntax-keyword": "#8a3b6b",
+  "--lode-syntax-string": "#7a5320",
+  "--lode-syntax-number": "#2f5fa8",
+  "--lode-syntax-title": "#3a5a7a",
+  "--lode-syntax-type": "#2f6b5e",
+  "--lode-syntax-comment": "#75726b",
+  "--lode-syntax-attr": "#5f5d57",
+  "--lode-syntax-variable": "#34322e",
+};
+
+export const DARK_THEME: LodeTheme = {
+  ...LIGHT_THEME,
+  "--lode-bg": "#1b1a18",
+  "--lode-surface": "#232220",
+  "--lode-sunken": "#2b2a27",
+  "--lode-fg": "#ecebe5",
+  "--lode-muted": "#b3b0a8",
+  "--lode-faint": "#8f8c85",
+  "--lode-line-number": "#6f6c66",
+  "--lode-border": "#34322f",
+  "--lode-outline": "#56534e",
+  "--lode-shadow": "#000000",
+  "--lode-calls": "#8f8c85",
+  "--lode-local": "#7aa5e6",
+  "--lode-channel": "#f08a5d",
+  "--lode-channel-text": "#f3a07c",
+  "--lode-state": "#d68bb8",
+  "--lode-syntax-keyword": "#d68bb8",
+  "--lode-syntax-string": "#d9b27c",
+  "--lode-syntax-number": "#7aa5e6",
+  "--lode-syntax-title": "#9cc0e0",
+  "--lode-syntax-type": "#7cc4b0",
+  "--lode-syntax-comment": "#8f8c85",
+  "--lode-syntax-attr": "#b3b0a8",
+  "--lode-syntax-variable": "#dcdad3",
+};
+
+// A theme as CSS, for a host's page: `<style>${themeCss(DARK_THEME)}</style>`.
+export function themeCss(theme: LodeTheme, selector = ":root"): string {
+  return `${selector} {\n${Object.entries(theme).map(([k, v]) => `  ${k}: ${v};`).join("\n")}\n}`;
+}
+
+// Give every var(--lode-x) its default, so a token set anywhere above the
+// view wins (declaring them on :host would shadow what's inherited).
+export function withDefaults(css: string): string {
+  return css.replace(/var\((--lode-[a-z-]+)\)/g, (all, name: string) => (name in LIGHT_THEME ? `var(${name}, ${LIGHT_THEME[name]})` : all));
+}
+
+// A view's styles: the base, the view's own, then the host's syntax CSS and
+// its own CSS last, so a host can restyle anything.
+export function viewCss(css: string, host?: LodeHost): string {
+  return withDefaults(BASE_CSS + css + (host?.syntaxCss ?? "") + (host?.css ?? ""));
+}
+
 export const BASE_CSS = `
 :host {
-  --lode-bg: #fafaf7;
-  --lode-surface: #ffffff;
-  --lode-sunken: #f4f3ee;
-  --lode-fg: #171614;
-  --lode-muted: #5f5d57;
-  --lode-faint: #75726b;
-  --lode-border: #e9e8e3;
-  --lode-outline: #b8b5ad;
-  --lode-calls: #75726b;
-  --lode-local: #2f5fa8;
-  --lode-channel: #e2632f;
-  --lode-channel-text: #a8461b;
-  --lode-state: #8a3b6b;
-  --lode-font: "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
-  --lode-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   display: block;
   height: 100%;
   overflow: auto;

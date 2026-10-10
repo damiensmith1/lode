@@ -1,6 +1,8 @@
+import type { LodeConnection } from "./connection.js";
+
 // Talks to a lode server over JSON-RPC on a WebSocket. One per host page;
 // every view shares it.
-export class LodeClient {
+export class LodeClient implements LodeConnection {
   private readonly socket: WebSocket;
   private readonly ready: Promise<void>;
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();

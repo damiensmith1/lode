@@ -1,7 +1,8 @@
 import type { BlockLink, BlockRegion, CodeBlock, LinkKind } from "../src/query/types.js";
-import type { LodeClient } from "./client.js";
+import type { LodeConnection } from "./connection.js";
+import { serviceStorage, type LodeStorage } from "./storage.js";
 import { TITLE_EVENT, type LodeHost } from "./host.js";
-import { ARROW_DEFS, BASE_CSS, escape, wire } from "./theme.js";
+import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 
 const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
@@ -10,7 +11,6 @@ const PAGE = 25; // lines a card shows before "show 25 more"
 const GAP = 72; // space between a card and one opened from it
 const PAD = 32; // board padding
 const UNDO_LIMIT = 100;
-const LAYOUT = "flow"; // the name the layout is saved under
 const ZOOM = { min: 0.2, max: 2 };
 
 interface Camera {
@@ -67,9 +67,9 @@ const CSS = `
 .card header { user-select: none; -webkit-user-select: none; }
 .board { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .zoom { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
-.card { position: absolute; z-index: 1; width: max-content; min-width: 480px; max-width: 760px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
-.card.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 4px 14px rgba(23,22,20,.06); z-index: 3; }
-.card.dragging { box-shadow: 0 0 0 1px var(--lode-local), 0 12px 32px rgba(23,22,20,.16); z-index: 4; }
+.card { position: absolute; z-index: 1; width: max-content; min-width: 480px; max-width: 760px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px color-mix(in srgb, var(--lode-shadow) 4%, transparent); }
+.card.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 4px 14px color-mix(in srgb, var(--lode-shadow) 6%, transparent); z-index: 3; }
+.card.dragging { box-shadow: 0 0 0 1px var(--lode-local), 0 12px 32px color-mix(in srgb, var(--lode-shadow) 16%, transparent); z-index: 4; }
 .card header { position: relative; padding: 10px 40px 8px 14px; border-bottom: 1px solid var(--lode-border); display: flex; flex-direction: column; gap: 3px; cursor: grab; }
 .card.dragging header { cursor: grabbing; }
 .close { position: absolute; top: 6px; right: 8px; width: 24px; height: 24px; border-radius: 5px; color: var(--lode-faint); text-align: center; font-size: 15px; line-height: 24px; }
@@ -86,11 +86,11 @@ const CSS = `
 .caller.open { border-style: solid; border-color: var(--lode-local); color: var(--lode-local); }
 .code { padding: 6px 0 8px; font: 12px/20px var(--lode-mono); cursor: auto; }
 .ln { display: flex; align-items: flex-start; padding-right: 8px; }
-.ln .no { flex: none; width: 46px; padding-right: 12px; text-align: right; color: #a3a09a; user-select: none; }
+.ln .no { flex: none; width: 46px; padding-right: 12px; text-align: right; color: var(--lode-line-number); user-select: none; }
 /* Long lines wrap (hanging under their indent) rather than being cut off. */
 .ln .src { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 .ln.linked .no { color: var(--lode-local); }
-.ln.active { background: rgba(47, 95, 168, .08); box-shadow: inset 2px 0 0 var(--lode-local); }
+.ln.active { background: color-mix(in srgb, var(--lode-local) 8%, transparent); box-shadow: inset 2px 0 0 var(--lode-local); }
 .fold { margin-left: 6px; padding: 0 6px; font: 11px/18px var(--lode-mono); color: var(--lode-muted); background: var(--lode-sunken); border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
 .fold:hover { border-color: var(--lode-outline); color: var(--lode-fg); }
 .fold.active { border-color: var(--lode-local); color: var(--lode-local); }
@@ -101,9 +101,9 @@ const CSS = `
 .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font: 10.5px/18px var(--lode-mono); padding: 0 6px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
 .chip:hover, .chip.active { border-color: currentColor; }
 .chip.rolled { opacity: .72; }
-.chip.k-calls { color: var(--lode-local); background: rgba(47, 95, 168, .07); }
-.chip.k-channel { color: var(--lode-channel-text); background: rgba(226, 99, 47, .09); }
-.chip.k-state { color: var(--lode-state); background: rgba(138, 59, 107, .07); }
+.chip.k-calls { color: var(--lode-local); background: color-mix(in srgb, var(--lode-local) 7%, transparent); }
+.chip.k-channel { color: var(--lode-channel-text); background: color-mix(in srgb, var(--lode-channel) 9%, transparent); }
+.chip.k-state { color: var(--lode-state); background: color-mix(in srgb, var(--lode-state) 7%, transparent); }
 .arrows { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 2; }
 .hint { padding: 32px; color: var(--lode-muted); }
 `;
@@ -117,7 +117,10 @@ const CSS = `
 // undoes. The layout is saved with the project.
 export class LodeFlow extends HTMLElement {
   static observedAttributes = ["node"];
-  client?: LodeClient;
+  client?: LodeConnection;
+  // Where this flow's canvas is kept in the host's storage (attribute
+  // "state"); flows with different keys are independent.
+  stateKey = "flow";
   host?: LodeHost;
 
   private readonly root = this.attachShadow({ mode: "open" });
@@ -146,20 +149,21 @@ export class LodeFlow extends HTMLElement {
       return;
     }
     this.built = true;
-    this.root.innerHTML = `<style>${BASE_CSS}${CSS}${this.host?.syntaxCss ?? ""}</style>
-      <div class="toolbar">
+    this.root.innerHTML = `<style>${viewCss(CSS, this.host)}</style>
+      <div class="toolbar" part="toolbar">
         <button class="crumb" data-action="undo" aria-label="Undo" title="Undo">←</button>
         <span class="count faint"></span>
         <span class="spacer"></span>
-        <span class="faint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header</span>
+        <span class="faint" part="toolbar-hint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header</span>
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
         <button class="crumb" data-action="fit" title="Show every card">fit</button>
         <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
-      <div class="canvas"><div class="board"></div></div>`;
+      <div class="canvas" part="canvas"><div class="board" part="board"></div></div>`;
     this.root.addEventListener("click", (e) => void this.onClick(e));
     this.setupDrag();
+    this.stateKey = this.getAttribute("state") ?? this.stateKey;
     this.ready = this.restore();
     void this.ready.then(() => {
       const id = this.getAttribute("node");
@@ -527,6 +531,10 @@ export class LodeFlow extends HTMLElement {
     this.saveTimer = window.setTimeout(() => void this.save(), 400);
   }
 
+  private storage(): LodeStorage | undefined {
+    return this.host?.storage ?? (this.client && serviceStorage(this.client));
+  }
+
   private async save() {
     const data: SavedLayout = {
       v: 1,
@@ -550,11 +558,20 @@ export class LodeFlow extends HTMLElement {
         k: Math.round(this.camera.k * 1000) / 1000,
       },
     };
-    await this.client?.call("saveLayout", { name: LAYOUT, data }).catch(() => {});
+    try {
+      await this.storage()?.save(this.stateKey, data);
+    } catch {
+      // Not kept this time; the next change tries again.
+    }
   }
 
   private async restore() {
-    const saved = await this.client?.call<SavedLayout | null>("loadLayout", { name: LAYOUT }).catch(() => null);
+    let saved: SavedLayout | null = null;
+    try {
+      saved = ((await this.storage()?.load(this.stateKey)) ?? null) as SavedLayout | null;
+    } catch {
+      // Unreadable: start empty.
+    }
     if (!saved || saved.v !== 1) return;
     const ids = [...new Set(saved.cards.map((c) => c.node))];
     const blocks = new Map((await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const))).filter(([, b]) => b));
@@ -824,13 +841,13 @@ export class LodeFlow extends HTMLElement {
     this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
     this.root.querySelector(".count")!.textContent = this.cards.size ? `${this.cards.size} card${this.cards.size === 1 ? "" : "s"}` : "";
     if (!this.cards.size) {
-      board.innerHTML = `<div class="hint">Pick an entry point, a file or a symbol to start reading from it.</div>`;
+      board.innerHTML = `<div class="hint" part="empty">Pick an entry point, a file or a symbol to start reading from it.</div>`;
       board.style.width = board.style.height = "";
       board.style.transform = "";
       this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: "flow", bubbles: true, composed: true }));
       return;
     }
-    board.innerHTML = [...this.cards.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
+    board.innerHTML = [...this.cards.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
     this.position();
     const first = this.cards.values().next().value!;
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${first.block.node.name}`, bubbles: true, composed: true }));
@@ -848,7 +865,7 @@ export class LodeFlow extends HTMLElement {
     const out = this.arrows.filter((a) => a.from === c.key);
     const isActive = (line: number, to: string) => out.some((a) => a.line === line && a.to === to);
 
-    const header = c.fragment ? `<div class="callers">in <span class="mono">${escape(blockName(b))}</span></div>` : this.callersHtml(c);
+    const header = c.fragment ? `<div class="callers" part="callers">in <span class="mono">${escape(blockName(b))}</span></div>` : this.callersHtml(c);
 
     // Folds: the outermost regions inside this card, one level deep.
     const folds = topFolds(c);
@@ -864,7 +881,7 @@ export class LodeFlow extends HTMLElement {
     const html = this.host?.syntax?.(b.lines.map((l) => l.text).join("\n"), n.file ?? "") ?? b.lines.map((l) => escape(l.text));
 
     const chip = (link: BlockLink, line: number, rolled: boolean) =>
-      `<button class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${escape(chipText(link))}</button>`;
+      `<button part="chip chip-${link.kind}" class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${escape(chipText(link))}</button>`;
 
     const rows: string[] = [];
     let shownLines = 0;
@@ -883,7 +900,7 @@ export class LodeFlow extends HTMLElement {
       let foldHtml = "";
       const opened = openedAt.get(line);
       if (opened && !fold) {
-        foldHtml = `<button class="fold" data-action="fold" data-start="${opened.start}" data-end="${opened.end}" title="Fold these lines again">⌃ collapse ${opened.end - opened.start} lines</button>`;
+        foldHtml = `<button part="fold" class="fold" data-action="fold" data-start="${opened.start}" data-end="${opened.end}" title="Fold these lines again">⌃ collapse ${opened.end - opened.start} lines</button>`;
       }
       const rolled: BlockLink[] = [];
       if (fold) {
@@ -891,7 +908,7 @@ export class LodeFlow extends HTMLElement {
         const small = inPlace(fold); // opens in place rather than as a card
         const foldKey = fold.node ? fold.node.id : `${n.id}@${fold.start}-${fold.end}`;
         const active = !small && isActive(line, foldKey);
-        foldHtml = `<button class="fold${active ? " active" : ""}" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open as a card"}">⋯ ${count} lines${small ? "" : " →"}</button>`;
+        foldHtml = `<button part="fold" class="fold${active ? " active" : ""}" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open as a card"}">⋯ ${count} lines${small ? "" : " →"}</button>`;
         // An anonymous fold carries the chips from inside it; a named one
         // doesn't (its own card shows them).
         if (!fold.node) {
@@ -901,29 +918,29 @@ export class LodeFlow extends HTMLElement {
       }
       const more =
         rolled.length > MAX_ROLLED && fold
-          ? `<button class="chip rolled" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="Open the fold to see them">+${rolled.length - MAX_ROLLED} inside</button>`
+          ? `<button part="chip" class="chip rolled" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="Open the fold to see them">+${rolled.length - MAX_ROLLED} inside</button>`
           : "";
       const chips = [...own.map((l) => chip(l, line, false)), ...rolled.slice(0, MAX_ROLLED).map((l) => chip(l, line, true)), more].join("");
       const classes = ["ln", own.length || rolled.length ? "linked" : "", out.some((a) => a.line === line) ? "active" : ""].filter(Boolean).join(" ");
-      rows.push(`<div class="${classes}" data-n="${line}"><span class="no">${line}</span><span class="src">${html[line - first] || " "}${foldHtml}</span>${chips ? `<span class="chips">${chips}</span>` : ""}</div>`);
+      rows.push(`<div part="line" class="${classes}" data-n="${line}"><span class="no" part="line-number">${line}</span><span class="src" part="source">${html[line - first] || " "}${foldHtml}</span>${chips ? `<span class="chips" part="chips">${chips}</span>` : ""}</div>`);
     }
     const total = shownLines + remaining;
     const paging = [
-      remaining ? `<button class="more-lines" data-action="more">show ${Math.min(PAGE, remaining)} more</button>` : "",
-      remaining > PAGE ? `<button class="more-lines" data-action="all" data-total="${total}">show all ${remaining}</button>` : "",
-      c.limit > PAGE && shownLines > PAGE ? `<button class="more-lines" data-action="less" data-total="${total}">⌃ collapse</button>` : "",
+      remaining ? `<button part="paging-button" class="more-lines" data-action="more">show ${Math.min(PAGE, remaining)} more</button>` : "",
+      remaining > PAGE ? `<button part="paging-button" class="more-lines" data-action="all" data-total="${total}">show all ${remaining}</button>` : "",
+      c.limit > PAGE && shownLines > PAGE ? `<button part="paging-button" class="more-lines" data-action="less" data-total="${total}">⌃ collapse</button>` : "",
     ].join("");
-    if (paging) rows.push(`<div class="paging">${paging}</div>`);
+    if (paging) rows.push(`<div class="paging" part="paging">${paging}</div>`);
 
     const span = c.range[1] - c.range[0] + 1;
-    return `<section class="card${this.group.has(c.key) ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
-      <header>
-        <button class="close" data-action="close" aria-label="Close this card" title="Close (and what only it opened)">×</button>
+    return `<section part="card${this.group.has(c.key) ? " card-selected" : ""}" class="card${this.group.has(c.key) ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
+      <header part="card-header">
+        <button class="close" part="card-close" data-action="close" aria-label="Close this card" title="Close this card">×</button>
         ${header}
-        <button class="title" data-action="source" title="Open the source">${titleHtml(c)}</button>
-        <span class="meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
+        <button class="title" part="card-title" data-action="source" title="Open the source">${titleHtml(c)}</button>
+        <span class="meta" part="card-meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
       </header>
-      <div class="code">${rows.join("")}</div>
+      <div class="code" part="code">${rows.join("")}</div>
     </section>`;
   }
 
@@ -933,7 +950,7 @@ export class LodeFlow extends HTMLElement {
     const b = c.block;
     if (!b.callers.length) {
       if (b.outline) return "";
-      return `<div class="callers">${b.trigger ? `runs on <span class="mono">${escape(b.trigger)}</span>` : "nothing in the project calls this"}</div>`;
+      return `<div class="callers" part="callers">${b.trigger ? `runs on <span class="mono">${escape(b.trigger)}</span>` : "nothing in the project calls this"}</div>`;
     }
     const shown = c.allCallers ? b.callers : b.callers.slice(0, MAX_CALLERS);
     const allCalls = b.callers.every((cl) => cl.kind === "calls" && !cl.label);
@@ -942,10 +959,10 @@ export class LodeFlow extends HTMLElement {
     for (const cl of b.callers) nameCount.set(cl.node.name, (nameCount.get(cl.node.name) ?? 0) + 1);
     const nameOf = (cl: CodeBlock["callers"][number]) => (nameCount.get(cl.node.name)! > 1 ? `${cl.node.name} (${cl.node.file?.split("/").pop()})` : cl.node.name);
     const open = (id: string) => this.arrows.some((a) => a.from === id && a.to === c.key);
-    return `<div class="callers${c.allCallers ? " all" : ""}">${allCalls ? "called by" : "used by"} ${shown
+    return `<div class="callers${c.allCallers ? " all" : ""}" part="callers">${allCalls ? "called by" : "used by"} ${shown
       .map(
         (cl) =>
-          `<button class="caller${open(cl.node.id) ? " open" : ""}" data-action="reroot" data-kind="${cl.kind}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(nameOf(cl))}${
+          `<button part="caller" class="caller${open(cl.node.id) ? " open" : ""}" data-action="reroot" data-kind="${cl.kind}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(nameOf(cl))}${
             cl.kind === "channel" ? ` ⇢ ${escape(cl.label ?? "")}` : cl.label ? ` · ${escape(cl.label)}` : ""
           }</button>`,
       )
