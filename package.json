@@ -1,7 +1,7 @@
 {
   "name": "lode",
   "version": "0.1.0",
-  "description": "Read a codebase as a flow of real code: a code graph, language plugins, and embeddable views any editor or app can host.",
+  "description": "Read a codebase as a flow of real code: a code graph, embeddable views any editor or app can host, git changes, and questions answered as flows.",
   "private": true,
   "type": "module",
   "engines": {
