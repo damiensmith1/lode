@@ -529,7 +529,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   folded, functions nothing in the project reaches (a framework, HTML or
   the outside calls them). All from data lode already had: channel
   endpoints (now kept on `Graph`), registrations, call edges. A summary line
-  says how the runtimes talk (`preload ⇄ renderer · 460 calls`). Filter by
+  says how the runtimes talk (`preload ⇄ renderer · 460 calls`): only
+  between real runtimes, and only with two or more (a project without them,
+  like lode, shows none rather than every pair of files). Filter by
   text; clicking an entry starts the flow there. Next idea: a model-written
   one-line summary per entry.
 - **Standalone host** (`hosts/app`): entry points and flow tabs, a file tree

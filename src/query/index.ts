@@ -214,7 +214,12 @@ export class Queries {
       }))
       .sort((a, b) => rank(RUNTIME_ORDER, a.runtime) - rank(RUNTIME_ORDER, b.runtime));
 
-    const summary = this.map("runtime").edges.map((e) => ({ ...e, from: e.from.replace(/^runtime:/, ""), to: e.to.replace(/^runtime:/, "") }));
+    // How the runtimes talk (main ⇄ renderer): only between real runtimes,
+    // and only when there are two or more. Files outside any runtime are
+    // their own groups in the lens; pairs of those are just noise.
+    const runtimeEdges = this.map("runtime").edges.filter((e) => e.from.startsWith("runtime:") && e.to.startsWith("runtime:"));
+    const runtimes = new Set(runtimeEdges.flatMap((e) => [e.from, e.to]));
+    const summary = runtimes.size < 2 ? [] : runtimeEdges.map((e) => ({ ...e, from: e.from.replace(/^runtime:/, ""), to: e.to.replace(/^runtime:/, "") }));
     return { summary, groups };
   }
 
