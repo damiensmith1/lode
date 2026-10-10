@@ -54,6 +54,7 @@ export interface FileView {
 export interface FileEntry {
   file: string;
   runtime?: string;
+  indexed?: boolean; // in the code graph (TS/JS); other files are read as text
 }
 
 export interface ProjectInfo {
@@ -140,4 +141,35 @@ export interface EntryGroup {
 export interface EntriesResult {
   summary: { from: string; to: string; kind: LinkKind; count: number }[];
   groups: EntryGroup[];
+}
+
+// Git changes (see src/query/git.ts). Line numbers are the current file's.
+export interface DiffHunk {
+  start: number; // first added/changed line (new file); for a pure removal, the line it follows (0: the top)
+  added: number; // lines added or changed from start
+  removed: string[]; // the old lines this hunk replaced or removed, shown before `start` (after it when added is 0)
+}
+
+export interface ChangedSymbol {
+  node: NodeRef; // the declaration changed lines are in, or the file for top-level code
+  parent?: string; // the enclosing changed-list symbol (a method's class), for a hierarchy
+  added: number; // its own lines (not its children's)
+  removed: number;
+}
+
+export interface FileChange {
+  file: string; // relative to the project root
+  status: "modified" | "added" | "deleted" | "renamed" | "untracked";
+  from?: string; // renamed from
+  indexed: boolean; // part of the graph (can be opened as cards)
+  added: number;
+  removed: number;
+  hunks: DiffHunk[];
+  symbols: ChangedSymbol[];
+}
+
+export interface ChangesResult {
+  base: string; // what the working tree is compared with
+  error?: string; // not a git repository, unknown base, …
+  files: FileChange[];
 }

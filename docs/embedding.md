@@ -85,7 +85,11 @@ view.addEventListener("lode-title", (e) => (tab.label = e.detail));
 ```
 
 - `kind: "flow"` is the reading canvas; `kind: "entries"` is where to start
-  (it asks the host to `openView` a flow when an entry is picked).
+  (it asks the host to `openView` a flow when an entry is picked);
+  `kind: "changes"` lists what changed in git (below).
+- A flow request can also carry `ids` (open several), `diff` (show git
+  changes against that ref, e.g. `"HEAD"`) and `newTab` (ask the host for
+  a fresh flow).
 - `state` names where that flow keeps its canvas (cards, arrows, camera,
   selection). Give each tab its own key; create a view with the same key
   again to bring the tab back as it was. Default `"flow"`.
@@ -108,9 +112,26 @@ const here = await api.symbolAt(file, cursorLine);  // then flow.show(here.id)
 connection.onChanged(async () => renderTree(buildFileTree(await api.files())));
 ```
 
-Also `info()`, `entries()`, `block(id)`, `source(file)`.
+Also `info()`, `entries()`, `block(id)`, `source(file)`, `changes(base)`.
+
+`files()` lists every project file: the code graph's (TS/JS, with their
+runtime) and the rest (README, JSON, CSS, …; whatever git doesn't ignore,
+or everything outside node_modules/.git/dist when it isn't a repository),
+marked `indexed: false`. Those open in a flow as text cards (Markdown
+headings fold into sections), take edits and show diffs like code; they
+just have no chips or callers. The bundled highlighter colours JSON,
+Markdown, CSS/SCSS, HTML/XML, YAML, shell, TOML and Python too.
 
 ## 5. Driving a flow and listening to it
+
+Every card has **expand** in its header (while there's something to do):
+it shows all the card's lines (comment/import folds opened in place) and
+opens everything it leads to, one
+level: its chips' targets (calls, IPC, state) on its own lines, and its
+nested declarations (a file's functions, a class's methods), as cards
+beside it with arrows. The new cards aren't expanded. (`action: "expand"`;
+part `expand`.)
+
 
 Methods on a `<lode-flow>`: `show(id)` (add a node or file, or go to its
 card), `run(command)`, `cards()`, `selection()`, `setSelection(keys)`.
@@ -218,7 +239,36 @@ the edits.
 - `lode-action` is sent with `action: "save"` / `"discard"` first
   (cancelable), then `lode-dirty` and `lode-save`.
 
-## 8. Look
+## 8. Git changes
+
+`<lode-changes>` (`{ kind: "changes", base? }`) lists what changed since a
+ref (default `HEAD`: uncommitted work, untracked files included), by file
+and by the symbol each change is in: a top-level function, class, method,
+type or variable, or "(top level)". Symbols carry `parent` (a method's
+class), so a host can show them as a hierarchy; a class whose methods
+changed is listed even if its own lines didn't. It refreshes as files change, so an
+agent's edits appear as they land. Picking one asks the host to
+`openView({ kind: "flow", id, diff: base })`; "open all in a flow" asks for
+`{ kind: "flow", ids, diff: base, newTab: true }`. A flow given several
+`ids` (or `flow.showAll(ids)`) lays them out as a flow: linked where they
+call each other, callers left of what they call, unconnected groups in
+rows.
+
+A flow showing changes (`diff` in its request, `flow.setDiff(base | null)`,
+or its "changes" toolbar toggle; kept with its state) marks added or
+changed lines, shows removed lines struck through where they were
+(read-only, never part of an edit), and marks folds and "show more" that
+hide changes, and chips or callers leading to a changed symbol get a dot.
+A card whose folds hide changes gets "open N changes →" in its header:
+it opens each of them as a card beside it (as clicking each fold would),
+counting only those not open yet. A card that arrives while changes are
+shown (or is on the canvas when they're turned on) opens far enough to
+show its changes: comment/import folds holding them open in place, and it
+shows down to its last changed line. (`action: "open-changes"` in
+`lode-action`; part `open-changes`.) `lodeApi(connection).changes(base)` gives the same data to a
+host's own UI (`ChangesResult`: files → hunks and symbols).
+
+## 9. Look
 
 - **Tokens.** Every colour and font is a `--lode-*` custom property, set on
   any ancestor of a view (or on the view). Ready-made: `LIGHT_THEME` (the
@@ -226,14 +276,15 @@ the edits.
   Map them to your editor's theme variables, e.g.
   `lode-flow { --lode-bg: var(--vscode-editor-background); … }`.
   Tokens: bg, surface, sunken, fg, muted, faint, line-number, border,
-  outline, shadow, calls, local, channel, channel-text, state, font, mono,
+  outline, shadow, calls, local, channel, channel-text, state, added,
+  removed, font, mono,
   and syntax-{keyword, string, number, title, type, comment, attr, variable}.
 - **Parts.** Pieces carry `part` names for `::part()` from the host page:
   flow: `toolbar`, `toolbar-hint`, `canvas`, `board`, `empty`, `card`,
   `card-selected`, `card-header`, `card-title`, `card-meta`, `card-close`,
   `callers`, `caller`, `code`, `line`, `line-number`, `source`, `chips`,
   `chip`, `chip-calls`, `chip-channel`, `chip-state`, `chip-local`, `fold`,
-  `paging`, `paging-button`, `arrows`, and `host-header`, `host-footer`,
+  `paging`, `paging-button`, `arrows`, `line-removed`, and `host-header`, `host-footer`,
   `host-line` around render hooks' markup; entries: `page`, `lede`, `summary`,
   `filter`, `list`, `runtime`, `category`, `entry`, `more`.
 - **`host.css`** goes last inside every view's shadow root, for anything

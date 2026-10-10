@@ -28,14 +28,36 @@ button:focus-visible, input:focus-visible { outline: 2px solid #2f5fa8; outline-
 #results .where { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .body { flex: 1; min-height: 0; display: flex; }
-#tree { flex: 0 0 240px; overflow: auto; padding: 10px 6px; background: var(--side); border-right: 1px solid var(--border); font-size: 12.5px; }
+#side { flex: 0 0 260px; min-height: 0; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--border); font-size: 12.5px; }
+.side-tabs { display: flex; gap: 2px; padding: 8px 8px 4px; }
+.side-tabs button { flex: 1; padding: 4px 8px; border-radius: 5px; text-align: center; color: var(--faint); }
+.side-tabs button[aria-selected="true"] { background: rgba(23,22,20,.08); color: var(--fg); }
+#changes-count { font: 11px var(--mono); color: #2e7d4f; }
+#tree, #changes { flex: 1; min-height: 0; overflow: auto; padding: 6px 6px 10px; }
 #tree button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 8px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #tree button:hover { background: rgba(23,22,20,.05); }
 #tree button[aria-current="true"] { background: rgba(23,22,20,.09); }
 #tree .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+#tree .dot.text { background: none; box-shadow: inset 0 0 0 1px var(--faint); }
+.changes-bar { display: flex; align-items: center; gap: 6px; padding: 2px 4px 6px; }
+.changes-bar input { flex: 1; min-width: 0; font: 11.5px var(--mono); padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: #fff; }
+.changes-bar button { padding: 3px 8px; border-radius: 5px; background: rgba(23,22,20,.06); white-space: nowrap; }
+.changes-bar button:hover { background: rgba(46,125,79,.14); }
+#changes-totals { padding: 0 6px 6px; font: 11px var(--mono); }
+#changes-list .row { display: flex; align-items: center; gap: 4px; width: 100%; padding: 2px 6px 2px 0; border-radius: 5px; white-space: nowrap; }
+#changes-list .row:hover { background: rgba(23,22,20,.05); }
+#changes-list .chev { flex: none; width: 16px; text-align: center; color: var(--faint); }
+#changes-list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+#changes-list .file .name { font-family: var(--mono); font-size: 12px; }
+#changes-list .kind { color: var(--faint); font-size: 10.5px; }
+#changes-list .st { flex: none; width: 14px; font: 10.5px var(--mono); color: var(--faint); text-align: center; }
+#changes-list .st.A, #changes-list .st.U { color: #2e7d4f; } #changes-list .st.D { color: #b3402a; }
+#changes-list .n { flex: none; font: 10.5px var(--mono); }
+#changes-list .add { color: #2e7d4f; } #changes-list .del { color: #b3402a; }
+#changes-list .gone .name { color: var(--faint); text-decoration: line-through; }
 .rt-main { background: #8a3b6b; } .rt-preload { background: #e2632f; } .rt-renderer { background: #2f5fa8; } .rt-shared { background: #75726b; }
 
-body.no-tree #tree { display: none; }
+body.no-tree #side { display: none; }
 .views { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #tabs { display: flex; overflow-x: auto; background: var(--side); border-bottom: 1px solid var(--border); font-size: 12.5px; }
 .tab { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 14px; border-right: 1px solid var(--border); color: var(--faint); white-space: nowrap; }

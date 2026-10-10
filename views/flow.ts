@@ -1,4 +1,4 @@
-import type { BlockLink, BlockRegion, CodeBlock, LinkKind } from "../src/query/types.js";
+import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
 import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
@@ -58,6 +58,7 @@ interface SavedLayout {
   arrows: Arrow[];
   selected: string | null;
   camera?: Camera; // x, y: where the canvas origin (0, 0) sits on screen
+  diff?: string | null; // showing git changes against this ref
 }
 
 const CSS = `
@@ -92,6 +93,21 @@ const CSS = `
 .ln .src { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 .code[contenteditable="true"] { outline: none; caret-color: var(--lode-fg); }
 .ln.added .no { color: var(--lode-channel); }
+.ln.diff-added { background: color-mix(in srgb, var(--lode-added) 9%, transparent); box-shadow: inset 3px 0 0 var(--lode-added); }
+.ln-removed { display: flex; padding-right: 8px; background: color-mix(in srgb, var(--lode-removed) 8%, transparent); box-shadow: inset 3px 0 0 var(--lode-removed); color: var(--lode-muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--lode-removed) 45%, transparent); user-select: none; }
+.ln-removed .no { flex: none; width: 46px; padding-right: 12px; text-align: right; color: var(--lode-removed); }
+.ln-removed .src { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; min-width: 0; opacity: .8; }
+.fold.changed, .more-lines.changed { box-shadow: inset 0 0 0 1px var(--lode-added); }
+.fold.changed::after, .more-lines.changed::after { content: " ●"; color: var(--lode-added); }
+.diff-toggle.on { color: var(--lode-added); font-weight: 550; }
+.card-actions { display: flex; gap: 6px; align-self: flex-start; }
+.card-actions:empty { display: none; }
+.expand { margin-left: 0; padding: 0 7px; border-radius: 4px; font-size: 11px; color: var(--lode-muted); box-shadow: inset 0 0 0 1px var(--lode-border); }
+.expand:hover { color: var(--lode-fg); background: var(--lode-sunken); }
+.open-changes { margin-left: 0; padding: 0 7px; border-radius: 4px; font-size: 11px; color: var(--lode-added); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lode-added) 55%, transparent); }
+.open-changes:hover { background: color-mix(in srgb, var(--lode-added) 12%, transparent); }
+.chip.to-changed::before, .caller.to-changed::before { content: "● "; color: var(--lode-added); }
+.chip.to-changed { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lode-added) 55%, transparent); }
 .chips, .paging, .ln .no { user-select: none; }
 .unsaved { display: none; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--lode-channel-text); }
 .unsaved .dot { color: var(--lode-channel); }
@@ -132,6 +148,8 @@ export class LodeFlow extends HTMLElement {
   // Where this flow's canvas is kept in the host's storage (attribute
   // "state"); flows with different keys are independent.
   stateKey = "flow";
+  // Nodes to open once connected (ViewRequest.ids).
+  pendingIds: string[] = [];
   host?: LodeHost;
 
   private readonly root = this.attachShadow({ mode: "open" });
@@ -144,6 +162,10 @@ export class LodeFlow extends HTMLElement {
   // against and to tell edited from not).
   private editing?: Editing;
   private dirty = new Set<string>();
+  // Git changes shown on cards (null: not shown), by file.
+  private diffBase: string | null = null;
+  private diff = new Map<string, DiffHunk[]>();
+  private changedIds = new Set<string>(); // symbols with changes: chips to them are marked
   private held = new Set<string>(); // just saved, caret still in: shown as edited, not redrawn
   private bases = new Map<string, { file: string; runs: { start: number; end: number }[]; original: Map<number, string> }>();
   private built = false;
@@ -162,6 +184,7 @@ export class LodeFlow extends HTMLElement {
     // click acts twice.
     if (this.built) {
       // Laid out while detached, everything measured 0: measure again.
+    // (And what changed in git may have moved on while hidden.)
       if (this.cardMap.size) this.position();
       return;
     }
@@ -175,6 +198,7 @@ export class LodeFlow extends HTMLElement {
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
         <button class="crumb" data-action="fit" title="Show every card">fit</button>
         <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
+        <button class="crumb diff-toggle" data-action="diff" title="Show what changed since the last commit (git)">changes</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
       <div class="canvas" part="canvas"><div class="board" part="board"></div></div>`;
@@ -203,6 +227,7 @@ export class LodeFlow extends HTMLElement {
       if (id && this.cardMap.has(id)) this.select(id);
       else if (id) void this.show(id);
       else this.render();
+      if (this.pendingIds.length) void this.showAll(this.pendingIds.splice(0));
     });
   }
 
@@ -293,6 +318,130 @@ export class LodeFlow extends HTMLElement {
   }
 
   // Show a node: select its card if it's open, else add it as a new tree.
+  // Open several nodes at once (one is just show()). They link up with
+  // arrows where they call each other, and are laid out as a flow: callers
+  // left of what they call, a column per step, unconnected groups below
+  // one another, below what's already on the canvas.
+  async showAll(ids: string[]) {
+    await this.ready;
+    const wanted = [...new Set(ids)];
+    if (wanted.length <= 1) return wanted[0] ? this.show(wanted[0]) : undefined;
+    const fresh = wanted.filter((id) => !this.cardMap.has(id));
+    const blocks = await Promise.all(fresh.map(async (id) => [id, await this.fetch(id)] as const));
+    this.remember();
+    const added: string[] = [];
+    for (const [id, block] of blocks) {
+      if (!block) continue;
+      const card = newCard(id, block);
+      this.revealChanges(card);
+      this.cardMap.set(id, card);
+      added.push(id);
+    }
+    for (const id of added) this.connect(id);
+    this.render();
+    const keys = wanted.filter((id) => this.cardMap.has(id));
+    this.arrange(keys, added);
+    for (const id of added) this.emit(OPEN_EVENT, { card: this.info(id)!, existing: false });
+    this.setSelection([]);
+    this.fit(keys);
+    this.changed();
+  }
+
+  // Lay `keys` out as a flow (see showAll). Only `movable` cards move;
+  // cards already on the canvas keep their place.
+  private arrange(keys: string[], movable: string[]) {
+    const inSet = new Set(keys);
+    const move = new Set(movable);
+    const edges = this.arrows.filter((a) => inSet.has(a.from) && inSet.has(a.to) && a.from !== a.to);
+    const out = new Map(keys.map((k) => [k, [] as string[]]));
+    const into = new Map(keys.map((k) => [k, [] as string[]]));
+    for (const e of edges) if (!out.get(e.from)!.includes(e.to)) (out.get(e.from)!.push(e.to), into.get(e.to)!.push(e.from));
+    // Groups: cards connected either way.
+    const group = new Map<string, number>();
+    const groups: string[][] = [];
+    for (const k of keys) {
+      if (group.has(k)) continue;
+      const members: string[] = [];
+      const queue = [k];
+      group.set(k, groups.length);
+      while (queue.length) {
+        const v = queue.shift()!;
+        members.push(v);
+        for (const w of [...out.get(v)!, ...into.get(v)!]) if (!group.has(w)) (group.set(w, groups.length), queue.push(w));
+      }
+      groups.push(members);
+    }
+    // Columns: the longest call path from a group's starts (cycles cut).
+    const column = new Map<string, number>();
+    const visiting = new Set<string>();
+    const depth = (v: string): number => {
+      if (column.has(v)) return column.get(v)!;
+      if (visiting.has(v)) return 0;
+      visiting.add(v);
+      const d = Math.max(0, ...into.get(v)!.map((u) => (visiting.has(u) ? 0 : depth(u) + 1)));
+      visiting.delete(v);
+      column.set(v, d);
+      return d;
+    };
+    for (const k of keys) depth(k);
+    const size = (k: string) => ({ w: this.cardEl(k)?.offsetWidth ?? 480, h: this.cardEl(k)?.offsetHeight ?? 200 });
+    const order = (k: string) => {
+      const n = this.cardMap.get(k)!.block.node;
+      return `${n.file ?? ""}:${String(n.line ?? 0).padStart(6, "0")}`;
+    };
+    // Each group laid out on its own (columns of call steps), then the
+    // groups packed in rows, biggest first, wrapping to about the view's
+    // shape; all below what's already on the canvas.
+    const ROW = 32;
+    const laid = groups.map((members) => {
+      const columns: string[][] = [];
+      for (const k of members) (columns[column.get(k)!] ??= []).push(k);
+      const y = new Map<string, number>();
+      const at = new Map<string, { x: number; y: number }>();
+      let x = 0;
+      let height = 0;
+      columns.forEach((col, i) => {
+        // First column in file order; later ones next to what calls them.
+        const by = (k: string) => {
+          const ys = into.get(k)!.filter((u) => y.has(u)).map((u) => y.get(u)!);
+          return ys.length ? Math.min(...ys) : Infinity;
+        };
+        col.sort((a, b) => (i ? by(a) - by(b) : 0) || order(a).localeCompare(order(b)));
+        let cy = 0;
+        for (const k of col) {
+          const want = i ? by(k) : cy;
+          const top = Math.max(cy, Number.isFinite(want) ? want : cy);
+          y.set(k, top);
+          at.set(k, { x, y: top });
+          cy = top + size(k).h + ROW;
+        }
+        height = Math.max(height, cy - ROW);
+        x += Math.max(...col.map((k) => size(k).w)) + GAP + 24;
+      });
+      return { members, at, width: x - GAP - 24, height, first: order([...members].sort((a, b) => order(a).localeCompare(order(b)))[0]) };
+    });
+    laid.sort((a, b) => b.members.length - a.members.length || a.first.localeCompare(b.first));
+    const view = this.canvas().getBoundingClientRect();
+    const area = laid.reduce((n, g) => n + (g.width + 88) * (g.height + 88), 0);
+    const rowWidth = Math.max(...laid.map((g) => g.width), Math.sqrt(area * Math.max(1, view.width / Math.max(1, view.height))));
+    const others = [...this.cardMap.values()].filter((c) => !inSet.has(c.key));
+    const left = others.length ? Math.min(...others.map((c) => c.x)) : 0;
+    let top = others.length ? Math.max(...others.map((c) => c.y + size(c.key).h)) + 120 : 0;
+    let x = left;
+    let rowHeight = 0;
+    for (const g of laid) {
+      if (x > left && x - left + g.width > rowWidth) {
+        top += rowHeight + 88;
+        x = left;
+        rowHeight = 0;
+      }
+      for (const [k, p] of g.at) if (move.has(k)) Object.assign(this.cardMap.get(k)!, { x: x + p.x, y: top + p.y });
+      x += g.width + 88;
+      rowHeight = Math.max(rowHeight, g.height);
+    }
+    this.position();
+  }
+
   async show(id: string) {
     await this.ready;
     if (this.cardMap.has(id)) {
@@ -302,7 +451,9 @@ export class LodeFlow extends HTMLElement {
     const block = await this.fetch(id);
     if (!block) return;
     this.remember();
-    this.cardMap.set(id, newCard(id, block));
+    const card = newCard(id, block);
+    this.revealChanges(card);
+    this.cardMap.set(id, card);
     this.connect(id);
     this.render();
     this.placeRoot(id);
@@ -343,12 +494,15 @@ export class LodeFlow extends HTMLElement {
     if (action === "fit") return this.run("fit");
     if (action === "focus") return this.run("focus");
     if (action === "zoom-reset") return this.run("zoomReset");
+    if (action === "diff") return void this.setDiff(this.diffBase === null ? "HEAD" : null);
     if (action === "clear") return this.run("clear");
     if (!here) return;
     if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);
     if (action === "fold") return this.fold(here, Number(start), Number(end));
     if (action === "reroot" && id) return this.openCaller(key, id, Number(line), (el.dataset.kind ?? "calls") as LinkKind);
     if (action === "close") return this.close([key]);
+    if (action === "open-changes") return void this.openChanges(here);
+    if (action === "expand") return void this.expand(here);
     if (action === "save") return void this.saveEdits(key, "click");
     if (action === "discard") return void this.discardEdits(key);
     if (action === "more" || action === "all" || action === "less") {
@@ -581,6 +735,7 @@ export class LodeFlow extends HTMLElement {
     if (!existing) {
       const card = newCard(key, block!);
       if (fragment) Object.assign(card, { range: fragment.range, fragment: fragment.header });
+      this.revealChanges(card);
       this.cardMap.set(key, card);
     }
     this.addArrow({ from, line, to: key, kind });
@@ -598,7 +753,11 @@ export class LodeFlow extends HTMLElement {
     const block = existing ? null : await this.fetch(callerId);
     if (!existing && !block) return;
     this.remember();
-    if (!existing) this.cardMap.set(callerId, newCard(callerId, block!));
+    if (!existing) {
+      const card = newCard(callerId, block!);
+      this.revealChanges(card);
+      this.cardMap.set(callerId, card);
+    }
     this.addArrow({ from: callerId, line, to: cardKey, kind });
     if (!existing) this.connect(callerId);
     this.render();
@@ -650,16 +809,26 @@ export class LodeFlow extends HTMLElement {
 
   // A card that arrives (again) links up with what's already on the canvas:
   // an arrow to each card it calls and from each card that calls it, from
-  // the first line that does, unless there's an arrow between them already.
+  // the first line that does (its own line, not one inside a nested
+  // declaration's body), unless there's an arrow between them already or
+  // one card is inside the other.
   // Whole files don't, or one would point at everything it contains.
   private connect(key: string) {
     const card = this.cardMap.get(key);
     if (!card) return;
     const isFile = (c: Card) => c.block.node.id === c.block.node.file;
     if (isFile(card)) return;
+    // One card inside the other (a method in its class): not a link.
+    const within = (inner: Card, outer: Card) =>
+      inner.block.node.file === outer.block.node.file && inner.range[0] >= outer.range[0] && inner.range[1] <= outer.range[1];
+    // A line inside a declaration nested in the card (a method's body, in a
+    // class card): the call is that declaration's, not the card's.
+    const nested = (c: Card, line: number) => c.block.regions.some((r) => r.node && r.start < line && line <= r.end && !(r.start <= c.range[0] && r.end >= c.range[1]));
     const link = (from: Card, to: string) => {
       if (isFile(from) || this.arrows.some((a) => a.from === from.key && a.to === to)) return;
-      const l = from.block.links.find((l) => l.target.id === to && l.line >= from.range[0] && l.line <= from.range[1]);
+      const target = this.cardMap.get(to);
+      if (target && (within(target, from) || within(from, target))) return;
+      const l = from.block.links.find((l) => l.target.id === to && l.line >= from.range[0] && l.line <= from.range[1] && !nested(from, l.line));
       if (l) this.addArrow({ from: from.key, line: l.line, to, kind: l.kind });
     };
     for (const other of this.cardMap.values()) {
@@ -861,6 +1030,7 @@ export class LodeFlow extends HTMLElement {
       })),
       arrows: this.arrows,
       selected: this.selected,
+      diff: this.diffBase,
       // Saved in canvas coordinates, independent of the board's padding origin.
       camera: {
         x: Math.round(this.camera.x + this.offset.x * this.camera.k),
@@ -882,6 +1052,8 @@ export class LodeFlow extends HTMLElement {
     } catch {
       // Unreadable: start empty.
     }
+    if (saved?.diff !== undefined && this.diffBase === null) this.diffBase = saved.diff;
+    await this.loadDiff();
     if (!saved || saved.v !== 1) return;
     const ids = [...new Set(saved.cards.map((c) => c.node))];
     const blocks = new Map((await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const))).filter(([, b]) => b));
@@ -922,7 +1094,142 @@ export class LodeFlow extends HTMLElement {
       else Object.assign(c, { block, ...(c.fragment ? {} : { range: fullRange(block) }) });
     }
     this.arrows = this.arrows.filter((a) => this.cardMap.has(a.from) && this.cardMap.has(a.to));
+    await this.loadDiff();
     this.render();
+  }
+
+  // --- git changes --------------------------------------------------------------
+
+  // Before it's on the page: start with git changes shown against `base`.
+  setDiffOnConnect(base: string) {
+    this.diffBase = base;
+  }
+
+  // Show (or stop showing) git changes on the cards, against `base`.
+  async setDiff(base: string | null) {
+    this.diffBase = base;
+    await this.loadDiff();
+    if (base !== null) for (const c of this.cardMap.values()) if (!this.dirty.has(c.key)) this.revealChanges(c);
+    this.render();
+    this.changed();
+  }
+
+  private async loadDiff() {
+    this.diff = new Map();
+    this.changedIds = new Set();
+    this.root.querySelector(".diff-toggle")?.classList.toggle("on", this.diffBase !== null);
+    if (this.diffBase === null || !this.client) return;
+    const result = await this.client.call<ChangesResult>("changes", { base: this.diffBase }).catch(() => null);
+    for (const f of result?.files ?? []) {
+      this.diff.set(f.file, f.hunks);
+      for (const sym of f.symbols) this.changedIds.add(sym.node.id);
+    }
+  }
+
+  // What a card leads to, one level: its chips (calls, IPC, state) on its
+  // own lines (not ones inside a nested declaration: those are that
+  // declaration's), and its nested declarations (a file's functions, a
+  // class's methods), each once, in line order.
+  private leadsTo(c: Card): { id: string; line: number; kind: LinkKind }[] {
+    const own = (r: BlockRegion) => r.start <= c.range[0] && r.end >= c.range[1];
+    const nested = c.block.regions.filter((r) => r.node && !own(r) && r.start >= c.range[0] && r.end <= c.range[1]);
+    const inNested = (line: number) => nested.some((r) => r.start < line && line <= r.end);
+    // Only the outermost nested declarations: a class's methods come with it.
+    const outer = nested.filter((r) => !nested.some((o) => o !== r && o.start <= r.start && o.end >= r.end));
+    const found = new Map<string, { id: string; line: number; kind: LinkKind }>();
+    for (const r of outer) found.set(r.node!.id, { id: r.node!.id, line: r.start, kind: "calls" });
+    for (const l of c.block.links) {
+      if (l.line < c.range[0] || l.line > c.range[1] || inNested(l.line) || found.has(l.target.id) || l.target.id === c.block.node.id) continue;
+      found.set(l.target.id, { id: l.target.id, line: l.line, kind: l.kind });
+    }
+    return [...found.values()].sort((a, b) => a.line - b.line);
+  }
+
+  // Expand a card: all its lines shown, and everything it leads to (see
+  // leadsTo) opened as cards beside it, in one go. One level: the new
+  // cards aren't expanded.
+  private async expand(card: Card) {
+    const key = card.key;
+    const targets = this.leadsTo(card);
+    const fresh = targets.filter((t) => !this.cardMap.has(t.id));
+    const blocks = new Map(await Promise.all(fresh.map(async (t) => [t.id, await this.fetch(t.id)] as const)));
+    this.remember();
+    if (!this.dirty.has(key)) {
+      // The whole length: every line, comment and import folds opened in place.
+      for (const r of card.block.regions) if (inPlace(r) && r.start >= card.range[0] && r.end <= card.range[1]) card.expanded.add(r.start);
+      card.limit = card.range[1] - card.range[0] + 1;
+    }
+    const added: string[] = [];
+    for (const t of targets) {
+      const block = blocks.get(t.id);
+      if (block && !this.cardMap.has(t.id)) {
+        const fresh = newCard(t.id, block);
+        this.revealChanges(fresh);
+        this.cardMap.set(t.id, fresh);
+        added.push(t.id);
+      }
+      if (this.cardMap.has(t.id)) this.addArrow({ from: key, line: t.line, to: t.id, kind: t.kind });
+    }
+    for (const id of added) this.connect(id);
+    this.render();
+    for (const t of targets) if (added.includes(t.id)) this.placeBeside(t.id, key, t.line);
+    this.select(key);
+    for (const id of added) this.emit(OPEN_EVENT, { card: this.info(id)!, from: key, line: targets.find((t) => t.id === id)!.line, existing: false });
+    this.changed();
+  }
+
+  // Is there anything left for expand to do?
+  private canExpand(c: Card, shownAll: boolean): number {
+    if (topFolds(c).some(inPlace)) shownAll = false; // folded comments/imports to open
+    const missing = this.leadsTo(c).filter((t) => !this.cardMap.has(t.id) || !this.arrows.some((a) => a.from === c.key && a.to === t.id)).length;
+    return missing || (shownAll ? 0 : -1); // -1: only lines to show
+  }
+
+  // A card that arrives while changes are shown opens far enough to show
+  // them: comment/import folds holding changes open in place, and it shows
+  // down to its last changed line (folds that open as cards stay folded,
+  // marked; "open N changes" opens those).
+  private revealChanges(c: Card) {
+    const diff = this.diffFor(c);
+    if (!diff.any) return;
+    const lines = [...diff.added, ...diff.removed.keys()].filter((l) => l >= c.range[0] && l <= c.range[1] + 1);
+    if (!lines.length) return;
+    for (const r of c.block.regions) if (inPlace(r) && r.start >= c.range[0] && r.end <= c.range[1] && lines.some((l) => l > r.start && l <= r.end)) c.expanded.add(r.start);
+    c.limit = Math.max(c.limit, Math.min(c.range[1] + 1, Math.max(...lines) + 3) - c.range[0]);
+  }
+
+  // The folds in a card that hide changes and open as cards (not the
+  // comments and imports that open in place).
+  private changedFolds(c: Card): BlockRegion[] {
+    const diff = this.diffFor(c);
+    if (!diff.any) return [];
+    const changed = (from: number, to: number) => {
+      for (let l = from; l <= to; l++) if (diff.added.has(l) || diff.removed.has(l)) return true;
+      return false;
+    };
+    return topFolds(c).filter((f) => !inPlace(f) && changed(f.start + 1, f.end));
+  }
+
+  // Open every fold in a card that hides changes, each as a card beside it
+  // (as clicking each would).
+  private async openChanges(card: Card) {
+    for (const f of this.changedFolds(card)) await this.fold(card, f.start, f.end);
+  }
+
+  // A card's changes by line: lines added or changed, and removed lines by
+  // the line they were before (a removal at the very end: last line + 1).
+  private diffFor(c: Card) {
+    const hunks = this.diffBase === null ? undefined : this.diff.get(c.block.node.file ?? "");
+    const added = new Set<number>();
+    const removed = new Map<number, string[]>();
+    for (const h of hunks ?? []) {
+      for (let l = h.start; l < h.start + h.added; l++) added.add(l);
+      if (h.removed.length) {
+        const at = h.added ? h.start : h.start + 1;
+        removed.set(at, [...(removed.get(at) ?? []), ...h.removed]);
+      }
+    }
+    return { added, removed, any: !!hunks?.length };
   }
 
   // --- layout ----------------------------------------------------------------
@@ -1212,11 +1519,23 @@ export class LodeFlow extends HTMLElement {
     const html = this.host?.syntax?.(b.lines.map((l) => l.text).join("\n"), n.file ?? "") ?? b.lines.map((l) => escape(l.text));
 
     const chip = (link: BlockLink, line: number, rolled: boolean) =>
-      `<button part="chip chip-${link.kind}" class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${(info && render?.chip?.(link, info)) ?? escape(chipText(link))}</button>`;
+      `<button part="chip chip-${link.kind}" class="chip k-${link.kind}${this.changedIds.has(link.target.id) ? " to-changed" : ""}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${(info && render?.chip?.(link, info)) ?? escape(chipText(link))}</button>`;
 
     const rows: string[] = [];
     let shownLines = 0;
     let remaining = 0;
+    // Git changes: added lines marked, removed ones shown where they were
+    // (read-only), folds and the paging cut marked when they hide some.
+    const diff = this.diffFor(c);
+    let lastShown = 0;
+    const ghost = (lines: string[]) =>
+      lines
+        .map((t) => `<div class="ln-removed" part="line-removed" contenteditable="false"><span class="no">−</span><span class="src">${t ? (this.host?.syntax?.(t, n.file ?? "")[0] ?? escape(t)) : " "}</span></div>`)
+        .join("");
+    const changedWithin = (from: number, to: number) => {
+      for (let l = from; l <= to; l++) if (diff.added.has(l) || diff.removed.has(l)) return true;
+      return false;
+    };
     // Runs of visible lines that are contiguous in the file: what can be
     // edited as one (see editing.ts). Kept as what the card showed, to save
     // against.
@@ -1231,6 +1550,8 @@ export class LodeFlow extends HTMLElement {
         continue;
       }
       shownLines++;
+      lastShown = line;
+      if (diff.removed.has(line)) rows.push(ghost(diff.removed.get(line)!));
       const own = linksByLine.get(line) ?? [];
       const fold = foldAt.get(line);
       let foldHtml = "";
@@ -1244,7 +1565,8 @@ export class LodeFlow extends HTMLElement {
         const small = inPlace(fold); // opens in place rather than as a card
         const foldKey = fold.node ? fold.node.id : `${n.id}@${fold.start}-${fold.end}`;
         const active = !small && isActive(line, foldKey);
-        foldHtml = `<button part="fold" class="fold${active ? " active" : ""}" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open as a card"}">⋯ ${count} lines${small ? "" : " →"}</button>`;
+        const hidesChanges = diff.any && changedWithin(fold.start + 1, fold.end);
+        foldHtml = `<button part="fold" class="fold${active ? " active" : ""}${hidesChanges ? " changed" : ""}" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open as a card"}">⋯ ${count} lines${small ? "" : " →"}</button>`;
         // An anonymous fold carries the chips from inside it; a named one
         // doesn't (its own card shows them).
         if (!fold.node) {
@@ -1258,7 +1580,7 @@ export class LodeFlow extends HTMLElement {
           : "";
       const hostLine = info && render?.line?.(info, line);
       const chips = [hostLine ? `<span class="host-line" part="host-line">${hostLine}</span>` : "", ...own.map((l) => chip(l, line, false)), ...rolled.slice(0, MAX_ROLLED).map((l) => chip(l, line, true)), more].join("");
-      const classes = ["ln", own.length || rolled.length ? "linked" : "", out.some((a) => a.line === line) ? "active" : ""].filter(Boolean).join(" ");
+      const classes = ["ln", own.length || rolled.length ? "linked" : "", out.some((a) => a.line === line) ? "active" : "", diff.added.has(line) ? "diff-added" : ""].filter(Boolean).join(" ");
       const run = runs.length && runs[runs.length - 1].end === line - 1 && !foldAt.has(runs[runs.length - 1].end) ? runs[runs.length - 1] : (runs.push({ start: line, end: line }), runs[runs.length - 1]);
       run.end = line;
       original.set(line, b.lines[line - first]?.text ?? "");
@@ -1267,9 +1589,12 @@ export class LodeFlow extends HTMLElement {
         `<div part="line" class="${classes}" data-n="${line}" data-run="${runs.length - 1}"><span class="no" part="line-number" contenteditable="false">${line}</span><span class="src" part="source"><span class="text">${b.lines[line - first]?.text ? html[line - first] : "<br>"}</span>${lockedHtml}</span>${chips ? `<span class="chips" part="chips" contenteditable="false">${chips}</span>` : ""}</div>`,
       );
     }
+    // Removed at the very end of what the card shows.
+    if (!remaining && diff.removed.has(lastShown + 1) && lastShown === c.range[1]) rows.push(ghost(diff.removed.get(lastShown + 1)!));
+    const pagedChanges = remaining > 0 && diff.any && changedWithin(lastShown + 1, c.range[1]);
     const total = shownLines + remaining;
     const paging = [
-      remaining ? `<button part="paging-button" class="more-lines" data-action="more">show ${Math.min(PAGE, remaining)} more</button>` : "",
+      remaining ? `<button part="paging-button" class="more-lines${pagedChanges ? " changed" : ""}" data-action="more">show ${Math.min(PAGE, remaining)} more</button>` : "",
       remaining > PAGE ? `<button part="paging-button" class="more-lines" data-action="all" data-total="${total}">show all ${remaining}</button>` : "",
       c.limit > PAGE && shownLines > PAGE ? `<button part="paging-button" class="more-lines" data-action="less" data-total="${total}">⌃ collapse</button>` : "",
     ].join("");
@@ -1278,6 +1603,9 @@ export class LodeFlow extends HTMLElement {
     const editable = this.isEditable(c);
 
     const span = c.range[1] - c.range[0] + 1;
+    // Changed folds not opened yet (the button goes once they all are).
+    const expandable = this.canExpand(c, remaining === 0);
+    const changedFolds = this.changedFolds(c).filter((f) => !this.cardMap.has(f.node ? f.node.id : `${n.id}@${f.start}-${f.end}`));
     const hostHeader = info && render?.header?.(info);
     const hostFooter = info && render?.footer?.(info);
     return `<section part="card${this.group.has(c.key) ? " card-selected" : ""}" class="card${this.group.has(c.key) ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
@@ -1286,6 +1614,8 @@ export class LodeFlow extends HTMLElement {
         ${header}
         <button class="title" part="card-title" data-action="source" title="Open the source">${titleHtml(c)}</button>
         <span class="meta" part="card-meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
+        <div class="card-actions">${expandable ? `<button class="expand" part="expand" data-action="expand" title="Show all its lines and open everything it leads to (one level)">${expandable > 0 ? `expand · ${expandable} →` : "expand"}</button>` : ""}
+        ${changedFolds.length ? `<button class="open-changes" part="open-changes" data-action="open-changes" title="Open every folded part with changes as a card">open ${changedFolds.length} change${changedFolds.length === 1 ? "" : "s"} →</button>` : ""}</div>
         ${hostHeader ? `<div class="host-header" part="host-header">${hostHeader}</div>` : ""}
         <div class="unsaved" part="unsaved"><span class="dot">●</span> unsaved <button data-action="save" title="Save (⌘S)">save</button><button data-action="discard" title="Throw these edits away">discard</button><span class="edit-note"></span></div>
       </header>
@@ -1312,7 +1642,7 @@ export class LodeFlow extends HTMLElement {
     return `<div class="callers${c.allCallers ? " all" : ""}" part="callers">${allCalls ? "called by" : "used by"} ${shown
       .map(
         (cl) =>
-          `<button part="caller" class="caller${open(cl.node.id) ? " open" : ""}" data-action="reroot" data-kind="${cl.kind}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(nameOf(cl))}${
+          `<button part="caller" class="caller${this.changedIds.has(cl.node.id) ? " to-changed" : ""}${open(cl.node.id) ? " open" : ""}" data-action="reroot" data-kind="${cl.kind}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(nameOf(cl))}${
             cl.kind === "channel" ? ` ⇢ ${escape(cl.label ?? "")}` : cl.label ? ` · ${escape(cl.label)}` : ""
           }</button>`,
       )

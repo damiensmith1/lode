@@ -51,9 +51,14 @@ export interface SourceHighlight {
 // A view to show. `state` names where a flow keeps its canvas in the host's
 // storage: give each flow tab its own to keep them apart, and the same one
 // again to bring a tab back as it was. Defaults to "flow".
+// `diff` shows git changes on a flow's cards, against that ref ("HEAD":
+// uncommitted changes); `ids` opens several at once; `newTab` asks the
+// host for a fresh flow rather than the current one. A "changes" view
+// lists what changed since `base` (default HEAD).
 export type ViewRequest =
   | { kind: "entries" }
-  | { kind: "flow"; id?: string; state?: string };
+  | { kind: "changes"; base?: string }
+  | { kind: "flow"; id?: string; ids?: string[]; state?: string; diff?: string; newTab?: boolean };
 
 // What a flow can be asked to do, by a key (LodeHost.keys) or by the host
 // calling flow.run(command).

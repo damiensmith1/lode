@@ -32,28 +32,35 @@ export {
 } from "./host.js";
 export { buildFileTree, lodeApi, type FileTreeNode, type LodeApi } from "./api.js";
 export { LodeEntries } from "./entries.js";
+export { LodeChanges } from "./changes.js";
 export { LodeFlow } from "./flow.js";
 export type * from "../src/query/types.js";
 
 import type { LodeConnection } from "./connection.js";
 import { LodeEntries } from "./entries.js";
+import { LodeChanges } from "./changes.js";
 import { LodeFlow } from "./flow.js";
 import type { LodeHost, ViewRequest } from "./host.js";
 
 export function defineLodeElements() {
   if (!customElements.get("lode-entries")) customElements.define("lode-entries", LodeEntries);
   if (!customElements.get("lode-flow")) customElements.define("lode-flow", LodeFlow);
+  if (!customElements.get("lode-changes")) customElements.define("lode-changes", LodeChanges);
 }
 
 // The element for a view request, wired to a client and host, ready to mount.
 export function createView(view: ViewRequest, client: LodeConnection, host: LodeHost): HTMLElement {
   defineLodeElements();
-  const el = document.createElement(`lode-${view.kind}`) as LodeEntries | LodeFlow;
+  const el = document.createElement(`lode-${view.kind}`) as LodeEntries | LodeFlow | LodeChanges;
   el.client = client;
   el.host = host;
   if (view.kind === "flow") {
-    if (view.id) el.setAttribute("node", view.id);
-    if (view.state) (el as LodeFlow).stateKey = view.state;
+    const flow = el as LodeFlow;
+    if (view.id) flow.setAttribute("node", view.id);
+    if (view.state) flow.stateKey = view.state;
+    if (view.diff) flow.setDiffOnConnect(view.diff);
+    if (view.ids?.length) flow.pendingIds = [...view.ids];
   }
+  if (view.kind === "changes" && view.base) (el as LodeChanges).base = view.base;
   return el;
 }

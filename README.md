@@ -39,10 +39,10 @@ src/schema      the contract between plugins and the core (nodes, edges, channel
 src/ingest/ts   TypeScript + JavaScript plugin: facts from the compiler API, mapped to the schema
 src/derive      core analysis: channel matching (tier 3), shared-state flows (tier 2)
 src/graph       Graph (validation, traversal), lenses, GraphStore (cache)
-src/query      deterministic queries views need (block, entries, search, source)
+src/query      deterministic queries views need (block, entries, search, source, git changes)
 src/service    those queries as methods with no transport; serveMessages for message channels
 src/server     the service over JSON-RPC on a WebSocket (`/rpc`), file watching
-views/         web components (<lode-entries>, <lode-flow>), connections, storage, themes, host contract
+views/         web components (<lode-entries>, <lode-flow>, <lode-changes>), connections, storage, themes, host contract
 hosts/app      the standalone host (`lode open`)
 hosts/minimal  a whole host in one HTML page, from the package's bundles
 src/cli.ts     the commands above

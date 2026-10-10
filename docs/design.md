@@ -376,6 +376,39 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   can't be closed, folded or paged until saved or discarded. Selection
   gestures (⌘-click, header) take the caret out of code so keys act on
   cards again.
+- **Git changes.** `changes(base)` runs `git diff -U0 -M <base>` (with
+  `--end-of-options`, the ref validated) plus untracked files, under the
+  project root, and maps each changed line to the symbol it's in: the
+  deepest declaration that isn't nested in a function, a type's member or
+  a class field (so methods, not their callbacks; interfaces, not their
+  properties), else the file. Removed lines count toward what follows
+  them. A changes view lists files → symbols with +/− and opens them in a
+  flow with the diff shown; "open all" puts every changed symbol in a new
+  flow, laid out as one: they link up where they call each other, each
+  connected group in columns of call steps (callers left of what they
+  call, next to their callers), groups packed in rows (biggest first) to
+  about the view's shape. While a diff is shown, chips and callers that
+  lead to a changed symbol carry a green dot, so changes can be followed
+  card to card. Linking skips calls made inside a nested declaration
+  (they're that declaration's) and cards inside one another, so a class
+  card doesn't unroll to reach its own methods. Every card has "expand":
+  all its lines, plus everything it leads to one level down (its own
+  lines' chips and its outermost nested declarations; calls inside those
+  are theirs), opened beside it in one go, undoable as one step. A card whose folds hide
+  changes offers "open N changes →" to open them all beside it at once.
+  Cards arriving while changes are shown open at them (down to the last
+  changed line, small folds holding changes opened), not at their top. Cards show added/changed lines, removed lines as struck-through
+  read-only rows where they were (outside editing's runs), and mark folds
+  and paging that hide changes. Both refresh on re-index, so an agent's
+  work shows up live. A flow's diff setting is part of its saved state.
+- **Not just code.** The file list is every project file (git's tracked
+  and untracked, not ignored), not just the graph's; files outside the
+  graph read as text cards (Markdown headings as folds) that can be edited
+  and diffed, and their changes reach views through the watcher even
+  though nothing re-indexes. The standalone app's sidebar toggles between
+  files and changes: changed files that drop down into the changed
+  declarations as a hierarchy (a class over its methods), with the
+  "since" ref and "open all" at the top and a count on the toggle.
 - **Look is the host's.** Every colour and font is a `--lode-*` token with
   its default as a `var()` fallback, so a host sets tokens on any ancestor
   (declaring defaults on `:host` would shadow inherited ones). Syntax

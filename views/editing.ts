@@ -353,7 +353,9 @@ function textOf(row: HTMLElement): string {
 
 // The row next to this one, if it's in the same run.
 function neighbour(row: HTMLElement, step: -1 | 1): HTMLElement | null {
-  const next = (step < 0 ? row.previousElementSibling : row.nextElementSibling) as HTMLElement | null;
+  let next = (step < 0 ? row.previousElementSibling : row.nextElementSibling) as HTMLElement | null;
+  // Removed lines shown from git sit between rows; they're not lines.
+  while (next?.classList.contains("ln-removed")) next = (step < 0 ? next.previousElementSibling : next.nextElementSibling) as HTMLElement | null;
   return next?.classList.contains("ln") && next.dataset.run === row.dataset.run ? next : null;
 }
 

@@ -66,9 +66,10 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     return path.join(stateDir, `layout-${key}.json`);
   };
 
-  // Project files only: resolved for real, inside the root, and indexed.
+  // Project files only: resolved for real, inside the root, and listed
+  // (in the graph, or a file git doesn't ignore).
   const projectFile = (file: unknown) => {
-    if (typeof file !== "string" || !store.graph.node(file)) return null;
+    if (typeof file !== "string" || !queries.isProjectFile(file)) return null;
     try {
       const root = realpathSync(store.root);
       const absolute = realpathSync(path.resolve(store.root, file));
@@ -98,7 +99,9 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     }
     for (const e of sorted) lines.splice(e.start - 1, e.end - e.start + 1, ...e.lines);
     await writeFile(absolute, lines.join(eol));
-    return { ok: true, files: service.refresh() };
+    const files = service.refresh();
+    if (!files.length) for (const listener of listeners) listener([String(file)]);
+    return { ok: true, files: files.length ? files : [String(file)] };
   };
 
   const methods: Record<string, (params: Record<string, unknown>) => unknown> = {
@@ -135,6 +138,7 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     graph: (p) => queries.tree(String(p.lens ?? "runtime")),
     block: (p) => queries.block(String(p.id)),
     entries: () => queries.entries(),
+    changes: (p) => queries.changes(typeof p.base === "string" && p.base ? p.base : "HEAD"),
     symbolAt: (p) => queries.symbolAt(String(p.file), Number(p.line)),
   };
 
@@ -163,10 +167,19 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     watch: (watchOptions = {}) => {
       const ignore = watchOptions.ignore ?? ((name: string) => IGNORED.test(name));
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const touched = new Set<string>();
       const watcher = watchFiles(store.root, { recursive: true }, (_event, name) => {
         if (!name || ignore(String(name))) return;
+        touched.add(String(name).split(path.sep).join("/"));
         clearTimeout(timer);
-        timer = setTimeout(() => service.refresh(), watchOptions.debounceMs ?? 250);
+        timer = setTimeout(() => {
+          // Code files re-index (and tell listeners); other files (README,
+          // JSON) aren't in the graph, but views showing them or their
+          // changes still need to hear about it.
+          const names = [...touched];
+          touched.clear();
+          if (!service.refresh().length) for (const listener of listeners) listener(names);
+        }, watchOptions.debounceMs ?? 250);
       });
       return () => {
         clearTimeout(timer);

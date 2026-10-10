@@ -4,7 +4,8 @@
 // on clicks. It's one host among many; everything lode-specific comes from
 // ../../views through LodeHost.
 import { highlightJs } from "../../views/highlight.js";
-import { buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeHost, type ViewRequest } from "../../views/index.js";
+import type { ChangesResult } from "../../src/query/types.js";
+import { buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) => {
@@ -20,6 +21,7 @@ const client = new LodeClient(`ws://${location.host}/rpc?token=${encodeURICompon
 const storage = serviceStorage(client);
 const api = lodeApi(client);
 const TABS_KEY = "app-tabs";
+const SIDE_KEY = "app-sidebar"; // files or changes, and the changes' base
 
 // --- Tabs of lode views ---------------------------------------------------
 
@@ -52,27 +54,33 @@ function select(tab: Tab) {
 
 function saveTabs() {
   void storage.save(TABS_KEY, {
-    tabs: tabs.map((t) => (t.request.kind === "flow" ? { kind: "flow", state: t.request.state } : { kind: t.request.kind })),
+    // A flow's own state (cards, diff) is in its storage; just its key here.
+    tabs: tabs.map((t) => (t.request.kind === "flow" ? { kind: "flow", state: t.request.state } : t.request)),
     selected: current ? tabs.indexOf(current) : 0,
   });
 }
 
 // A flow request reads in the last flow tab (or the first one, if none is
-// open); entries has one tab. `newTab` adds a flow tab instead.
+// open), turning on its git changes if asked; `newTab` adds a flow tab
+// instead. Entries and changes have one tab each.
 function openView(request: ViewRequest, newTab = false): Tab {
-  if (request.kind === "flow" && !newTab) {
+  if (request.kind === "flow" && !newTab && !request.newTab) {
     const flow = lastFlow && tabs.includes(lastFlow) ? lastFlow : tabs.find(isFlow);
     if (flow) {
-      if (request.id) void (flow.view as HTMLElement & { show(id: string): Promise<void> }).show(request.id);
+      const view = flow.view as LodeFlow;
+      void (async () => {
+        if (request.diff) await view.setDiff(request.diff);
+        await view.showAll([...(request.id ? [request.id] : []), ...(request.ids ?? [])]);
+      })();
       select(flow);
       return flow;
     }
   }
-  if (request.kind === "entries") {
-    const existing = tabs.find((t) => t.request.kind === "entries");
+  if (request.kind !== "flow") {
+    const existing = tabs.find((t) => t.request.kind === request.kind);
     if (existing) return (select(existing), existing);
   }
-  return addTab(request);
+  return addTab(request.kind === "flow" ? { ...request, newTab: undefined } : request);
 }
 
 function addTab(request: ViewRequest, at = tabs.length): Tab {
@@ -136,7 +144,8 @@ function renderTree(tree: FileTreeNode[]) {
         rows.push(indent(el("button", { ariaExpanded: String(isOpen), onclick: toggle }, `${isOpen ? "▾" : "▸"} ${n.name}`), depth));
         if (isOpen) walk(n.children ?? [], depth + 1);
       } else {
-        const button = indent(el("button", { title: n.runtime ? `runtime: ${n.runtime}` : "", onclick: () => readInFlow(n.path) }, el("span", { className: `dot rt-${n.runtime ?? "none"}` }), n.name), depth);
+        const dot = n.indexed === false ? "dot text" : `dot rt-${n.runtime ?? "none"}`;
+        const button = indent(el("button", { title: n.runtime ? `runtime: ${n.runtime}` : n.indexed === false ? "text file" : "", onclick: () => readInFlow(n.path) }, el("span", { className: dot }), n.name), depth);
         button.dataset.file = n.path;
         button.setAttribute("aria-current", String(n.path === currentFile));
         rows.push(button);
@@ -150,6 +159,115 @@ function renderTree(tree: FileTreeNode[]) {
 function indent<T extends HTMLElement>(node: T, depth: number): T {
   node.style.paddingLeft = `${8 + depth * 14}px`;
   return node;
+}
+
+// --- Changes (the sidebar's other mode) -------------------------------------
+//
+// What changed in git since a ref: files, each dropping down into the
+// declarations that changed, as a hierarchy (a class over its methods).
+// Picking one reads it in the flow with the diff shown.
+
+const openFiles = new Set<string>(); // files dropped down
+const closedSymbols = new Set<string>(); // symbols with children folded up
+let changes: ChangesResult | null = null;
+let sideMode: "files" | "changes" = "files";
+
+function changesBase(): string {
+  return $<HTMLInputElement>("changes-base").value.trim() || "HEAD";
+}
+
+async function loadChanges() {
+  changes = await api.changes(changesBase()).catch((error) => ({ base: changesBase(), error: String(error), files: [] }));
+  const total = changes.files.length;
+  $("changes-count").textContent = total ? String(total) : "";
+  if (sideMode === "changes") renderChanges();
+}
+
+function setSideMode(mode: "files" | "changes") {
+  sideMode = mode;
+  $("side-files").setAttribute("aria-selected", String(mode === "files"));
+  $("side-changes").setAttribute("aria-selected", String(mode === "changes"));
+  $("tree").hidden = mode !== "files";
+  $("changes").hidden = mode !== "changes";
+  void storage.save(SIDE_KEY, { mode, base: changesBase() });
+  if (mode === "changes") void loadChanges();
+}
+
+function renderChanges() {
+  const list = $("changes-list");
+  const totals = $("changes-totals");
+  if (!changes || changes.error) {
+    totals.textContent = "";
+    return void list.replaceChildren(el("div", { className: "faint" }, changes?.error ?? "loading…"));
+  }
+  const added = changes.files.reduce((n, f) => n + f.added, 0);
+  const removed = changes.files.reduce((n, f) => n + f.removed, 0);
+  totals.textContent = changes.files.length ? `${changes.files.length} file${changes.files.length === 1 ? "" : "s"} · +${added} −${removed}` : `no changes since ${changes.base}`;
+  const counts = (a: number, r: number) => el("span", { className: "n" }, ...(a ? [el("span", { className: "add" }, `+${a} `)] : []), ...(r ? [el("span", { className: "del" }, `−${r}`)] : []));
+  const read = (id: string) => openView({ kind: "flow", id, diff: changes!.base });
+  const rows: HTMLElement[] = [];
+  for (const f of changes.files) {
+    const open = openFiles.has(f.file);
+    const status = { modified: "M", added: "A", deleted: "D", renamed: "R", untracked: "U" }[f.status];
+    // Symbols under the file: the hierarchy, top-level ones first.
+    const symbols = f.status === "added" || f.status === "untracked" ? [] : f.symbols.filter((s) => s.node.id !== f.file || s.added || s.removed);
+    const chev = el("span", { className: "chev" }, symbols.length ? (open ? "▾" : "▸") : "");
+    const gone = f.status === "deleted";
+    const row = el(
+      "button",
+      { className: `row file${gone ? " gone" : ""}`, title: f.from ? `${f.from} → ${f.file}` : f.file },
+      chev,
+      el("span", { className: `st ${status}` }, status),
+      el("span", { className: "name" }, f.file),
+      counts(f.added, f.removed),
+    );
+    // The arrow drops down; the name reads the whole file.
+    row.addEventListener("click", (e) => {
+      if (e.target === chev && symbols.length) {
+        open ? openFiles.delete(f.file) : openFiles.add(f.file);
+        return renderChanges();
+      }
+      if (!gone) read(f.file);
+    });
+    rows.push(row);
+    if (!open) continue;
+    const children = new Map<string | undefined, typeof symbols>();
+    for (const s of symbols) children.set(s.parent, [...(children.get(s.parent) ?? []), s]);
+    const walk = (parent: string | undefined, depth: number) => {
+      for (const s of children.get(parent) ?? []) {
+        const kids = children.get(s.node.id)?.length ?? 0;
+        const folded = closedSymbols.has(s.node.id);
+        const sChev = el("span", { className: "chev" }, kids ? (folded ? "▸" : "▾") : "");
+        const label = s.node.id === f.file ? "(top level)" : s.node.name;
+        const sRow = el("button", { className: "row", title: s.node.id }, sChev, el("span", { className: "name" }, label, " ", el("span", { className: "kind" }, s.node.kind)), counts(s.added, s.removed));
+        sRow.style.paddingLeft = `${10 + depth * 14}px`;
+        sRow.addEventListener("click", (e) => {
+          if (e.target === sChev && kids) {
+            folded ? closedSymbols.delete(s.node.id) : closedSymbols.add(s.node.id);
+            return renderChanges();
+          }
+          read(s.node.id);
+        });
+        rows.push(sRow);
+        if (!folded) walk(s.node.id, depth + 1);
+      }
+    };
+    walk(undefined, 1);
+  }
+  list.replaceChildren(...rows);
+}
+
+function setupChanges() {
+  $("side-files").addEventListener("click", () => setSideMode("files"));
+  $("side-changes").addEventListener("click", () => setSideMode("changes"));
+  $("changes-base").addEventListener("change", () => {
+    void storage.save(SIDE_KEY, { mode: sideMode, base: changesBase() });
+    void loadChanges();
+  });
+  $("changes-all").addEventListener("click", () => {
+    const ids = (changes?.files ?? []).flatMap((f) => (f.status === "deleted" ? [] : f.status === "added" || f.status === "untracked" || !f.symbols.length ? [f.file] : f.symbols.filter((s) => s.added || s.removed).map((s) => s.node.id)));
+    if (ids.length) openView({ kind: "flow", ids, diff: changesBase(), newTab: true });
+  });
 }
 
 // --- Search ---------------------------------------------------------------
@@ -201,6 +319,11 @@ async function start() {
   renderTree(buildFileTree(await api.files()));
   setupSearch();
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
+  setupChanges();
+  const side = (await storage.load(SIDE_KEY)) as { mode?: "files" | "changes"; base?: string } | null;
+  if (side?.base) $<HTMLInputElement>("changes-base").value = side.base;
+  setSideMode(side?.mode === "changes" ? "changes" : "files");
+  void loadChanges(); // the count on the toggle
 
   // The tabs open last time, or entry points and a flow.
   const newFlow = el("button", { id: "new-flow", className: "tab new", title: "New flow tab", ariaLabel: "New flow tab" }, "+");
@@ -221,6 +344,7 @@ async function start() {
   client.onChanged(async (files) => {
     Object.assign(info, await api.info());
     renderTree(buildFileTree(await api.files()));
+    void loadChanges();
     setStatus(` · re-indexed ${files.length} file${files.length === 1 ? "" : "s"}`);
   });
 }

@@ -23,6 +23,8 @@ export const LIGHT_THEME: LodeTheme = {
   "--lode-channel": "#e2632f",
   "--lode-channel-text": "#a8461b",
   "--lode-state": "#8a3b6b",
+  "--lode-added": "#2e7d4f", // git changes: added or changed lines
+  "--lode-removed": "#b3402a", // and removed ones
   "--lode-font": '"Geist", -apple-system, BlinkMacSystemFont, sans-serif',
   "--lode-mono": '"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace',
   // Syntax colours, for highlighters that use them (see ./highlight.ts).
@@ -53,6 +55,8 @@ export const DARK_THEME: LodeTheme = {
   "--lode-channel": "#f08a5d",
   "--lode-channel-text": "#f3a07c",
   "--lode-state": "#d68bb8",
+  "--lode-added": "#6cc28f",
+  "--lode-removed": "#e07a66",
   "--lode-syntax-keyword": "#d68bb8",
   "--lode-syntax-string": "#d9b27c",
   "--lode-syntax-number": "#7aa5e6",

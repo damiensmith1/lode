@@ -1,16 +1,29 @@
-// An optional syntax highlighter for views (highlight.js, TS/JS), for hosts
+// An optional syntax highlighter for views (highlight.js: TS/JS and common
+// project files: JSON, Markdown, CSS, HTML, YAML, shell, TOML), for hosts
 // without their own. Kept out of the views index so hosts that bring their
 // own (an IDE's tokenizer, Shiki) don't pull highlight.js in.
 import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import ini from "highlight.js/lib/languages/ini";
 import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
+import python from "highlight.js/lib/languages/python";
+import scss from "highlight.js/lib/languages/scss";
 import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("typescript", typescript);
+for (const [name, language] of Object.entries({ bash, css, ini, javascript, json, markdown, python, scss, typescript, xml, yaml })) hljs.registerLanguage(name, language);
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
   js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+  json: "json", jsonc: "json", md: "markdown", markdown: "markdown", mdx: "markdown",
+  css: "css", scss: "scss", html: "xml", htm: "xml", xml: "xml", svg: "xml",
+  yml: "yaml", yaml: "yaml", sh: "bash", zsh: "bash", bash: "bash",
+  toml: "ini", ini: "ini", py: "python",
 };
 
 // One HTML string per source line. highlight.js escapes the source text; its
@@ -55,6 +68,10 @@ export const SYNTAX_CSS = `
 .hljs-attr, .hljs-property { color: var(--lode-syntax-attr); }
 .hljs-variable.language_, .hljs-params { color: var(--lode-syntax-variable); }
 .hljs-meta { color: var(--lode-syntax-comment); }
+.hljs-section, .hljs-strong { color: var(--lode-syntax-title); font-weight: 600; }
+.hljs-emphasis { font-style: italic; }
+.hljs-bullet, .hljs-link, .hljs-selector-class, .hljs-selector-id, .hljs-tag, .hljs-name { color: var(--lode-syntax-type); }
+.hljs-code, .hljs-symbol { color: var(--lode-syntax-string); }
 `;
 
 // Ready to spread into a LodeHost: { ...highlightJs, openView, … }.

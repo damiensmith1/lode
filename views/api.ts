@@ -1,4 +1,4 @@
-import type { CodeBlock, EntriesResult, FileEntry, FileView, NodeRef, ProjectInfo } from "../src/query/types.js";
+import type { ChangesResult, CodeBlock, EntriesResult, FileEntry, FileView, NodeRef, ProjectInfo } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 
 // Typed calls for building a host's own UI around the views: a file tree,
@@ -16,6 +16,8 @@ export function lodeApi(connection: LodeConnection) {
     // Symbols by name (best first); open one with flow.show(node.id).
     search: (query: string) => connection.call<NodeRef[]>("search", { query }),
     entries: () => connection.call<EntriesResult>("entries"),
+    // What changed since `base` (git; default HEAD), by file and symbol.
+    changes: (base?: string) => connection.call<ChangesResult>("changes", base ? { base } : {}),
     block: (id: string) => connection.call<CodeBlock | null>("block", { id }),
     // The innermost symbol at a line, e.g. to open the editor's cursor in a flow.
     symbolAt: (file: string, line: number) => connection.call<NodeRef | null>("symbolAt", { file, line }),
@@ -30,6 +32,7 @@ export interface FileTreeNode {
   path: string; // from the project root; a file's is what flow.show() takes
   kind: "dir" | "file";
   runtime?: string; // files only
+  indexed?: boolean; // files only: in the code graph; false for text files (README, JSON)
   children?: FileTreeNode[]; // dirs only: dirs first, then files, by name
 }
 
@@ -41,7 +44,7 @@ export function buildFileTree(files: FileEntry[]): FileTreeNode[] {
     let dir = root;
     parts.forEach((name, i) => {
       const path = parts.slice(0, i + 1).join("/");
-      if (i === parts.length - 1) return void dir.children!.push({ name, path, kind: "file", ...(f.runtime && { runtime: f.runtime }) });
+      if (i === parts.length - 1) return void dir.children!.push({ name, path, kind: "file", ...(f.runtime && { runtime: f.runtime }), ...(f.indexed === false && { indexed: false }) });
       let next = dir.children!.find((c) => c.kind === "dir" && c.name === name);
       if (!next) dir.children!.push((next = { name, path, kind: "dir", children: [] }));
       dir = next;

@@ -20,7 +20,22 @@
   </div>
 </header>
 <main class="body">
-  <nav id="tree" aria-label="Files"></nav>
+  <aside id="side">
+    <div class="side-tabs" role="tablist" aria-label="Sidebar">
+      <button id="side-files" role="tab" aria-selected="true">files</button>
+      <button id="side-changes" role="tab" aria-selected="false">changes <span id="changes-count"></span></button>
+    </div>
+    <nav id="tree" aria-label="Files"></nav>
+    <div id="changes" aria-label="Changes" hidden>
+      <div class="changes-bar">
+        <label class="faint" for="changes-base">since</label>
+        <input id="changes-base" value="HEAD" spellcheck="false" autocomplete="off" title="A git ref: HEAD (uncommitted), main, HEAD~3, a commit">
+        <button id="changes-all" title="Open every changed symbol in a new flow">open all</button>
+      </div>
+      <div id="changes-totals" class="faint"></div>
+      <div id="changes-list"></div>
+    </div>
+  </aside>
   <section class="views" aria-label="lode views">
     <div id="tabs" role="tablist"></div>
     <div id="view"></div>

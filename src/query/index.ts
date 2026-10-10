@@ -1,14 +1,18 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Graph } from "../graph/graph.js";
+import { gitChanges, listFiles, validBase } from "./git.js";
 import type { Edge, Node, NodeId } from "../schema/index.js";
 import type {
   Annotation,
   BlockLink,
+  ChangedSymbol,
+  ChangesResult,
   CodeBlock,
   EntriesResult,
   EntryCategory,
   EntryPoint,
+  FileChange,
   FileEntry,
   FileView,
   GraphDump,
@@ -31,18 +35,106 @@ export class Queries {
     private readonly root: string,
   ) {}
 
-  info(): ProjectInfo {
+  // What changed in the working tree since `base` (git), by file and by
+  // the declaration each change is in: a top-level function, class, method,
+  // type or variable (not a callback nested inside a function, a type's
+  // member or a class field), or the file itself for top-level code. New
+  // files are their own symbol.
+  async changes(base = "HEAD"): Promise<ChangesResult> {
+    if (!validBase(base)) return { base, error: `not a ref: ${base}`, files: [] };
+    let files: FileChange[];
+    try {
+      files = await gitChanges(this.root, base);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { base, error: /not a git repository/i.test(message) ? "not a git repository" : (message.split("\n").find((l) => /fatal|error/i.test(l)) ?? message), files: [] };
+    }
     const g = this.graph();
-    return { root: this.root, ...g.size, files: this.files().length, lenses: ["runtime", "folder", "containment"] };
+    for (const f of files) {
+      const fileNode = g.node(f.file);
+      f.indexed = !!fileNode && !fileNode.external;
+      if (!f.indexed || f.status === "deleted") continue;
+      if (f.status === "added" || f.status === "untracked") {
+        f.symbols = [{ node: this.ref(fileNode!), added: f.added, removed: f.removed }];
+        continue;
+      }
+      const decls = [...g.allNodes()].filter((n) => !n.external && n.loc?.file === f.file && n.id !== f.file && n.kind !== "block" && n.loc.endLine);
+      const nestedInCallable = (n: Node): boolean => {
+        for (let p = n.parent ? g.node(n.parent) : undefined; p; p = p.parent ? g.node(p.parent) : undefined) if (p.kind === "callable") return true;
+        return false;
+      };
+      // Not interface/type members or class fields: they count toward
+      // their interface or class (methods stay their own).
+      const member = (n: Node) => {
+        const parent = n.parent ? g.node(n.parent) : undefined;
+        return !!parent && parent.id !== f.file && (parent.kind === "type" || n.kind !== "callable");
+      };
+      const top = decls.filter((n) => !nestedInCallable(n) && !member(n));
+      // The deepest top declaration around a line (a method over its class).
+      const at = (line: number) => {
+        let best: Node | undefined;
+        for (const n of top) if (n.loc!.line <= line && n.loc!.endLine! >= line && (!best || n.loc!.line >= best.loc!.line)) best = n;
+        return best ?? fileNode!;
+      };
+      const bySymbol = new Map<string, ChangedSymbol>();
+      const count = (n: Node, added: number, removed: number) => {
+        const s = bySymbol.get(n.id) ?? { node: this.ref(n), added: 0, removed: 0 };
+        s.added += added;
+        s.removed += removed;
+        bySymbol.set(n.id, s);
+      };
+      for (const h of f.hunks) {
+        for (let line = h.start; line < h.start + h.added; line++) count(at(line), 1, 0);
+        // Removed lines count toward what's around where they were: the
+        // replacement's first line, or the line after a pure removal.
+        if (h.removed.length) count(at(h.added ? h.start : h.start + 1), 0, h.removed.length);
+      }
+      // The hierarchy: each symbol under the nearest listed declaration
+      // around it (a method under its class), which is listed even when
+      // only its children changed.
+      const topIds = new Set(top.map((n) => n.id));
+      const parentOf = new Map<string, string>();
+      const place = (id: string) => {
+        for (let p = g.node(id)?.parent; p && p !== f.file; p = g.node(p)?.parent) {
+          if (!topIds.has(p)) continue;
+          parentOf.set(id, p);
+          if (!bySymbol.has(p)) {
+            count(g.node(p)!, 0, 0);
+            place(p);
+          }
+          return;
+        }
+      };
+      for (const id of [...bySymbol.keys()]) place(id);
+      for (const [id, sym] of bySymbol) if (parentOf.has(id)) sym.parent = parentOf.get(id);
+      f.symbols = [...bySymbol.values()].sort((a, b) => (a.node.line ?? 0) - (b.node.line ?? 0));
+    }
+    return { base, files: files.sort((a, b) => a.file.localeCompare(b.file)) };
   }
 
+  info(): ProjectInfo {
+    const g = this.graph();
+    return { root: this.root, ...g.size, files: this.files().filter((f) => f.indexed).length, lenses: ["runtime", "folder", "containment"] };
+  }
+
+  // Every file in the project: the graph's (TS/JS) and the rest (README,
+  // JSON, CSS, …: not ignored by git, or outside node_modules/.git/dist
+  // when it isn't a repository), which open as text.
   files(): FileEntry[] {
     const g = this.graph();
-    const files: FileEntry[] = [];
+    const files = new Map<string, FileEntry>();
     for (const n of g.allNodes()) {
-      if (n.parent === null && !n.external && n.loc && n.id === n.loc.file) files.push({ file: n.id, runtime: n.tags?.runtime });
+      if (n.parent === null && !n.external && n.loc && n.id === n.loc.file) files.set(n.id, { file: n.id, runtime: n.tags?.runtime, indexed: true });
     }
-    return files.sort((a, b) => a.file.localeCompare(b.file));
+    for (const file of listFiles(this.root)) if (!files.has(file)) files.set(file, { file, indexed: false });
+    return [...files.values()].sort((a, b) => a.file.localeCompare(b.file));
+  }
+
+  // A project file lode can show and edit: in the graph, or listed above.
+  isProjectFile(file: string): boolean {
+    const n = this.graph().node(file);
+    if (n && !n.external && n.id === n.loc?.file) return true;
+    return !file.includes("#") && listFiles(this.root).includes(file);
   }
 
   // Symbols whose name matches, best matches first.
@@ -260,6 +352,7 @@ export class Queries {
   block(id: NodeId): CodeBlock | null {
     const g = this.graph();
     const node = g.node(id);
+    if (!node && this.isProjectFile(id)) return this.textBlock(id);
     if (!node?.loc || node.external) return null;
     const file = node.loc.file;
     const text = this.readText(file);
@@ -358,10 +451,44 @@ export class Queries {
       const root = realpathSync(this.root);
       const absolute = realpathSync(path.resolve(this.root, file));
       if (!absolute.startsWith(root + path.sep)) return null;
+      if (statSync(absolute).size > 4_000_000) return null; // too big to show
       return readFileSync(absolute, "utf8");
     } catch {
       return null;
     }
+  }
+
+  // A file outside the graph, as plain lines: no links or callers. Markdown
+  // headings fold into their sections.
+  private textBlock(file: string): CodeBlock | null {
+    const text = this.readText(file);
+    if (text === null || text.includes("\0")) return null; // binary
+    const source = text.split(/\r?\n/);
+    while (source.length > 1 && source[source.length - 1].trim() === "") source.pop();
+    const regions: CodeBlock["regions"] = [];
+    if (/\.(md|markdown|mdx)$/i.test(file)) {
+      const headings: { line: number; level: number }[] = [];
+      let fenced = false;
+      source.forEach((l, i) => {
+        if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
+        const m = !fenced && /^(#{1,6})\s/.exec(l);
+        if (m) headings.push({ line: i + 1, level: m[1].length });
+      });
+      headings.forEach((h, i) => {
+        const next = headings.slice(i + 1).find((o) => o.level <= h.level);
+        let end = next ? next.line - 1 : source.length;
+        while (end > h.line && source[end - 1].trim() === "") end--;
+        if (end > h.line) regions.push({ start: h.line, end, kind: "block" });
+      });
+    }
+    return {
+      node: { id: file, name: path.basename(file), kind: "container", file, line: 1, endLine: source.length, external: false },
+      outline: true,
+      lines: source.map((t, i) => ({ n: i + 1, text: t })),
+      links: [],
+      callers: [],
+      regions,
+    };
   }
 
   ref(node: Node): NodeRef {
