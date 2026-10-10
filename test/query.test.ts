@@ -128,6 +128,20 @@ describe("block query", () => {
     expect(qb.block("src/state.ts#setCurrent")!.callers).toContainEqual(expect.objectContaining({ label: "passes it", node: expect.objectContaining({ name: "wire" }) }));
   });
 
+  it("doesn't treat a request's reply as a link back", () => {
+    // The bridge member is called by the renderer and invokes main; main's
+    // reply and the member's return to the renderer are not new links.
+    const member = q.block("src/preload.ts#exposeInMainWorld:notes.save")!;
+    expect(member.links.map((l) => l.target.name)).toEqual(["handle:notes:save"]);
+    expect(member.callers.map((c) => c.node.name)).toEqual(["onSave"]);
+    const handler = q.block("src/main.ts#registerIpc.handle:notes:save")!;
+    expect(handler.links.some((l) => l.target.name === "save")).toBe(false);
+  });
+
+  it("says what runs a registered callback", () => {
+    expect(q.block("src/main.ts#registerIpc.on:notes:clear")!.trigger).toBe("on notes:clear");
+  });
+
   it("gives files as an outline of their members", () => {
     const b = q.block("src/main.ts")!;
     expect(b.outline).toBe(true);

@@ -29,7 +29,8 @@ describe("deriveChannelFlows", () => {
 
   it("adds the reply edge when the sender awaits one", () => {
     const edges = deriveChannelFlows([ep("a", "send", "x", { awaitsReply: true }), ep("b", "receive", "x", { returns: "Note" })]);
-    expect(edges).toContainEqual(expect.objectContaining({ from: "b", to: "a", type: "Note" }));
+    expect(edges).toContainEqual(expect.objectContaining({ from: "b", to: "a", type: "Note", reply: true }));
+    expect(edges.find((e) => e.from === "a")?.reply).toBeUndefined();
   });
 });
 

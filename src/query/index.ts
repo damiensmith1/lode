@@ -109,7 +109,7 @@ export class Queries {
     // or from outside. Last, and folded.
     for (const n of g.allNodes()) {
       if (n.kind !== "callable" || n.external || !n.loc || n.detail?.registration) continue;
-      const reached = g.neighbors(n.id, "up").some((e) => e.kind === "calls" || (e.kind === "flows" && e.via) || (e.kind === "references" && e.access === "read"));
+      const reached = g.neighbors(n.id, "up").some((e) => e.kind === "calls" || (e.kind === "flows" && e.via && !e.reply) || (e.kind === "references" && e.access === "read"));
       if (!reached) add("not called in the project", n, `${n.name}()`);
     }
 
@@ -238,7 +238,7 @@ export class Queries {
       if (e.loc?.file !== file) continue;
       const to = g.node(e.to);
       if (!to) continue;
-      if (e.kind === "flows" && e.via && g.node(e.from)?.loc?.file === file) {
+      if (e.kind === "flows" && e.via && !e.reply && g.node(e.from)?.loc?.file === file) {
         add({ line: e.loc.line, kind: "channel", text: `${e.via.family.startsWith("electron-bridge") ? "bridge" : "ipc"} ⇢ ${to.name}`, target: to.id });
       } else if (e.kind === "flows" && e.within && e.to !== e.within && !to.external) {
         const from = g.node(e.from);
@@ -272,7 +272,7 @@ export class Queries {
     // writers of a value, users of a type.
     const leadsHere = (e: Edge): { kind: LinkKind; label?: string } | null => {
       if (e.kind === "calls") return { kind: "calls" };
-      if (e.kind === "flows" && e.via) return { kind: "channel", label: e.via.key };
+      if (e.kind === "flows" && e.via) return e.reply ? null : { kind: "channel", label: e.via.key };
       if (e.kind !== "references") return null;
       if (e.access === "read" && node.kind === "callable") return { kind: "calls", label: "passes it" };
       if (e.access === "write" && node.kind === "value") return { kind: "state", label: "writes it" };
@@ -320,7 +320,7 @@ export class Queries {
         const to = g.node(e.to);
         if (!to || to.external || !e.loc || e.loc.file !== node.loc.file || inside.has(to.id)) continue;
         if (e.kind === "calls") add({ line: e.loc.line, kind: "calls", target: this.ref(to) });
-        else if (e.kind === "flows" && e.via) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
+        else if (e.kind === "flows" && e.via && !e.reply) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
         else if (e.kind === "references" && e.access === "write" && to.kind === "value") add({ line: e.loc.line, kind: "state", target: this.ref(to), label: "writes" });
         else if (e.kind === "references" && e.access === "read" && to.kind === "callable") add({ line: e.loc.line, kind: "calls", target: this.ref(to), label: "passes" });
       }
@@ -332,7 +332,15 @@ export class Queries {
         if (r) add({ line: start, kind: "state", target: this.ref(r), label: "read by" });
       }
     }
-    return { node: this.ref(node), outline: false, lines, links: links.sort((a, b) => a.line - b.line), callers };
+    const reg = node.detail?.registration as { call: string; key: string | null } | undefined;
+    return {
+      node: this.ref(node),
+      outline: false,
+      lines,
+      links: links.sort((a, b) => a.line - b.line),
+      callers,
+      ...(reg && { trigger: reg.key ? `${reg.call} ${reg.key}` : reg.call }),
+    };
   }
 
   // A project file's text; real paths on both sides, so neither `..` nor a
@@ -378,7 +386,9 @@ function rank(order: string[], value: string | null): number {
   return i === -1 ? order.length : i;
 }
 
+// Replies are the far end of a request, not a separate connection.
 function linkKind(e: Edge): LinkKind | null {
+  if (e.reply) return null;
   if (e.kind === "calls") return "calls";
   if (e.kind === "flows") return e.via ? "channel" : e.through ? "state" : "local";
   return null;

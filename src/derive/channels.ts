@@ -16,7 +16,7 @@ export function deriveChannelFlows(endpoints: ChannelEndpoint[]): Edge[] {
       const via = { family: send.family, key: send.pattern ? receive.key : send.key };
       edges.push({ kind: "flows", from: send.node, to: receive.node, confidence, loc: send.loc, type: send.payload, via });
       if (send.awaitsReply) {
-        edges.push({ kind: "flows", from: receive.node, to: send.node, confidence, loc: receive.loc, type: receive.returns, via });
+        edges.push({ kind: "flows", from: receive.node, to: send.node, confidence, loc: receive.loc, type: receive.returns, via, reply: true });
       }
     }
   }

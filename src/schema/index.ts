@@ -46,6 +46,7 @@ export interface Edge {
   returns?: string; // calls: type passed back
   type?: string; // flows/references: the type carried
   via?: { family: string; key: string }; // flows: the channel it crossed
+  reply?: boolean; // flows: a request's return value coming back (not a call)
   within?: NodeId; // flows: the node where it happens (local data flow)
   through?: NodeId; // flows: the shared state it passes through (tier 2)
   access?: "read" | "write" | "type"; // references: how the target is used

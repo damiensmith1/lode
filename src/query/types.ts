@@ -105,6 +105,7 @@ export interface CodeBlock {
   lines: { n: number; text: string }[];
   links: BlockLink[];
   callers: { node: NodeRef; line: number; kind: LinkKind; label?: string }[]; // line is in the caller
+  trigger?: string; // a registered callback: what runs it ("addEventListener drop")
 }
 
 // Where to start reading: entry points by runtime and kind, plus a one-line

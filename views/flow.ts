@@ -209,11 +209,15 @@ export class LodeFlow extends HTMLElement {
     const left = this.columns[i - 1]?.block.node.id;
     const shownCallers = c.allCallers ? b.callers : b.callers.slice(0, MAX_CALLERS);
     const allCalls = b.callers.every((cl) => cl.kind === "calls" && !cl.label);
+    // Same name from different places (two preloads exposing one API): add the file.
+    const nameCount = new Map<string, number>();
+    for (const cl of b.callers) nameCount.set(cl.node.name, (nameCount.get(cl.node.name) ?? 0) + 1);
+    const callerName = (cl: CodeBlock["callers"][number]) => (nameCount.get(cl.node.name)! > 1 ? `${cl.node.name} (${cl.node.file?.split("/").pop()})` : cl.node.name);
     const callers = b.callers.length
       ? `<div class="callers${c.allCallers ? " all" : ""}">${allCalls ? "called by" : "used by"} ${shownCallers
           .map(
             (cl) =>
-              `<button class="caller${cl.node.id === left ? " open" : ""}" data-action="reroot" data-col="${i}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(cl.node.name)}${
+              `<button class="caller${cl.node.id === left ? " open" : ""}" data-action="reroot" data-col="${i}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(callerName(cl))}${
                 cl.kind === "channel" ? ` ⇢ ${escape(cl.label ?? "")}` : cl.label ? ` · ${escape(cl.label)}` : ""
               }</button>`,
           )
@@ -222,7 +226,7 @@ export class LodeFlow extends HTMLElement {
         }</div>`
       : b.outline
         ? ""
-        : `<div class="callers">nothing in the project calls this</div>`;
+        : `<div class="callers">${b.trigger ? `runs on <span class="mono">${escape(b.trigger)}</span>` : "nothing in the project calls this"}</div>`;
 
     const linksByLine = new Map<number, BlockLink[]>();
     for (const l of b.links) linksByLine.set(l.line, [...(linksByLine.get(l.line) ?? []), l]);

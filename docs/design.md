@@ -360,6 +360,12 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   open to the left is marked. Passing a function (`rows.map(toTranscript)`)
   is also a chip on the passing line. Long caller lists show 4 and a
   "+N more" chip that expands into a short scrolling list.
+- **Replies aren't links.** A request that awaits a reply (IPC `invoke` →
+  `handle`, renderer → bridge member) also has an edge carrying the return
+  value back; those are marked `reply` and left out of chips, "used by",
+  annotations and summaries. Otherwise following a call led straight back
+  to the caller. A registered callback with no callers says what runs it
+  ("runs on addEventListener drop").
 - **Flow history.** Every move (following a chip, opening a caller, a
   breadcrumb, starting somewhere new) is one step; ← restores exactly the
   columns and selection before it. Expanding callers or folds isn't a step.
