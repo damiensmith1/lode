@@ -7,31 +7,62 @@ const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
 const SMALL = 3; // regions hiding this many lines or fewer never fold
 const PAGE = 25; // lines a card shows before "show 25 more"
+const GAP = 72; // space between a card and one opened from it
+const PAD = 32; // board padding
+const UNDO_LIMIT = 100;
+const LAYOUT = "flow"; // the name the layout is saved under
 
 // Comments and imports open in place: a card of them is just a detour.
 const inPlace = (r: BlockRegion) => r.kind === "comment" || r.kind === "imports";
 
-// A card: a node's code, or a range inside it (a fragment), shown one level
-// deep: nested regions fold to their header line.
-interface Column {
+// A card on the canvas: a node's code, or a range inside one (a fragment),
+// shown one level deep (nested regions fold to their header line).
+interface Card {
+  key: string; // node id, or "<node id>@<start>-<end>" for a fragment
   block: CodeBlock;
   range: [number, number];
   fragment?: string; // the fragment's header text, for its title
-  fromLine?: number; // the line in the previous card that opened it
-  expanded: Set<number>; // comment/import folds opened in place (by header line)
+  expanded: Set<number>; // comment/import folds opened in place
   limit: number; // lines shown before "show more"
   allCallers?: boolean;
+  x: number;
+  y: number;
+}
+
+// An arrow from a line in one card to another card.
+interface Arrow {
+  from: string;
+  line: number;
+  to: string;
+  kind: LinkKind;
+}
+
+interface Snapshot {
+  cards: Card[];
+  arrows: Arrow[];
+  selected: string | null;
+}
+
+// What's saved with the project (blocks are refetched on load).
+interface SavedLayout {
+  v: 1;
+  cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; x: number; y: number }[];
+  arrows: Arrow[];
+  selected: string | null;
 }
 
 const CSS = `
 :host { display: flex; flex-direction: column; overflow: hidden; }
 .canvas { position: relative; flex: 1; min-height: 0; overflow: auto; }
-.row { position: relative; display: flex; align-items: flex-start; gap: 72px; padding: 24px 32px 120px; width: max-content; }
-.block { position: relative; z-index: 1; width: max-content; min-width: 480px; max-width: 760px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
-.block.root { border-color: var(--lode-fg); }
-.block.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 1px 2px rgba(23,22,20,.04); }
-.block header { padding: 10px 14px 8px; border-bottom: 1px solid var(--lode-border); display: flex; flex-direction: column; gap: 3px; }
-.title { font: 600 13px var(--lode-mono); }
+.board { position: relative; min-width: 100%; min-height: 100%; }
+.card { position: absolute; z-index: 1; width: max-content; min-width: 480px; max-width: 760px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
+.card.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 4px 14px rgba(23,22,20,.06); z-index: 3; }
+.card.dragging { box-shadow: 0 0 0 1px var(--lode-local), 0 12px 32px rgba(23,22,20,.16); z-index: 4; }
+.card header { position: relative; padding: 10px 40px 8px 14px; border-bottom: 1px solid var(--lode-border); display: flex; flex-direction: column; gap: 3px; cursor: grab; }
+.card.dragging header { cursor: grabbing; }
+.close { position: absolute; top: 6px; right: 8px; width: 24px; height: 24px; border-radius: 5px; color: var(--lode-faint); text-align: center; font-size: 15px; line-height: 24px; }
+.close:hover { background: var(--lode-sunken); color: var(--lode-fg); }
+.title { font: 600 13px var(--lode-mono); align-self: flex-start; }
 .title:hover { text-decoration: underline; }
 .title .part { font-weight: 450; color: var(--lode-muted); }
 .meta { font-size: 11.5px; color: var(--lode-faint); }
@@ -41,7 +72,7 @@ const CSS = `
 .callers.all { max-height: 92px; overflow-y: auto; padding-right: 4px; }
 .caller.more { border-style: solid; border-color: var(--lode-border); background: var(--lode-sunken); font-family: var(--lode-font); }
 .caller.open { border-style: solid; border-color: var(--lode-local); color: var(--lode-local); }
-.code { padding: 6px 0 8px; font: 12px/20px var(--lode-mono); }
+.code { padding: 6px 0 8px; font: 12px/20px var(--lode-mono); cursor: auto; }
 .ln { display: flex; align-items: flex-start; padding-right: 8px; }
 .ln .no { flex: none; width: 46px; padding-right: 12px; text-align: right; color: #a3a09a; user-select: none; }
 /* Long lines wrap (hanging under their indent) rather than being cut off. */
@@ -49,7 +80,7 @@ const CSS = `
 .ln.linked .no { color: var(--lode-local); }
 .ln.active { background: rgba(47, 95, 168, .08); box-shadow: inset 2px 0 0 var(--lode-local); }
 .fold { margin-left: 6px; padding: 0 6px; font: 11px/18px var(--lode-mono); color: var(--lode-muted); background: var(--lode-sunken); border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
-.fold:hover, .fold.active { border-color: var(--lode-outline); color: var(--lode-fg); }
+.fold:hover { border-color: var(--lode-outline); color: var(--lode-fg); }
 .fold.active { border-color: var(--lode-local); color: var(--lode-local); }
 .more-lines { display: block; margin: 6px 0 2px 58px; padding: 3px 10px; font: 11.5px var(--lode-font); color: var(--lode-muted); background: var(--lode-sunken); border-radius: 5px; }
 .more-lines:hover { color: var(--lode-fg); }
@@ -60,190 +91,498 @@ const CSS = `
 .chip.k-calls { color: var(--lode-local); background: rgba(47, 95, 168, .07); }
 .chip.k-channel { color: var(--lode-channel-text); background: rgba(226, 99, 47, .09); }
 .chip.k-state { color: var(--lode-state); background: rgba(138, 59, 107, .07); }
-.arrows { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 2; }
+.arrows { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 2; }
 .hint { padding: 32px; color: var(--lode-muted); }
 `;
 
-// <lode-flow node="file#symbol">: code as nodes. Cards of real code in
-// columns, left to right, each shown one level deep: nested blocks fold to
-// their first line. A line that leads somewhere (a call, IPC, shared state)
-// has a chip; clicking it, or a big fold, opens that code in the next card
-// with an arrow from the exact line. Small folds expand in place.
+// <lode-flow node="file#symbol">: code as nodes, on a canvas. Cards of real
+// code, each one level deep (nested blocks fold to their first line). A line
+// that leads somewhere (a call, IPC, shared state) has a chip; clicking it,
+// or a big fold, opens that code as a card beside it with an arrow from the
+// exact line. Opening from several places branches; new starting points add
+// trees; cards drag anywhere; × closes a card and what only it led to; ←
+// undoes. The layout is saved with the project.
 export class LodeFlow extends HTMLElement {
   static observedAttributes = ["node"];
   client?: LodeClient;
   host?: LodeHost;
 
   private readonly root = this.attachShadow({ mode: "open" });
-  private columns: Column[] = [];
-  private selected = 0; // the card reported to the host (highlight)
-  // Every move (open, caller, crumb, new start) can be undone with ←.
-  private history: { columns: Column[]; selected: number }[] = [];
+  private cards = new Map<string, Card>();
+  private arrows: Arrow[] = [];
+  private selected: string | null = null;
+  private undo: Snapshot[] = [];
+  private offset = { x: PAD, y: PAD }; // board origin, so negative positions fit
+  private ready: Promise<void> = Promise.resolve();
+  private saveTimer?: number;
   private unsubscribe?: () => void;
-  private resize = new ResizeObserver(() => this.layout());
 
   connectedCallback() {
     this.root.innerHTML = `<style>${BASE_CSS}${CSS}${this.host?.syntaxCss ?? ""}</style>
       <div class="toolbar">
-        <button class="crumb" data-action="back" aria-label="Back">←</button>
-        <span class="path"></span>
+        <button class="crumb" data-action="undo" aria-label="Undo" title="Undo">←</button>
+        <span class="count faint"></span>
         <span class="spacer"></span>
-        <span class="faint">click a chip or a fold to follow it →</span>
+        <span class="faint">click a chip or fold to follow it · drag a card by its header</span>
+        <button class="crumb" data-action="clear">clear</button>
       </div>
-      <div class="canvas"><div class="row"></div></div>`;
-    this.root.addEventListener("click", (e) => this.onClick(e));
-    this.unsubscribe = this.client?.onChanged(() => this.reload());
-    this.resize.observe(this);
-    void this.start();
+      <div class="canvas"><div class="board"></div></div>`;
+    this.root.addEventListener("click", (e) => void this.onClick(e));
+    this.setupDrag();
+    this.unsubscribe = this.client?.onChanged(() => void this.reload());
+    this.ready = this.restore();
+    void this.ready.then(() => {
+      const id = this.getAttribute("node");
+      if (id) void this.show(id);
+      else this.render();
+    });
   }
 
   disconnectedCallback() {
     this.unsubscribe?.();
-    this.resize.disconnect();
   }
 
   attributeChangedCallback(_n: string, before: string | null, after: string | null) {
-    if (before !== after && this.isConnected) void this.start();
+    if (after && before !== after && this.isConnected) void this.ready.then(() => this.show(after));
+  }
+
+  // Show a node: select its card if it's open, else add it as a new tree.
+  async show(id: string) {
+    await this.ready;
+    if (this.cards.has(id)) return this.goTo(id);
+    const block = await this.fetch(id);
+    if (!block) return;
+    this.remember();
+    this.cards.set(id, newCard(id, block));
+    this.render();
+    this.placeRoot(id);
+    this.goTo(id);
+    this.changed();
   }
 
   private async fetch(id: string) {
     return (await this.client?.call<CodeBlock | null>("block", { id })) ?? null;
   }
 
-  private async start() {
-    const id = this.getAttribute("node");
-    if (!id) return this.render();
-    const block = await this.fetch(id);
-    if (!block) return this.render();
-    const fresh = [card(block)];
-    if (this.columns.length) this.go(fresh, 0);
-    else {
-      this.columns = fresh;
-      this.render();
-      this.select(0);
-    }
-  }
-
-  // Move to a new set of cards, remembering where we were.
-  private go(columns: Column[], select: number) {
-    this.history.push({ columns: this.columns, selected: this.selected });
-    this.columns = columns;
-    this.render();
-    this.select(select);
-    this.scrollToColumn(select);
-  }
-
-  // Select a card, and tell the host which code it is.
-  private select(i: number) {
-    this.selected = Math.max(0, Math.min(i, this.columns.length - 1));
-    this.root.querySelectorAll(".block").forEach((b) => b.classList.toggle("selected", Number((b as HTMLElement).dataset.col) === this.selected));
-    const c = this.columns[this.selected];
-    const n = c?.block.node;
-    if (!n?.file) return void this.host?.highlight?.(null);
-    this.host?.highlight?.({ node: n.id, file: n.file, range: c.range, marks: [...new Set(c.block.links.map((l) => l.line))] });
-  }
-
-  // After re-indexing, refetch every open card (lines may have moved).
-  private async reload() {
-    const blocks = await Promise.all(this.columns.map((c) => this.fetch(c.block.node.id)));
-    this.columns = this.columns.flatMap((c, i) => (blocks[i] ? [{ ...c, block: blocks[i]!, ...(c.fragment ? {} : { range: fullRange(blocks[i]!) }) }] : []));
-    this.render();
-  }
+  // --- actions -------------------------------------------------------------
 
   private async onClick(event: Event) {
     const el = (event.target as Element).closest<HTMLElement>("[data-action]");
+    const cardEl = (event.target as Element).closest<HTMLElement>(".card");
     if (!el) {
-      // A click anywhere else in a card selects it.
-      const block = (event.target as Element).closest<HTMLElement>(".block");
-      if (block && !String(window.getSelection() ?? "")) this.select(Number(block.dataset.col));
+      if (cardEl && !String(window.getSelection() ?? "")) this.select(cardEl.dataset.key!);
       return;
     }
-    const { action, col, id, line, start, end } = el.dataset;
-    const c = Number(col);
-    const here = this.columns[c];
-    if (action === "open" && id) {
-      const block = await this.fetch(id);
-      if (block) this.go([...this.columns.slice(0, c + 1), { ...card(block), fromLine: Number(line) }], c + 1);
-    } else if (action === "fold") {
-      const s = Number(start);
-      const region = here.block.regions.find((r) => r.start === s && r.end === Number(end));
-      if (!region) return;
-      if (inPlace(region)) {
-        // Comments and imports: open (or close) in place. The card grows by
-        // the lines revealed, so what was showing stays showing.
-        const lines = region.end - region.start;
-        if (here.expanded.has(s)) {
-          here.expanded.delete(s);
-          here.limit = Math.max(PAGE, here.limit - lines);
-        } else {
-          here.expanded.add(s);
-          here.limit += lines;
-        }
-        return this.render();
-      }
-      if (region.node) {
-        // The body of a nested declaration: open that declaration's own card.
-        const block = await this.fetch(region.node.id);
-        if (block) this.go([...this.columns.slice(0, c + 1), { ...card(block), fromLine: s }], c + 1);
-      } else {
-        // An anonymous block: open that part of this card as a fragment.
-        const header = here.block.lines.find((l) => l.n === s)?.text.trim() ?? "";
-        this.go([...this.columns.slice(0, c + 1), { block: here.block, range: [region.start, region.end], fragment: header, fromLine: s, expanded: new Set(), limit: PAGE }], c + 1);
-      }
-    } else if (action === "reroot" && id) {
-      // The caller goes to the left of this card, with an arrow from its line
-      // (← brings back what was there before).
-      const block = await this.fetch(id);
-      if (block) this.go([card(block), { ...here, fromLine: Number(line) }, ...this.columns.slice(c + 1)], 0);
-    } else if (action === "more") {
+    const { action, id, line, start, end } = el.dataset;
+    const key = cardEl?.dataset.key ?? "";
+    const here = this.cards.get(key);
+
+    if (action === "undo") return this.popUndo();
+    if (action === "clear") {
+      if (!this.cards.size) return;
+      this.remember();
+      this.cards.clear();
+      this.arrows = [];
+      this.selected = null;
+      this.render();
+      return this.changed();
+    }
+    if (!here) return;
+    if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);
+    if (action === "fold") return this.fold(here, Number(start), Number(end));
+    if (action === "reroot" && id) return this.openCaller(key, id, Number(line), (el.dataset.kind ?? "calls") as LinkKind);
+    if (action === "close") return this.close(key);
+    if (action === "more") {
+      this.remember();
       here.limit += PAGE;
-      this.render();
-    } else if (action === "callers") {
+      return this.rerender();
+    }
+    if (action === "callers") {
       here.allCallers = true;
-      this.render();
-    } else if (action === "back") {
-      const previous = this.history.pop();
-      if (!previous) return;
-      this.columns = previous.columns;
-      this.render();
-      this.select(previous.selected);
-      this.scrollToColumn(previous.selected);
-    } else if (action === "source") {
-      const n = here?.block.node;
-      if (n?.file) this.host?.openSource(n.file, here.range[0]);
-    } else if (action === "crumb") {
-      this.go(this.columns.slice(0, c + 1), c);
+      return this.rerender();
+    }
+    if (action === "source") {
+      const n = here.block.node;
+      if (n.file) this.host?.openSource(n.file, here.range[0]);
     }
   }
+
+  // Open `id` as a card to the right of `from`, with an arrow from `line`.
+  // If it's already on the canvas, just add the arrow and go to it.
+  private async openFrom(from: string, line: number, id: string, kind: LinkKind, fragment?: { block: CodeBlock; range: [number, number]; header: string }) {
+    const key = fragment ? `${id}@${fragment.range[0]}-${fragment.range[1]}` : id;
+    const existing = this.cards.has(key);
+    const block = fragment ? fragment.block : existing ? null : await this.fetch(id);
+    if (!existing && !block) return;
+    this.remember();
+    if (!existing) {
+      const card = newCard(key, block!);
+      if (fragment) Object.assign(card, { range: fragment.range, fragment: fragment.header });
+      this.cards.set(key, card);
+    }
+    this.addArrow({ from, line, to: key, kind });
+    this.render();
+    if (!existing) this.placeBeside(key, from, line);
+    this.goTo(key);
+    this.changed();
+  }
+
+  // A caller goes to the left of the card, with an arrow from its line.
+  private async openCaller(cardKey: string, callerId: string, line: number, kind: LinkKind) {
+    const existing = this.cards.has(callerId);
+    const block = existing ? null : await this.fetch(callerId);
+    if (!existing && !block) return;
+    this.remember();
+    if (!existing) this.cards.set(callerId, newCard(callerId, block!));
+    this.addArrow({ from: callerId, line, to: cardKey, kind });
+    this.render();
+    if (!existing) this.placeLeft(callerId, cardKey, line);
+    this.goTo(callerId);
+    this.changed();
+  }
+
+  private fold(card: Card, start: number, end: number) {
+    const region = card.block.regions.find((r) => r.start === start && r.end === end);
+    if (!region) return;
+    if (inPlace(region)) {
+      // Comments and imports: open (or close) in place; the card grows by
+      // the lines revealed, so what was showing stays showing.
+      this.remember();
+      const lines = region.end - region.start;
+      if (card.expanded.has(start)) {
+        card.expanded.delete(start);
+        card.limit = Math.max(PAGE, card.limit - lines);
+      } else {
+        card.expanded.add(start);
+        card.limit += lines;
+      }
+      return this.rerender();
+    }
+    if (region.node) return this.openFrom(card.key, start, region.node.id, "calls");
+    const header = card.block.lines.find((l) => l.n === start)?.text.trim() ?? "";
+    return this.openFrom(card.key, start, card.block.node.id, "calls", { block: card.block, range: [region.start, region.end], header });
+  }
+
+  // Close a card, and every card that was only reachable through it.
+  private close(key: string) {
+    this.remember();
+    const gone = new Set([key]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const k of this.cards.keys()) {
+        if (gone.has(k)) continue;
+        const incoming = this.arrows.filter((a) => a.to === k);
+        if (incoming.length && incoming.every((a) => gone.has(a.from))) (gone.add(k), (grew = true));
+      }
+    }
+    for (const k of gone) this.cards.delete(k);
+    this.arrows = this.arrows.filter((a) => !gone.has(a.from) && !gone.has(a.to));
+    if (this.selected && gone.has(this.selected)) this.selected = null;
+    this.render();
+    this.changed();
+  }
+
+  private addArrow(a: Arrow) {
+    if (a.from === a.to) return;
+    if (!this.arrows.some((b) => b.from === a.from && b.line === a.line && b.to === a.to)) this.arrows.push(a);
+  }
+
+  // --- undo ----------------------------------------------------------------
+
+  private remember() {
+    this.undo.push(this.snapshot());
+    if (this.undo.length > UNDO_LIMIT) this.undo.shift();
+  }
+
+  private snapshot(): Snapshot {
+    return {
+      cards: [...this.cards.values()].map((c) => ({ ...c, expanded: new Set(c.expanded) })),
+      arrows: this.arrows.map((a) => ({ ...a })),
+      selected: this.selected,
+    };
+  }
+
+  private popUndo() {
+    const s = this.undo.pop();
+    if (!s) return;
+    this.cards = new Map(s.cards.map((c) => [c.key, c]));
+    this.arrows = s.arrows;
+    this.selected = s.selected;
+    this.render();
+    if (this.selected) this.select(this.selected);
+    this.changed();
+  }
+
+  // --- selection -------------------------------------------------------------
+
+  private select(key: string) {
+    this.selected = key;
+    this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", c.dataset.key === key));
+    const c = this.cards.get(key);
+    const n = c?.block.node;
+    if (!c || !n?.file) return void this.host?.highlight?.(null);
+    this.host?.highlight?.({ node: n.id, file: n.file, range: c.range, marks: [...new Set(c.block.links.map((l) => l.line))] });
+  }
+
+  private goTo(key: string) {
+    this.select(key);
+    this.cardEl(key)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  // --- saving ----------------------------------------------------------------
+
+  private changed() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => void this.save(), 400);
+  }
+
+  private async save() {
+    const data: SavedLayout = {
+      v: 1,
+      cards: [...this.cards.values()].map((c) => ({
+        key: c.key,
+        node: c.block.node.id,
+        range: c.range,
+        ...(c.fragment && { fragment: c.fragment }),
+        expanded: [...c.expanded],
+        limit: c.limit,
+        ...(c.allCallers && { allCallers: true }),
+        x: Math.round(c.x),
+        y: Math.round(c.y),
+      })),
+      arrows: this.arrows,
+      selected: this.selected,
+    };
+    await this.client?.call("saveLayout", { name: LAYOUT, data }).catch(() => {});
+  }
+
+  private async restore() {
+    const saved = await this.client?.call<SavedLayout | null>("loadLayout", { name: LAYOUT }).catch(() => null);
+    if (!saved || saved.v !== 1) return;
+    const ids = [...new Set(saved.cards.map((c) => c.node))];
+    const blocks = new Map((await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const))).filter(([, b]) => b));
+    for (const c of saved.cards) {
+      const block = blocks.get(c.node);
+      if (!block) continue; // gone since: renamed or deleted
+      this.cards.set(c.key, {
+        key: c.key,
+        block,
+        range: c.fragment ? c.range : fullRange(block),
+        ...(c.fragment && { fragment: c.fragment }),
+        expanded: new Set(c.expanded),
+        limit: c.limit,
+        ...(c.allCallers && { allCallers: true }),
+        x: c.x,
+        y: c.y,
+      });
+    }
+    this.arrows = saved.arrows.filter((a) => this.cards.has(a.from) && this.cards.has(a.to));
+    this.selected = saved.selected && this.cards.has(saved.selected) ? saved.selected : null;
+    this.render();
+    if (this.selected) this.select(this.selected);
+  }
+
+  // After re-indexing, refetch every card (lines may have moved).
+  private async reload() {
+    const ids = [...new Set([...this.cards.values()].map((c) => c.block.node.id))];
+    const blocks = new Map(await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const)));
+    for (const [key, c] of this.cards) {
+      const block = blocks.get(c.block.node.id);
+      if (!block) this.cards.delete(key);
+      else Object.assign(c, { block, ...(c.fragment ? {} : { range: fullRange(block) }) });
+    }
+    this.arrows = this.arrows.filter((a) => this.cards.has(a.from) && this.cards.has(a.to));
+    this.render();
+  }
+
+  // --- layout ----------------------------------------------------------------
+
+  private board() {
+    return this.root.querySelector<HTMLElement>(".board")!;
+  }
+
+  private cardEl(key: string) {
+    return [...this.root.querySelectorAll<HTMLElement>(".card")].find((c) => c.dataset.key === key) ?? null;
+  }
+
+  // The visible row for a line: the line itself, or the fold or cap hiding it.
+  private rowFor(cardEl: HTMLElement, line: number): HTMLElement | null {
+    let best: HTMLElement | null = null;
+    for (const row of cardEl.querySelectorAll<HTMLElement>(".ln")) if (Number(row.dataset.n) <= line) best = row;
+    return best;
+  }
+
+  // New card to the right of `from`, level with the line that opened it.
+  private placeBeside(key: string, from: string, line: number) {
+    const a = this.cards.get(from)!;
+    const aEl = this.cardEl(from)!;
+    const row = this.rowFor(aEl, line);
+    const header = this.cardEl(key)!.querySelector("header")!.offsetHeight;
+    this.settle(key, a.x + aEl.offsetWidth + GAP, a.y + (row?.offsetTop ?? 0) - header / 2);
+  }
+
+  // A caller to the left of `to`, its calling line level with `to`'s top.
+  private placeLeft(key: string, to: string, line: number) {
+    const t = this.cards.get(to)!;
+    const el = this.cardEl(key)!;
+    const row = this.rowFor(el, line);
+    this.settle(key, t.x - el.offsetWidth - GAP, t.y - (row?.offsetTop ?? 0) + 24);
+  }
+
+  // A new tree: below everything already open.
+  private placeRoot(key: string) {
+    const others = [...this.cards.values()].filter((c) => c.key !== key);
+    if (!others.length) return this.settle(key, 0, 0);
+    const bottom = Math.max(...others.map((c) => c.y + (this.cardEl(c.key)?.offsetHeight ?? 0)));
+    this.settle(key, Math.min(...others.map((c) => c.x)), bottom + 56);
+  }
+
+  // Put a card at (x, y), moving it down until it overlaps nothing.
+  private settle(key: string, x: number, y: number) {
+    const card = this.cards.get(key)!;
+    const el = this.cardEl(key)!;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    for (let i = 0; i < 200; i++) {
+      const hit = [...this.cards.values()].find((o) => {
+        if (o.key === key) return false;
+        const oe = this.cardEl(o.key);
+        if (!oe) return false;
+        return x < o.x + oe.offsetWidth + 24 && x + w + 24 > o.x && y < o.y + oe.offsetHeight + 24 && y + h + 24 > o.y;
+      });
+      if (!hit) break;
+      y = hit.y + (this.cardEl(hit.key)?.offsetHeight ?? 0) + 24;
+    }
+    card.x = x;
+    card.y = y;
+    this.position();
+  }
+
+  // Lay cards out at their positions, size the board to fit, draw arrows.
+  private position() {
+    const els = [...this.root.querySelectorAll<HTMLElement>(".card")];
+    if (!els.length) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const el of els) {
+      const c = this.cards.get(el.dataset.key!)!;
+      minX = Math.min(minX, c.x);
+      minY = Math.min(minY, c.y);
+      maxX = Math.max(maxX, c.x + el.offsetWidth);
+      maxY = Math.max(maxY, c.y + el.offsetHeight);
+    }
+    this.offset = { x: PAD - minX, y: PAD - minY };
+    for (const el of els) {
+      const c = this.cards.get(el.dataset.key!)!;
+      el.style.left = `${c.x + this.offset.x}px`;
+      el.style.top = `${c.y + this.offset.y}px`;
+    }
+    const board = this.board();
+    board.style.width = `${maxX - minX + PAD * 2 + 200}px`;
+    board.style.height = `${maxY - minY + PAD * 2 + 200}px`;
+    this.drawArrows();
+  }
+
+  private drawArrows() {
+    const svg = this.root.querySelector<SVGSVGElement>(".arrows");
+    if (!svg) return;
+    const board = this.board();
+    svg.setAttribute("width", String(board.offsetWidth));
+    svg.setAttribute("height", String(board.offsetHeight));
+    const paths: string[] = [];
+    for (const a of this.arrows) {
+      const fromEl = this.cardEl(a.from);
+      const toEl = this.cardEl(a.to);
+      if (!fromEl || !toEl) continue;
+      const row = this.rowFor(fromEl, a.line);
+      const y0 = fromEl.offsetTop + (row ? row.offsetTop + row.offsetHeight / 2 : 20);
+      const header = toEl.querySelector("header")!.offsetHeight;
+      const y1 = toEl.offsetTop + header / 2;
+      // Leave from the side facing the target.
+      const rightward = toEl.offsetLeft + toEl.offsetWidth / 2 >= fromEl.offsetLeft + fromEl.offsetWidth / 2;
+      const x0 = rightward ? fromEl.offsetLeft + fromEl.offsetWidth : fromEl.offsetLeft;
+      const x1 = rightward ? toEl.offsetLeft - 3 : toEl.offsetLeft + toEl.offsetWidth + 3;
+      const bend = Math.max(40, Math.abs(x1 - x0) / 2) * (rightward ? 1 : -1);
+      paths.push(wire(`M ${x0} ${y0} C ${x0 + bend} ${y0}, ${x1 - bend} ${y1}, ${x1} ${y1}`, a.kind));
+    }
+    svg.innerHTML = ARROW_DEFS + paths.join("");
+  }
+
+  // Drag a card by its header; arrows follow. A move can be undone.
+  private setupDrag() {
+    let drag: { key: string; el: HTMLElement; x: number; y: number; cx: number; cy: number; before: Snapshot; moved: boolean } | null = null;
+    this.root.addEventListener("pointerdown", (event) => {
+      const e = event as PointerEvent;
+      const target = e.target as Element;
+      const header = target.closest("header");
+      if (!header || target.closest("button")) return;
+      const el = header.closest<HTMLElement>(".card")!;
+      const c = this.cards.get(el.dataset.key!)!;
+      drag = { key: c.key, el, x: e.clientX, y: e.clientY, cx: c.x, cy: c.y, before: this.snapshot(), moved: false };
+      el.setPointerCapture(e.pointerId);
+    });
+    this.root.addEventListener("pointermove", (event) => {
+      const e = event as PointerEvent;
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      drag.moved = true;
+      drag.el.classList.add("dragging");
+      const c = this.cards.get(drag.key)!;
+      c.x = drag.cx + dx;
+      c.y = drag.cy + dy;
+      drag.el.style.left = `${c.x + this.offset.x}px`;
+      drag.el.style.top = `${c.y + this.offset.y}px`;
+      this.drawArrows();
+    });
+    const end = () => {
+      if (!drag) return;
+      drag.el.classList.remove("dragging");
+      if (drag.moved) {
+        this.undo.push(drag.before);
+        this.position();
+        this.changed();
+      } else this.select(drag.key);
+      drag = null;
+    };
+    this.root.addEventListener("pointerup", end);
+    this.root.addEventListener("pointercancel", end);
+  }
+
+  // --- rendering -------------------------------------------------------------
 
   private render() {
-    const row = this.root.querySelector(".row")!;
-    if (!this.columns.length) {
-      row.innerHTML = `<div class="hint">Pick a file or search for a symbol to start reading from it.</div>`;
-      this.root.querySelector(".path")!.innerHTML = "";
+    const board = this.board();
+    this.root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.disabled = !this.undo.length;
+    this.root.querySelector(".count")!.textContent = this.cards.size ? `${this.cards.size} card${this.cards.size === 1 ? "" : "s"}` : "";
+    if (!this.cards.size) {
+      board.innerHTML = `<div class="hint">Pick an entry point, a file or a symbol to start reading from it.</div>`;
+      board.style.width = board.style.height = "";
+      this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: "flow", bubbles: true, composed: true }));
       return;
     }
-    row.innerHTML = this.columns.map((c, i) => this.cardHtml(c, i)).join("") + `<svg class="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
-    this.root.querySelector(".path")!.innerHTML = this.columns
-      .map((c, i) => {
-        const name = escape(cardName(c));
-        return i === this.columns.length - 1 ? `<span class="crumb current mono">${name}</span>` : `<button class="crumb mono" data-action="crumb" data-col="${i}">${name}</button>`;
-      })
-      .join(`<span class="sep">→</span>`);
-    this.root.querySelector<HTMLButtonElement>('[data-action="back"]')!.disabled = !this.history.length;
-    this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${this.columns[0].block.node.name}`, bubbles: true, composed: true }));
-    requestAnimationFrame(() => this.layout());
+    board.innerHTML = [...this.cards.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
+    this.position();
+    const first = this.cards.values().next().value!;
+    this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${first.block.node.name}`, bubbles: true, composed: true }));
   }
 
-  private cardHtml(c: Column, i: number): string {
+  private rerender() {
+    this.render();
+    if (this.selected) this.select(this.selected);
+    this.changed();
+  }
+
+  private cardHtml(c: Card): string {
     const b = c.block;
     const n = b.node;
-    const next = this.columns[i + 1];
-    const isActive = (line: number, targetId: string) => next?.fromLine === line && !next.fragment && next.block.node.id === targetId;
+    const out = this.arrows.filter((a) => a.from === c.key);
+    const isActive = (line: number, to: string) => out.some((a) => a.line === line && a.to === to);
 
-    const header = c.fragment
-      ? `<div class="callers">in <span class="mono">${escape(blockName(b))}</span></div>`
-      : this.callersHtml(c, i);
+    const header = c.fragment ? `<div class="callers">in <span class="mono">${escape(blockName(b))}</span></div>` : this.callersHtml(c);
 
     // Folds: the outermost regions inside this card, one level deep.
     const folds = topFolds(c);
@@ -251,9 +590,7 @@ export class LodeFlow extends HTMLElement {
     for (const f of folds) for (let k = f.start + 1; k <= f.end; k++) hidden.add(k);
     const foldAt = new Map(folds.map((f) => [f.start, f]));
     // Folds opened in place keep a button on their header line to close them.
-    const openedAt = new Map(
-      b.regions.filter((r) => c.expanded.has(r.start) && inPlace(r) && r.start >= c.range[0] && r.end <= c.range[1]).map((r) => [r.start, r]),
-    );
+    const openedAt = new Map(b.regions.filter((r) => c.expanded.has(r.start) && inPlace(r) && r.start >= c.range[0] && r.end <= c.range[1]).map((r) => [r.start, r]));
 
     const linksByLine = new Map<number, BlockLink[]>();
     for (const l of b.links) linksByLine.set(l.line, [...(linksByLine.get(l.line) ?? []), l]);
@@ -261,13 +598,13 @@ export class LodeFlow extends HTMLElement {
     const html = this.host?.syntax?.(b.lines.map((l) => l.text).join("\n"), n.file ?? "") ?? b.lines.map((l) => escape(l.text));
 
     const chip = (link: BlockLink, line: number, rolled: boolean) =>
-      `<button class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-col="${i}" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${escape(chipText(link))}</button>`;
+      `<button class="chip k-${link.kind}${rolled ? " rolled" : ""}${isActive(line, link.target.id) ? " active" : ""}" data-action="open" data-id="${escape(link.target.id)}" data-line="${line}" title="${escape(link.target.id)}${rolled ? " (inside the fold)" : ""}">${escape(chipText(link))}</button>`;
 
     const rows: string[] = [];
     let shownLines = 0;
     let remaining = 0;
-    // Show up to the limit, and always as far as the line the next card came from.
-    const mustReach = next?.fromLine ?? 0;
+    // Show up to the limit, and always down to lines that arrows leave from.
+    const mustReach = Math.max(0, ...out.map((a) => a.line));
     for (let line = c.range[0]; line <= c.range[1]; line++) {
       if (hidden.has(line)) continue;
       if (shownLines >= c.limit && line > mustReach) {
@@ -280,14 +617,15 @@ export class LodeFlow extends HTMLElement {
       let foldHtml = "";
       const opened = openedAt.get(line);
       if (opened && !fold) {
-        foldHtml = `<button class="fold" data-action="fold" data-col="${i}" data-start="${opened.start}" data-end="${opened.end}" title="Fold these lines again">⌃ collapse ${opened.end - opened.start} lines</button>`;
+        foldHtml = `<button class="fold" data-action="fold" data-start="${opened.start}" data-end="${opened.end}" title="Fold these lines again">⌃ collapse ${opened.end - opened.start} lines</button>`;
       }
-      let rolled: BlockLink[] = [];
+      const rolled: BlockLink[] = [];
       if (fold) {
         const count = fold.end - fold.start;
         const small = inPlace(fold); // opens in place rather than as a card
-        const active = !small && next?.fromLine === line && (fold.node ? next.block.node.id === fold.node.id : !!next.fragment && next.range[0] === fold.start);
-        foldHtml = `<button class="fold${active ? " active" : ""}" data-action="fold" data-col="${i}" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open in the next card"}">⋯ ${count} lines${small ? "" : " →"}</button>`;
+        const foldKey = fold.node ? fold.node.id : `${n.id}@${fold.start}-${fold.end}`;
+        const active = !small && isActive(line, foldKey);
+        foldHtml = `<button class="fold${active ? " active" : ""}" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="${small ? "Show these lines here" : "Open as a card"}">⋯ ${count} lines${small ? "" : " →"}</button>`;
         // An anonymous fold carries the chips from inside it; a named one
         // doesn't (its own card shows them).
         if (!fold.node) {
@@ -295,90 +633,56 @@ export class LodeFlow extends HTMLElement {
           for (let k = fold.start + 1; k <= fold.end; k++) for (const l of linksByLine.get(k) ?? []) if (!seen.has(l.target.id)) (seen.add(l.target.id), rolled.push(l));
         }
       }
-      const more = rolled.length > MAX_ROLLED && fold
-        ? `<button class="chip rolled" data-action="fold" data-col="${i}" data-start="${fold.start}" data-end="${fold.end}" title="Open the fold to see them">+${rolled.length - MAX_ROLLED} inside</button>`
-        : "";
+      const more =
+        rolled.length > MAX_ROLLED && fold
+          ? `<button class="chip rolled" data-action="fold" data-start="${fold.start}" data-end="${fold.end}" title="Open the fold to see them">+${rolled.length - MAX_ROLLED} inside</button>`
+          : "";
       const chips = [...own.map((l) => chip(l, line, false)), ...rolled.slice(0, MAX_ROLLED).map((l) => chip(l, line, true)), more].join("");
-      const classes = ["ln", own.length || rolled.length ? "linked" : "", next?.fromLine === line ? "active" : ""].filter(Boolean).join(" ");
+      const classes = ["ln", own.length || rolled.length ? "linked" : "", out.some((a) => a.line === line) ? "active" : ""].filter(Boolean).join(" ");
       rows.push(`<div class="${classes}" data-n="${line}"><span class="no">${line}</span><span class="src">${html[line - first] || " "}${foldHtml}</span>${chips ? `<span class="chips">${chips}</span>` : ""}</div>`);
     }
-    if (remaining) {
-      rows.push(`<button class="more-lines" data-action="more" data-col="${i}">show ${Math.min(PAGE, remaining)} more · ${remaining} left</button>`);
-    }
+    if (remaining) rows.push(`<button class="more-lines" data-action="more">show ${Math.min(PAGE, remaining)} more · ${remaining} left</button>`);
 
     const span = c.range[1] - c.range[0] + 1;
-    return `<section class="block${i === 0 ? " root" : ""}${i === this.selected ? " selected" : ""}" data-col="${i}" aria-label="${escape(cardName(c))}">
+    return `<section class="card${c.key === this.selected ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
       <header>
+        <button class="close" data-action="close" aria-label="Close this card" title="Close (and what only it opened)">×</button>
         ${header}
-        <button class="title" data-action="source" data-col="${i}" title="Open the source">${titleHtml(c)}</button>
+        <button class="title" data-action="source" title="Open the source">${titleHtml(c)}</button>
         <span class="meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
       </header>
       <div class="code">${rows.join("")}</div>
     </section>`;
   }
 
-  // What leads to a card: callers, IPC senders, writers, users. The one open
-  // to its left is marked.
-  private callersHtml(c: Column, i: number): string {
+  // What leads to a card: callers, IPC senders, writers, users. Ones already
+  // on the canvas with an arrow here are marked.
+  private callersHtml(c: Card): string {
     const b = c.block;
     if (!b.callers.length) {
       if (b.outline) return "";
       return `<div class="callers">${b.trigger ? `runs on <span class="mono">${escape(b.trigger)}</span>` : "nothing in the project calls this"}</div>`;
     }
-    const left = this.columns[i - 1]?.block.node.id;
     const shown = c.allCallers ? b.callers : b.callers.slice(0, MAX_CALLERS);
     const allCalls = b.callers.every((cl) => cl.kind === "calls" && !cl.label);
     // Same name from different places (two preloads exposing one API): add the file.
     const nameCount = new Map<string, number>();
     for (const cl of b.callers) nameCount.set(cl.node.name, (nameCount.get(cl.node.name) ?? 0) + 1);
     const nameOf = (cl: CodeBlock["callers"][number]) => (nameCount.get(cl.node.name)! > 1 ? `${cl.node.name} (${cl.node.file?.split("/").pop()})` : cl.node.name);
+    const open = (id: string) => this.arrows.some((a) => a.from === id && a.to === c.key);
     return `<div class="callers${c.allCallers ? " all" : ""}">${allCalls ? "called by" : "used by"} ${shown
       .map(
         (cl) =>
-          `<button class="caller${cl.node.id === left ? " open" : ""}" data-action="reroot" data-col="${i}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(nameOf(cl))}${
+          `<button class="caller${open(cl.node.id) ? " open" : ""}" data-action="reroot" data-kind="${cl.kind}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(nameOf(cl))}${
             cl.kind === "channel" ? ` ⇢ ${escape(cl.label ?? "")}` : cl.label ? ` · ${escape(cl.label)}` : ""
           }</button>`,
       )
-      .join("")}${b.callers.length > shown.length ? `<button class="caller more" data-action="callers" data-col="${i}">+${b.callers.length - shown.length} more</button>` : ""}</div>`;
-  }
-
-  // Line each card up with the line that opened it, then draw the arrows.
-  private layout() {
-    const row = this.root.querySelector<HTMLElement>(".row");
-    const svg = this.root.querySelector<SVGSVGElement>(".arrows");
-    if (!row || !svg) return;
-    const blocks = [...row.querySelectorAll<HTMLElement>(".block")];
-    blocks.forEach((b) => (b.style.marginTop = "0px"));
-    const origin = row.getBoundingClientRect();
-    const paths: string[] = [];
-    for (let i = 1; i < blocks.length; i++) {
-      const from = this.columns[i].fromLine;
-      const source = blocks[i - 1].querySelector<HTMLElement>(`.ln[data-n="${from}"]`);
-      if (!source) continue;
-      const s = source.getBoundingClientRect();
-      const header = blocks[i].querySelector("header")!.getBoundingClientRect().height;
-      // Put the new card's title level with the source line.
-      blocks[i].style.marginTop = `${Math.max(0, s.top - origin.top - 24 - header / 2)}px`;
-      const t = blocks[i].getBoundingClientRect();
-      const anchor = source.querySelector<HTMLElement>(".chip.active, .fold.active") ?? source;
-      const a = anchor.getBoundingClientRect();
-      const x0 = blocks[i - 1].getBoundingClientRect().right - origin.left;
-      const y0 = a.top + a.height / 2 - origin.top;
-      const x1 = t.left - origin.left - 3;
-      const y1 = t.top + header / 2 - origin.top;
-      const kind = (anchor.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind;
-      paths.push(wire(`M ${x0} ${y0} C ${x0 + 48} ${y0}, ${x1 - 48} ${y1}, ${x1} ${y1}`, kind));
-    }
-    svg.innerHTML = ARROW_DEFS + paths.join("");
-  }
-
-  private scrollToColumn(i: number) {
-    requestAnimationFrame(() => this.root.querySelector(`.block[data-col="${i}"]`)?.scrollIntoView({ inline: "nearest", block: "nearest" }));
+      .join("")}${b.callers.length > shown.length ? `<button class="caller more" data-action="callers">+${b.callers.length - shown.length} more</button>` : ""}</div>`;
   }
 }
 
-function card(block: CodeBlock): Column {
-  return { block, range: fullRange(block), expanded: new Set(), limit: PAGE };
+function newCard(key: string, block: CodeBlock): Card {
+  return { key, block, range: fullRange(block), expanded: new Set(), limit: PAGE, x: 0, y: 0 };
 }
 
 function fullRange(b: CodeBlock): [number, number] {
@@ -389,7 +693,7 @@ function fullRange(b: CodeBlock): [number, number] {
 // region spanning the whole card), outermost first. Small regions never fold,
 // and nor do comment/import folds the reader opened; regions inside those
 // get their turn instead.
-function topFolds(c: Column): BlockRegion[] {
+function topFolds(c: Card): BlockRegion[] {
   const [from, to] = c.range;
   const folds: BlockRegion[] = [];
   for (const r of c.block.regions) {
@@ -418,11 +722,11 @@ function shorten(text: string, max = 36): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-function cardName(c: Column): string {
+function cardName(c: Card): string {
   return c.fragment ? `${blockName(c.block)} › ${shorten(c.fragment, 24)}` : blockName(c.block);
 }
 
-function titleHtml(c: Column): string {
+function titleHtml(c: Card): string {
   if (!c.fragment) return escape(blockName(c.block));
   return `${escape(blockName(c.block))} <span class="part">› ${escape(shorten(c.fragment))}</span>`;
 }

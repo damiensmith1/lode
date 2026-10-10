@@ -388,9 +388,23 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   annotations and summaries. Otherwise following a call led straight back
   to the caller. A registered callback with no callers says what runs it
   ("runs on addEventListener drop").
-- **Flow history.** Every move (following a chip, opening a caller, a
-  breadcrumb, starting somewhere new) is one step; ← restores exactly the
-  columns and selection before it. Expanding callers or folds isn't a step.
+- **The flow is a canvas.** Cards sit at positions, not in one chain.
+  Opening a chip, fold or caller adds a card beside its source (to the
+  right; callers to the left), level with the line, nudged down until it
+  overlaps nothing, with an arrow from that line. Opening from several
+  places branches; opening something already on the canvas adds an arrow to
+  the existing card and goes to it (no duplicates). Entry points, search and
+  the file tree add new trees below what's open. Cards drag by their header
+  and arrows follow. × closes a card and every card only reachable through
+  it. ← is undo: it reverses the last open, close, move, fold or "show
+  more".
+- **Layouts are saved with the project.** The server keeps a view's layout
+  (`loadLayout` / `saveLayout`, `layout-<name>.json` in the project's cache
+  dir, name-checked and size-capped), so it survives restarts in any host;
+  the browser's storage wouldn't (each `lode open` gets a new port, so a new
+  origin). The flow saves after every change: cards (node, range, folds,
+  position) and arrows. On load, blocks are refetched and cards whose node
+  is gone are dropped. Undo history isn't saved.
 - **Host syntax hook**: hosts may pass `syntax(text, file)` (escaped HTML per
   line) and `syntaxCss`; views put the CSS inside their shadow root. Views
   never bundle a highlighter.

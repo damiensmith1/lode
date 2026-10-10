@@ -35,7 +35,8 @@ function openView(request: ViewRequest): Tab {
   // There's one flow: asking for another reads in it instead.
   const flow = tabs.find((t) => t.view.tagName === "LODE-FLOW");
   if (request.kind === "flow" && flow) {
-    if (request.id) flow.view.setAttribute("node", request.id);
+    // Adds the node as a new tree, or goes to its card if it's already open.
+    if (request.id) void (flow.view as HTMLElement & { show(id: string): Promise<void> }).show(request.id);
     select(flow);
     return flow;
   }

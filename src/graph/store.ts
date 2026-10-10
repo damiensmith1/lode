@@ -44,6 +44,11 @@ export class GraphStore {
     this.graph = buildGraph(this.data);
   }
 
+  // Where this project's cache lives (graph, saved view layouts).
+  get cacheDir(): string {
+    return path.dirname(this.cachePath);
+  }
+
   // The project's root directory (where node locations are relative to).
   get root(): string {
     return this.session.root();

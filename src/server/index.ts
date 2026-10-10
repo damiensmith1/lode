@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -53,7 +53,28 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     !!given && given.length === token.length && timingSafeEqual(Buffer.from(given), Buffer.from(token));
   const queries = new Queries(() => store.graph, store.root);
 
+  // Views can keep a layout (e.g. the flow's cards) with the project's cache,
+  // so it survives restarts whatever host shows them.
+  const layoutPath = (name: unknown) => {
+    if (typeof name !== "string" || !/^[a-z0-9-]{1,40}$/.test(name)) throw new Error("bad layout name");
+    return path.join(store.cacheDir, `layout-${name}.json`);
+  };
+
   const methods: Record<string, (params: Record<string, unknown>) => unknown> = {
+    loadLayout: async (p) => {
+      try {
+        return JSON.parse(await readFile(layoutPath(p.name), "utf8"));
+      } catch {
+        return null;
+      }
+    },
+    saveLayout: async (p) => {
+      const text = JSON.stringify(p.data ?? null);
+      if (text.length > 2_000_000) throw new Error("layout too large");
+      await mkdir(store.cacheDir, { recursive: true });
+      await writeFile(layoutPath(p.name), text);
+      return true;
+    },
     info: () => queries.info(),
     files: () => queries.files(),
     search: (p) => queries.search(String(p.query ?? "")),
@@ -101,12 +122,12 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
       const { id } = request;
       const method = typeof request.method === "string" ? methods[request.method] : undefined;
       if (!method) return void socket.send(JSON.stringify({ id, error: `unknown method ${String(request.method)}` }));
-      try {
-        const result = method((request.params as Record<string, unknown>) ?? {});
-        socket.send(JSON.stringify({ id, result }));
-      } catch (error) {
-        socket.send(JSON.stringify({ id, error: error instanceof Error ? error.message : String(error) }));
-      }
+      Promise.resolve()
+        .then(() => method((request.params as Record<string, unknown>) ?? {}))
+        .then(
+          (result) => socket.send(JSON.stringify({ id, result })),
+          (error) => socket.send(JSON.stringify({ id, error: error instanceof Error ? error.message : String(error) })),
+        );
     });
   });
 
