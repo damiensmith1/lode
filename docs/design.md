@@ -409,12 +409,16 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   pointer at any zoom). Going to a card pans only if it's off screen. The
   toolbar shows the zoom (click for 100%), "fit" (every card in view, at
   most 100%) and "focus" (brings the selected
-  card to the left of the view at up to 100%; off when nothing is selected). The camera is saved
+  card to the left of the view at up to 100%; off when nothing is selected).
+  ⌘-click adds a card to the selection (or takes it out); a plain click
+  selects just that card. Focus, fit (with two or more selected), Delete
+  and dragging a header act on the whole selection. Ctrl-click is kept free
+  for right-click. The camera is saved
   with the layout, in canvas coordinates; a startup link to a card that's
   already on the restored canvas selects it without moving the view.
   Panning and moving cards never select text. Keys (while the flow is
   showing, not while typing in a field): Delete/Backspace closes the
-  selected card alone (unlike ×, the cards it opened stay), ⌘Z / Ctrl+Z undoes.
+  selected cards alone (unlike ×, the cards they opened stay), ⌘Z / Ctrl+Z undoes.
 - **Layouts are saved with the project.** The server keeps a view's layout
   (`loadLayout` / `saveLayout`, `layout-<name>.json` in the project's cache
   dir, name-checked and size-capped), so it survives restarts in any host;

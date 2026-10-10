@@ -123,7 +123,9 @@ export class LodeFlow extends HTMLElement {
   private readonly root = this.attachShadow({ mode: "open" });
   private cards = new Map<string, Card>();
   private arrows: Arrow[] = [];
-  private selected: string | null = null;
+  private selected: string | null = null; // the primary card (highlighted in the host)
+  private group = new Set<string>(); // every selected card, ⌘-click adds
+  private dragged = false; // the click ending a drag isn't a click
   private built = false;
   private undo: Snapshot[] = [];
   private offset = { x: PAD, y: PAD }; // board origin, so negative positions fit
@@ -174,15 +176,15 @@ export class LodeFlow extends HTMLElement {
     document.removeEventListener("keydown", this.onKey);
   }
 
-  // Delete/Backspace closes the selected card; ⌘Z / Ctrl+Z undoes. Only while
+  // Delete/Backspace closes the selected cards; ⌘Z / Ctrl+Z undoes. Only while
   // this view is showing, and never while typing somewhere.
   private onKey = (e: KeyboardEvent) => {
     if (!this.isConnected || !this.offsetParent) return;
     const typing = e.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
     if (typing) return;
-    if ((e.key === "Delete" || e.key === "Backspace") && this.selected && this.cards.has(this.selected)) {
+    if ((e.key === "Delete" || e.key === "Backspace") && this.group.size) {
       e.preventDefault();
-      this.close(this.selected, true);
+      this.close([...this.group], true);
     } else if (e.key === "z" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
       e.preventDefault();
       this.popUndo();
@@ -216,8 +218,13 @@ export class LodeFlow extends HTMLElement {
   private async onClick(event: Event) {
     const el = (event.target as Element).closest<HTMLElement>("[data-action]");
     const cardEl = (event.target as Element).closest<HTMLElement>(".card");
+    if (this.dragged) {
+      this.dragged = false;
+      if (!el) return;
+    }
     if (!el) {
-      if (cardEl && !String(window.getSelection() ?? "")) this.select(cardEl.dataset.key!);
+      const e = event as MouseEvent;
+      if (cardEl && !String(window.getSelection() ?? "")) this.select(cardEl.dataset.key!, e.metaKey);
       return;
     }
     const { action, id, line, start, end } = el.dataset;
@@ -225,8 +232,8 @@ export class LodeFlow extends HTMLElement {
     const here = this.cards.get(key);
 
     if (action === "undo") return this.popUndo();
-    if (action === "fit") return this.fit();
-    if (action === "focus") return this.selected && this.frame(this.selected);
+    if (action === "fit") return this.fit(this.group.size > 1 ? [...this.group] : [...this.cards.keys()]);
+    if (action === "focus") return this.group.size && this.frame([...this.group]);
     if (action === "zoom-reset") return this.zoomTo(1, this.viewCentre());
     if (action === "clear") {
       if (!this.cards.size) return;
@@ -234,6 +241,7 @@ export class LodeFlow extends HTMLElement {
       this.cards.clear();
       this.arrows = [];
       this.selected = null;
+      this.group.clear();
       this.render();
       return this.changed();
     }
@@ -241,7 +249,7 @@ export class LodeFlow extends HTMLElement {
     if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);
     if (action === "fold") return this.fold(here, Number(start), Number(end));
     if (action === "reroot" && id) return this.openCaller(key, id, Number(line), (el.dataset.kind ?? "calls") as LinkKind);
-    if (action === "close") return this.close(key);
+    if (action === "close") return this.close([key]);
     if (action === "more" || action === "all" || action === "less") {
       // Paging: 25 more, everything, or back 25 (to the first 25 from
       // everything).
@@ -324,10 +332,10 @@ export class LodeFlow extends HTMLElement {
 
   // Close a card, and every card that was only reachable through it.
   // × closes a card and every card only reachable through it; the Delete
-  // key (`alone`) closes just the card, leaving what it opened in place.
-  private close(key: string, alone = false) {
+  // key (`alone`) closes just the selected cards, leaving what they opened.
+  private close(keys: string[], alone = false) {
     this.remember();
-    const gone = new Set([key]);
+    const gone = new Set(keys);
     for (let grew = !alone; grew; ) {
       grew = false;
       for (const k of this.cards.keys()) {
@@ -339,6 +347,7 @@ export class LodeFlow extends HTMLElement {
     for (const k of gone) this.cards.delete(k);
     this.arrows = this.arrows.filter((a) => !gone.has(a.from) && !gone.has(a.to));
     if (this.selected && gone.has(this.selected)) this.selected = null;
+    for (const k of gone) this.group.delete(k);
     this.render();
     this.changed();
   }
@@ -369,6 +378,7 @@ export class LodeFlow extends HTMLElement {
     this.cards = new Map(s.cards.map((c) => [c.key, c]));
     this.arrows = s.arrows;
     this.selected = s.selected;
+    this.group.clear();
     this.render();
     if (this.selected) this.select(this.selected);
     this.changed();
@@ -376,12 +386,24 @@ export class LodeFlow extends HTMLElement {
 
   // --- selection -------------------------------------------------------------
 
-  private select(key: string) {
+  // Select one card (the group becomes just it), or with `add` (⌘-click)
+  // add it to the group, or take it out if it's already in.
+  private select(key: string, add = false) {
+    if (!add) this.group = new Set([key]);
+    else if (this.group.has(key)) {
+      this.group.delete(key);
+      if (this.selected === key) this.selected = [...this.group].pop() ?? null;
+      return this.showSelection();
+    } else this.group.add(key);
     this.selected = key;
+    this.showSelection();
+  }
+
+  private showSelection() {
     this.root.querySelector<HTMLButtonElement>('[data-action="fit"]')!.disabled = !this.cards.size;
-    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = false;
-    this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", c.dataset.key === key));
-    const c = this.cards.get(key);
+    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
+    this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", this.group.has(c.dataset.key!)));
+    const c = this.selected ? this.cards.get(this.selected) : undefined;
     const n = c?.block.node;
     if (!c || !n?.file) return void this.host?.highlight?.(null);
     this.host?.highlight?.({ node: n.id, file: n.file, range: c.range, marks: [...new Set(c.block.links.map((l) => l.line))] });
@@ -444,14 +466,23 @@ export class LodeFlow extends HTMLElement {
   // Bring a card to the left of the view at a readable zoom: no closer than
   // 100%, further out only if it wouldn't fit otherwise. Vertically centred
   // when it fits, else from its top.
-  // Zoom and pan so every card is in view (at most 100%).
-  private fit() {
-    const els = [...this.root.querySelectorAll<HTMLElement>(".card")];
-    if (!els.length) return;
-    const minX = Math.min(...els.map((e) => e.offsetLeft));
-    const minY = Math.min(...els.map((e) => e.offsetTop));
-    const maxX = Math.max(...els.map((e) => e.offsetLeft + e.offsetWidth));
-    const maxY = Math.max(...els.map((e) => e.offsetTop + e.offsetHeight));
+  // The board rectangle around some cards.
+  private bounds(keys: string[]) {
+    const els = keys.map((k) => this.cardEl(k)).filter((e): e is HTMLElement => !!e);
+    if (!els.length) return null;
+    return {
+      minX: Math.min(...els.map((e) => e.offsetLeft)),
+      minY: Math.min(...els.map((e) => e.offsetTop)),
+      maxX: Math.max(...els.map((e) => e.offsetLeft + e.offsetWidth)),
+      maxY: Math.max(...els.map((e) => e.offsetTop + e.offsetHeight)),
+    };
+  }
+
+  // Zoom and pan so the cards are in view, centred (at most 100%).
+  private fit(keys: string[]) {
+    const b = this.bounds(keys);
+    if (!b) return;
+    const { minX, minY, maxX, maxY } = b;
     const view = this.canvas().getBoundingClientRect();
     const k = Math.max(ZOOM.min, Math.min(1, (view.width - 48) / (maxX - minX), (view.height - 48) / (maxY - minY)));
     this.camera = { k, x: (view.width - (maxX - minX) * k) / 2 - minX * k, y: (view.height - (maxY - minY) * k) / 2 - minY * k };
@@ -459,15 +490,15 @@ export class LodeFlow extends HTMLElement {
     this.changed();
   }
 
-  private frame(key: string) {
-    const el = this.cardEl(key);
-    if (!el) return;
+  private frame(keys: string[]) {
+    const b = this.bounds(keys);
+    if (!b) return;
     const view = this.canvas().getBoundingClientRect();
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
     const k = Math.max(ZOOM.min, Math.min(1, (view.width - 96) / w, (view.height - 48) / h));
     const y = h * k < view.height - 48 ? (view.height - h * k) / 2 : 24;
-    this.camera = { k, x: 48 - el.offsetLeft * k, y: y - el.offsetTop * k };
+    this.camera = { k, x: 48 - b.minX * k, y: y - b.minY * k };
     this.applyCamera();
     this.changed();
   }
@@ -528,6 +559,7 @@ export class LodeFlow extends HTMLElement {
     }
     this.arrows = saved.arrows.filter((a) => this.cards.has(a.from) && this.cards.has(a.to));
     this.selected = saved.selected && this.cards.has(saved.selected) ? saved.selected : null;
+    this.group.clear();
     this.render();
     if (saved.camera) {
       const { x, y, k } = saved.camera;
@@ -673,12 +705,14 @@ export class LodeFlow extends HTMLElement {
 
   // Drag a card by its header; arrows follow. A move can be undone.
   private setupDrag() {
-    let drag: { key: string; el: HTMLElement; x: number; y: number; cx: number; cy: number; before: Snapshot; moved: boolean } | null = null;
+    // A drag moves the card, or the whole selection when the card is in it.
+    let drag: { key: string; x: number; y: number; starts: { c: Card; el: HTMLElement; x: number; y: number }[]; before: Snapshot; moved: boolean } | null = null;
     let pan: { x: number; y: number; cam: Camera } | null = null;
     const canvas = this.canvas();
     this.root.addEventListener("pointerdown", (event) => {
       const e = event as PointerEvent;
       const target = e.target as Element;
+      this.dragged = false;
       // Empty canvas: drag to move around.
       if (!target.closest(".card") && target.closest(".canvas")) {
         e.preventDefault(); // no text selection while panning
@@ -692,9 +726,15 @@ export class LodeFlow extends HTMLElement {
       if (!header || target.closest("button")) return;
       e.preventDefault(); // no text selection while moving a card
       const el = header.closest<HTMLElement>(".card")!;
-      const c = this.cards.get(el.dataset.key!)!;
+      const key = el.dataset.key!;
+      const keys = this.group.has(key) ? [...this.group] : [key];
+      const starts = keys.flatMap((k) => {
+        const c = this.cards.get(k);
+        const cel = this.cardEl(k);
+        return c && cel ? [{ c, el: cel, x: c.x, y: c.y }] : [];
+      });
       canvas.classList.add("moving");
-      drag = { key: c.key, el, x: e.clientX, y: e.clientY, cx: c.x, cy: c.y, before: this.snapshot(), moved: false };
+      drag = { key, x: e.clientX, y: e.clientY, starts, before: this.snapshot(), moved: false };
       el.setPointerCapture(e.pointerId);
     });
     this.root.addEventListener("pointermove", (event) => {
@@ -709,12 +749,13 @@ export class LodeFlow extends HTMLElement {
       const dy = (e.clientY - drag.y) / this.camera.k;
       if (!drag.moved && Math.hypot(dx, dy) < 4) return;
       drag.moved = true;
-      drag.el.classList.add("dragging");
-      const c = this.cards.get(drag.key)!;
-      c.x = drag.cx + dx;
-      c.y = drag.cy + dy;
-      drag.el.style.left = `${c.x + this.offset.x}px`;
-      drag.el.style.top = `${c.y + this.offset.y}px`;
+      for (const s of drag.starts) {
+        s.el.classList.add("dragging");
+        s.c.x = s.x + dx;
+        s.c.y = s.y + dy;
+        s.el.style.left = `${s.c.x + this.offset.x}px`;
+        s.el.style.top = `${s.c.y + this.offset.y}px`;
+      }
       this.drawArrows();
     });
     const end = () => {
@@ -725,12 +766,14 @@ export class LodeFlow extends HTMLElement {
       }
       if (!drag) return;
       canvas.classList.remove("moving");
-      drag.el.classList.remove("dragging");
+      for (const s of drag.starts) s.el.classList.remove("dragging");
       if (drag.moved) {
+        this.dragged = true;
         this.undo.push(drag.before);
         this.position();
         this.changed();
-      } else this.select(drag.key);
+      }
+      // Without a move, the click that follows selects the card.
       drag = null;
     };
     this.root.addEventListener("pointerup", end);
@@ -762,7 +805,7 @@ export class LodeFlow extends HTMLElement {
   private render() {
     const board = this.board();
     this.root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.disabled = !this.undo.length;
-    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.selected || !this.cards.has(this.selected);
+    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
     this.root.querySelector(".count")!.textContent = this.cards.size ? `${this.cards.size} card${this.cards.size === 1 ? "" : "s"}` : "";
     if (!this.cards.size) {
       board.innerHTML = `<div class="hint">Pick an entry point, a file or a symbol to start reading from it.</div>`;
@@ -857,7 +900,7 @@ export class LodeFlow extends HTMLElement {
     if (paging) rows.push(`<div class="paging">${paging}</div>`);
 
     const span = c.range[1] - c.range[0] + 1;
-    return `<section class="card${c.key === this.selected ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
+    return `<section class="card${this.group.has(c.key) ? " selected" : ""}" data-key="${escape(c.key)}" aria-label="${escape(cardName(c))}">
       <header>
         <button class="close" data-action="close" aria-label="Close this card" title="Close (and what only it opened)">×</button>
         ${header}
