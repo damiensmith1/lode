@@ -395,7 +395,10 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   places branches; opening something already on the canvas adds an arrow to
   the existing card and goes to it (no duplicates). Entry points, search and
   the file tree add new trees below what's open. Cards drag by their header
-  and arrows follow. × closes a card and every card only reachable through
+  and arrows follow, routed by where the cards sit: side to side (into the
+  target's header) when it's clearly left or right, otherwise out of the
+  line's side facing it and into its top (or bottom, when it's above), so an
+  arrow never doubles back across a card. × closes a card and every card only reachable through
   it. ← is undo: it reverses the last open, close, move, fold or "show
   more".
 - **Camera.** The canvas is a viewport over a transformed board: the wheel

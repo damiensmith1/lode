@@ -620,13 +620,7 @@ export class LodeFlow extends HTMLElement {
       const row = this.rowFor(fromEl, a.line);
       const y0 = fromEl.offsetTop + (row ? row.offsetTop + row.offsetHeight / 2 : 20);
       const header = toEl.querySelector("header")!.offsetHeight;
-      const y1 = toEl.offsetTop + header / 2;
-      // Leave from the side facing the target.
-      const rightward = toEl.offsetLeft + toEl.offsetWidth / 2 >= fromEl.offsetLeft + fromEl.offsetWidth / 2;
-      const x0 = rightward ? fromEl.offsetLeft + fromEl.offsetWidth : fromEl.offsetLeft;
-      const x1 = rightward ? toEl.offsetLeft - 3 : toEl.offsetLeft + toEl.offsetWidth + 3;
-      const bend = Math.max(40, Math.abs(x1 - x0) / 2) * (rightward ? 1 : -1);
-      paths.push(wire(`M ${x0} ${y0} C ${x0 + bend} ${y0}, ${x1 - bend} ${y1}, ${x1} ${y1}`, a.kind));
+      paths.push(wire(route(rect(fromEl), y0, rect(toEl), header), a.kind));
     }
     svg.innerHTML = ARROW_DEFS + paths.join("");
   }
@@ -837,6 +831,41 @@ export class LodeFlow extends HTMLElement {
       )
       .join("")}${b.callers.length > shown.length ? `<button class="caller more" data-action="callers">+${b.callers.length - shown.length} more</button>` : ""}</div>`;
   }
+}
+
+interface Box {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+function rect(el: HTMLElement): Box {
+  return { left: el.offsetLeft, right: el.offsetLeft + el.offsetWidth, top: el.offsetTop, bottom: el.offsetTop + el.offsetHeight };
+}
+
+// An arrow from a line (at height y0) in card `s` to card `t`, by where they
+// sit: side to side when `t` is clearly left or right (entering by its
+// header), otherwise out of the side facing `t` and into its top (or bottom,
+// when it's above), so it never doubles back across a card.
+function route(s: Box, y0: number, t: Box, header: number): string {
+  const GAP = 16;
+  if (t.left >= s.right + GAP || t.right <= s.left - GAP) {
+    const rightward = t.left >= s.right + GAP;
+    const x0 = rightward ? s.right : s.left;
+    const x1 = rightward ? t.left - 3 : t.right + 3;
+    const y1 = t.top + header / 2;
+    const bend = Math.max(40, Math.abs(x1 - x0) / 2) * (rightward ? 1 : -1);
+    return `M ${x0} ${y0} C ${x0 + bend} ${y0}, ${x1 - bend} ${y1}, ${x1} ${y1}`;
+  }
+  const exitRight = (t.left + t.right) / 2 >= (s.left + s.right) / 2;
+  const x0 = exitRight ? s.right : s.left;
+  const out = exitRight ? 56 : -56;
+  const below = t.top >= y0;
+  const x1 = Math.min(t.right - 28, Math.max(t.left + 28, x0 + out));
+  const y1 = below ? t.top - 3 : t.bottom + 3;
+  const pull = Math.max(48, Math.abs(y1 - y0) / 2) * (below ? -1 : 1);
+  return `M ${x0} ${y0} C ${x0 + out * 1.5} ${y0}, ${x1} ${y1 + pull}, ${x1} ${y1}`;
 }
 
 function newCard(key: string, block: CodeBlock): Card {
