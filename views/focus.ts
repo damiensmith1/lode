@@ -6,16 +6,16 @@ import { ARROW_DEFS, BASE_CSS, escape, wire } from "./theme.js";
 const COLLAPSE_AFTER = 3; // links of one kind shown before "+N more"
 
 const CSS = `
-.stage { position: relative; padding: 28px 40px 48px; display: flex; flex-direction: column; align-items: center; gap: 64px; min-width: 620px; }
+.stage { position: relative; padding: 28px 24px 48px; display: flex; flex-direction: column; align-items: center; gap: 56px; min-width: 320px; }
 .band { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 980px; }
 .band-label { font-size: 11px; color: var(--lode-faint); }
 .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-.card { display: flex; flex-direction: column; gap: 1px; min-width: 150px; max-width: 230px; padding: 7px 11px; border: 1px dashed var(--lode-outline); border-radius: 8px; background: var(--lode-bg); }
+.card { display: flex; flex-direction: column; gap: 1px; min-width: 120px; max-width: 220px; padding: 7px 11px; border: 1px dashed var(--lode-outline); border-radius: 8px; background: var(--lode-bg); }
 .card:hover { border-style: solid; border-color: var(--lode-fg); }
 .card .name { font-family: var(--lode-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .sub { font-size: 11px; color: var(--lode-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card.more { justify-content: center; color: var(--lode-muted); font-size: 12px; }
-.focus { position: relative; z-index: 1; min-width: 340px; max-width: 460px; background: var(--lode-surface); border: 1px solid var(--lode-fg); border-radius: 10px; padding: 14px 64px 14px 16px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
+.focus { position: relative; z-index: 1; width: 100%; max-width: 460px; background: var(--lode-surface); border: 1px solid var(--lode-fg); border-radius: 10px; padding: 14px 64px 14px 16px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
 .focus h2 { margin: 0; font: 600 14px var(--lode-mono); }
 .focus .meta { font-size: 11.5px; color: var(--lode-faint); margin-top: 2px; }
 .steps { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -115,6 +115,7 @@ export class LodeFocus extends HTMLElement {
     const { action, id, file, line, key, parent } = el.dataset;
     if (action === "go" && id) {
       if ((event as MouseEvent).metaKey || (event as MouseEvent).ctrlKey) this.host?.openView({ kind: "focus", id });
+      else if (this.host?.reveal) this.host.reveal(id, this.nodeId);
       else this.go(id);
     } else if (action === "back") {
       const previous = this.history.pop();

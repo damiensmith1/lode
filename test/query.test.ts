@@ -23,6 +23,11 @@ describe("queries", () => {
     expect(f.hidden.libraryCalls).toBe(1); // Date.now()
   });
 
+  it("focus on a type shows what uses it", () => {
+    const f = q.focus("src/main.ts#Note")!;
+    expect(f.down).toContainEqual(expect.objectContaining({ label: "uses it", node: expect.objectContaining({ name: "saveNote" }) }));
+  });
+
   it("focus: unknown nodes return null", () => {
     expect(q.focus("nope")).toBeNull();
   });

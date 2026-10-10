@@ -16,9 +16,11 @@ interface Column {
 const CSS = `
 :host { display: flex; flex-direction: column; overflow: hidden; }
 .canvas { position: relative; flex: 1; min-height: 0; overflow: auto; }
-.row { position: relative; display: flex; align-items: flex-start; gap: 96px; padding: 24px 32px 120px; width: max-content; }
-.block { position: relative; z-index: 1; width: 720px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
+.row { position: relative; display: flex; align-items: flex-start; gap: 72px; padding: 24px 32px 120px; width: max-content; }
+.block { position: relative; z-index: 1; width: 600px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
 .block.root { border-color: var(--lode-fg); }
+.block.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 1px 2px rgba(23,22,20,.04); }
+.ln.hovered { background: rgba(226, 99, 47, .16); box-shadow: inset 2px 0 0 var(--lode-channel); }
 .block header { padding: 10px 14px 8px; border-bottom: 1px solid var(--lode-border); display: flex; flex-direction: column; gap: 3px; }
 .title { font: 600 13px var(--lode-mono); }
 .title:hover { text-decoration: underline; }
@@ -32,7 +34,7 @@ const CSS = `
 .ln .src { white-space: pre; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ln.linked .no { color: var(--lode-local); }
 .ln.active { background: rgba(47, 95, 168, .08); box-shadow: inset 2px 0 0 var(--lode-local); }
-.chips { flex: none; width: 190px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; }
+.chips { flex: none; width: 150px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; }
 .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .chip { font: 10.5px/18px var(--lode-mono); padding: 0 6px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
 .chip:hover, .chip.active { border-color: currentColor; }
@@ -56,6 +58,7 @@ export class LodeFlow extends HTMLElement {
 
   private readonly root = this.attachShadow({ mode: "open" });
   private columns: Column[] = [];
+  private selected = 0; // the block the host's summary (focus) follows
   private rootHistory: Column[][] = [];
   private unsubscribe?: () => void;
   private resize = new ResizeObserver(() => this.layout());
@@ -97,6 +100,60 @@ export class LodeFlow extends HTMLElement {
       this.columns = [{ block, unfolded: new Set(), showAll: false }];
     }
     this.render();
+    this.select(0);
+  }
+
+  // Select a block: the host's summary view follows it.
+  private select(i: number) {
+    this.selected = Math.max(0, Math.min(i, this.columns.length - 1));
+    this.root.querySelectorAll(".block").forEach((b) => b.classList.toggle("selected", Number((b as HTMLElement).dataset.col) === this.selected));
+    const b = this.columns[this.selected]?.block;
+    const n = b?.node;
+    if (!n?.file || !n.line) return void this.host?.highlight?.(null);
+    this.host?.highlight?.({ node: n.id, file: n.file, range: [n.line, n.endLine ?? n.line], marks: [...new Set(b.links.map((l) => l.line))] });
+  }
+
+  // Show `id`, reached from the open block `from`: as the next column from
+  // the line that leads to it, as a new root when it calls the first block,
+  // by going back to it if it's already open, or else as a fresh root.
+  async reveal(id: string, from: string) {
+    const existing = this.columns.findIndex((c) => c.block.node.id === id);
+    if (existing >= 0) {
+      this.columns = this.columns.slice(0, Math.max(existing + 1, this.columns.findIndex((c) => c.block.node.id === from) + 1));
+      this.render();
+      this.select(existing);
+      return this.scrollToColumn(existing);
+    }
+    const block = await this.fetch(id);
+    if (!block) return;
+    const col = this.columns.findIndex((c) => c.block.node.id === from);
+    const link = col >= 0 ? this.columns[col].block.links.find((l) => l.target.id === id) : undefined;
+    const caller = col === 0 ? this.columns[0].block.callers.find((c) => c.node.id === id) : undefined;
+    if (link) {
+      this.columns = [...this.columns.slice(0, col + 1), { block, fromLine: link.line, unfolded: new Set(), showAll: false }];
+      this.render();
+      this.select(this.columns.length - 1);
+    } else if (caller) {
+      this.rootHistory.push(this.columns);
+      this.columns = [{ block, unfolded: new Set(), showAll: false }, { ...this.columns[0], fromLine: caller.line }, ...this.columns.slice(1)];
+      this.render();
+      this.select(0);
+    } else {
+      if (this.columns.length) this.rootHistory.push(this.columns);
+      this.columns = [{ block, unfolded: new Set(), showAll: false }];
+      this.render();
+      this.select(0);
+    }
+    this.scrollToColumn(this.selected);
+  }
+
+  // Point at a line in an open block (e.g. while the summary is hovered).
+  // Marked only; nothing scrolls.
+  mark(id: string, line?: number) {
+    this.root.querySelectorAll(".ln.hovered").forEach((r) => r.classList.remove("hovered"));
+    if (!line) return;
+    const col = this.columns.findIndex((c) => c.block.node.id === id);
+    this.root.querySelector(`.block[data-col="${col}"] .ln[data-n="${line}"]`)?.classList.add("hovered");
   }
 
   // After re-indexing, refetch every open block (lines may have moved).
@@ -108,7 +165,12 @@ export class LodeFlow extends HTMLElement {
 
   private async onClick(event: Event) {
     const el = (event.target as Element).closest<HTMLElement>("[data-action]");
-    if (!el) return;
+    if (!el) {
+      // A click anywhere else in a block selects it.
+      const block = (event.target as Element).closest<HTMLElement>(".block");
+      if (block && !String(window.getSelection() ?? "")) this.select(Number(block.dataset.col));
+      return;
+    }
     const { action, col, id, line, gap } = el.dataset;
     const c = Number(col);
     if (action === "open" && id) {
@@ -116,6 +178,7 @@ export class LodeFlow extends HTMLElement {
       if (!block) return;
       this.columns = [...this.columns.slice(0, c + 1), { block, fromLine: Number(line), unfolded: new Set(), showAll: false }];
       this.render();
+      this.select(this.columns.length - 1);
       this.scrollToColumn(this.columns.length - 1);
     } else if (action === "reroot" && id) {
       const block = await this.fetch(id);
@@ -124,6 +187,7 @@ export class LodeFlow extends HTMLElement {
       const [first, ...rest] = this.columns;
       this.columns = [{ block, unfolded: new Set(), showAll: false }, { ...first, fromLine: Number(line) }, ...rest];
       this.render();
+      this.select(0);
       this.scrollToColumn(0);
     } else if (action === "unfold") {
       this.columns[c].unfolded.add(Number(gap));
@@ -135,12 +199,14 @@ export class LodeFlow extends HTMLElement {
       if (this.columns.length > 1) this.columns = this.columns.slice(0, -1);
       else if (this.rootHistory.length) this.columns = this.rootHistory.pop()!;
       this.render();
+      this.select(this.columns.length - 1);
     } else if (action === "source") {
       const b = this.columns[c]?.block.node;
       if (b?.file) this.host?.openSource(b.file, b.line);
     } else if (action === "crumb") {
       this.columns = this.columns.slice(0, c + 1);
       this.render();
+      this.select(c);
       this.scrollToColumn(c);
     }
   }
@@ -208,7 +274,7 @@ export class LodeFlow extends HTMLElement {
     flushFold((b.lines.at(-1)?.n ?? 0) + 1);
 
     const long = b.lines.length > SHORT_BODY && !b.outline;
-    return `<section class="block${i === 0 ? " root" : ""}" data-col="${i}" aria-label="${escape(n.name)}">
+    return `<section class="block${i === 0 ? " root" : ""}${i === this.selected ? " selected" : ""}" data-col="${i}" aria-label="${escape(n.name)}">
       <header>
         ${callers}
         <button class="title" data-action="source" data-col="${i}" title="Open in the editor">${escape(blockName(b))}</button>

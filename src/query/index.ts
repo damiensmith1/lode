@@ -112,6 +112,10 @@ export class Queries {
       if (e.kind === "calls") up.add(e.from, "calls", undefined, e.args?.join(", "));
       else if (e.kind === "flows" && e.via) up.add(e.from, "channel", e.via.key, e.type);
       else if (e.kind === "references" && e.access === "read" && g.node(e.to)?.kind === "callable") up.add(e.from, "calls", "passes it");
+      // A type is about who uses it; a value about who writes and reads it.
+      else if (e.kind === "references" && e.access === "type" && node.kind === "type") down.add(e.from, "calls", "uses it");
+      else if (e.kind === "references" && node.kind === "value" && e.access === "write") up.add(e.from, "state", "writes it", e.type);
+      else if (e.kind === "references" && node.kind === "value" && e.access === "read") down.add(e.from, "state", "reads it", e.type);
     }
     for (const e of g.neighbors(id, "down")) {
       if (e.kind === "calls" && !g.node(e.to)?.external) down.add(e.to, "calls", undefined, e.returns);

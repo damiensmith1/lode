@@ -13,6 +13,10 @@ export interface LodeHost {
   syntax?(text: string, file: string): string[];
   // CSS for the classes `syntax` emits; views put it inside their shadow root.
   syntaxCss?: string;
+  // Optional: show a node in the host's main reading view (e.g. open it as
+  // the next flow column), reached from `from`. Views that summarise (focus)
+  // use it instead of navigating themselves, when the host offers it.
+  reveal?(id: string, from: string): void;
 }
 
 export interface SourceHighlight {
