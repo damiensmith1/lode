@@ -328,12 +328,15 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   implement. `highlight` reports the lines a view is about (the focused
   node's range, its step lines, the line under the pointer); the host
   decides how to show them, which in an IDE maps to editor decorations.
-- **Code pane → flow, by clicks only.** Following the cursor or scroll
-  automatically moved things around too much, so nothing moves on its own.
-  Clicking a line (not selecting text), a ◇ in the gutter or an inline note
-  reads that code in the flow (`symbolAt` finds the innermost declaration).
-  Views can report `highlight` (the flow does, for its selected block); a
-  host with a visible editor can show it as decorations.
+- **No separate code pane.** It was dropped: the flow reads code better, and
+  the one thing the pane did that the flow didn't, reading a file's
+  top-level code, is now how a file block works. A file opens in the flow as
+  the whole file: top-level code in full (imports folded when long), each
+  function or class folded to its first line with a chip to open it, any
+  fold expandable, top-level calls / IPC / state writes as chips. The
+  `source` query and annotations stay in the core for IDE adapters, where
+  the host's own editor is the code pane. Nothing moves on its own; only
+  clicks navigate.
 - Declarations record their **end line** (`loc.endLine`) for ranges.
 - **Flow view: code as nodes** (`<lode-flow>`, the app's first tab). The
   graph views showed structure but didn't make code readable: a box saying
@@ -383,8 +386,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   says how the runtimes talk (`preload ⇄ renderer · 460 calls`). Filter by
   text; clicking an entry starts the flow there. Next idea: a model-written
   one-line summary per entry.
-- **Standalone host** (`hosts/app`): entry points and flow tabs; a code pane
-  that appears once a file is opened, with syntax colours
+- **Standalone host** (`hosts/app`): entry points and flow tabs, a file tree
+  (a file opens in the flow), syntax colours
   (highlight.js, Clance's palette; a host concern, so not in views) and ◇
   annotations,
   lode views in tabs on the right, file tree, symbol search, deep links

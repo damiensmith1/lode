@@ -261,7 +261,7 @@ export class LodeFlow extends HTMLElement {
       <header>
         ${callers}
         <button class="title" data-action="source" data-col="${i}" title="Open in the editor">${escape(blockName(b))}</button>
-        <span class="meta">${escape(n.file ?? "")}:${n.line ?? ""}${n.runtime ? ` · ${escape(n.runtime)}` : ""}${b.outline ? ` · ${b.lines.length} members` : ` · ${b.lines.length} lines`}${
+        <span class="meta">${escape(n.file ?? "")}:${n.line ?? ""}${n.runtime ? ` · ${escape(n.runtime)}` : ""}${b.outline && !b.folds ? ` · ${b.lines.length} members` : ` · ${b.lines.length} lines`}${
           long ? ` · <button class="crumb" data-action="all" data-col="${i}">${c.showAll ? "fold" : "show all"}</button>` : ""
         }</span>
       </header>
@@ -309,6 +309,14 @@ export class LodeFlow extends HTMLElement {
 function visibleLines(c: Column, linksByLine: Map<number, BlockLink[]>): Set<number> {
   const lines = c.block.lines;
   const shown = new Set<number>();
+  const folds = c.block.folds;
+  if (folds) {
+    // A file: everything except folded ranges the reader hasn't opened.
+    const hidden = new Set<number>();
+    for (const [a, b] of folds) if (!c.unfolded.has(a)) for (let n = a; n <= b; n++) hidden.add(n);
+    for (const l of lines) if (!hidden.has(l.n)) shown.add(l.n);
+    return shown;
+  }
   if (c.block.outline || c.showAll) {
     for (const l of lines) shown.add(l.n);
     return shown;

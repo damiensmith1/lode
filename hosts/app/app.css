@@ -36,23 +36,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #2f5fa8; outline-
 .rt-main { background: #8a3b6b; } .rt-preload { background: #e2632f; } .rt-renderer { background: #2f5fa8; } .rt-shared { background: #75726b; }
 
 body.no-tree #tree { display: none; }
-body.flow-mode .code, body:not(.has-file) .code { display: none; } /* the code pane appears once a file is opened */
-.code { flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
-.pane-head { padding: 9px 14px; border-bottom: 1px solid var(--border); font: 12px var(--mono); }
-#code { flex: 1; overflow: auto; padding: 8px 0 40px; font: 12px/21px var(--mono); }
-.ln { display: flex; padding-right: 12px; }
-.ln { cursor: pointer; }
-.ln:hover .no { color: var(--fg); }
-.ln .no { flex: none; width: 52px; padding-right: 8px; text-align: right; color: #a3a09a; }
-.ln .gut { flex: none; width: 18px; text-align: center; }
-.ln .gut button { color: var(--signal); font-size: 11px; }
-.ln .src { white-space: pre; }
-.ln .notes { margin-left: auto; padding-left: 16px; display: flex; gap: 10px; white-space: nowrap; }
-.note { font-size: 10.5px; }
-.note:hover { text-decoration: underline; }
-.note.k-channel { color: #a8461b; } .note.k-state { color: #8a3b6b; } .note.k-local { color: #2f5fa8; }
-
-.views { flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; }
+.views { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #tabs { display: flex; overflow-x: auto; background: var(--side); border-bottom: 1px solid var(--border); font-size: 12.5px; }
 .tab { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 14px; border-right: 1px solid var(--border); color: var(--faint); white-space: nowrap; }
 .tab[aria-selected="true"] { background: var(--bg); color: var(--fg); }

@@ -287,6 +287,44 @@ export class Queries {
       callers.push({ node: this.ref(from), line: e.loc.line, ...lead });
     }
 
+    // A file reads as a file: its top-level code in full, each member folded
+    // to its first line (with a chip to open it), a long import block folded.
+    if (node.id === node.loc.file) {
+      const members = g.childrenOf(id).filter((c) => c.loc && c.kind !== "block");
+      const folds: [number, number][] = [];
+      const links: BlockLink[] = [];
+      const seen = new Set<string>();
+      const add = (l: BlockLink) => {
+        const key = `${l.line}|${l.target.id}|${l.kind}`;
+        if (!seen.has(key)) (seen.add(key), links.push(l));
+      };
+      for (const c of members) {
+        const start = c.loc!.line;
+        const end = c.loc!.endLine ?? start;
+        if (end > start) folds.push([start + 1, end]);
+        add({ line: start, kind: "calls", target: this.ref(c), label: "open" });
+      }
+      const imports = leadingImports(source);
+      if (imports >= 4) folds.push([1, imports]);
+      // What the top-level code itself does.
+      for (const e of g.neighbors(id, "down")) {
+        const to = g.node(e.to);
+        if (!to || to.external || !e.loc || e.loc.file !== node.loc.file) continue;
+        if (e.kind === "calls") add({ line: e.loc.line, kind: "calls", target: this.ref(to) });
+        else if (e.kind === "flows" && e.via && !e.reply) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
+        else if (e.kind === "references" && e.access === "write" && to.kind === "value") add({ line: e.loc.line, kind: "state", target: this.ref(to), label: "writes" });
+      }
+      while (source.length > 1 && source[source.length - 1].trim() === "") source.pop();
+      return {
+        node: this.ref(node),
+        outline: true,
+        lines: source.map((text, i) => ({ n: i + 1, text })),
+        links: links.sort((a, b) => a.line - b.line),
+        callers,
+        folds: folds.sort((a, b) => a[0] - b[0]),
+      };
+    }
+
     if (node.kind === "container") {
       const members = g.childrenOf(id).filter((c) => c.loc && c.kind !== "block");
       return {
@@ -379,6 +417,24 @@ export class Queries {
     for (const e of this.graph().neighbors(value, "up", ["references"])) if (e.access === access) nodes.add(e.from);
     return [...nodes];
   }
+}
+
+// How many lines at the top of a file are imports (including multi-line
+// `import {` … `} from "…"` and blank lines between them).
+function leadingImports(lines: string[]): number {
+  let last = 0;
+  let open = false;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (open) {
+      if (/\bfrom\s+["']/.test(t) || t.endsWith(";")) open = false;
+      last = i + 1;
+    } else if (/^import\b/.test(t) || /^(const|let|var)\s.*=\s*require\(/.test(t)) {
+      open = !/\bfrom\s+["']|["'];?$/.test(t);
+      last = i + 1;
+    } else if (t !== "" && !t.startsWith("//")) break;
+  }
+  return last;
 }
 
 function rank(order: string[], value: string | null): number {

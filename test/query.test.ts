@@ -142,10 +142,13 @@ describe("block query", () => {
     expect(q.block("src/main.ts#registerIpc.on:notes:clear")!.trigger).toBe("on notes:clear");
   });
 
-  it("gives files as an outline of their members", () => {
+  it("gives a file as the whole file, member bodies folded, with top-level chips", () => {
     const b = q.block("src/main.ts")!;
     expect(b.outline).toBe(true);
-    expect(b.links.map((l) => l.target.name)).toEqual(expect.arrayContaining(["saveNote", "registerIpc"]));
+    expect(b.lines.map((l) => l.n)).toEqual(Array.from({ length: 19 }, (_, i) => i + 1));
+    expect(b.links.filter((l) => l.label === "open").map((l) => l.target.name)).toEqual(expect.arrayContaining(["saveNote", "registerIpc"]));
+    // saveNote spans 7–9: its body (8–9) folds under its first line
+    expect(b.folds).toContainEqual([8, 9]);
   });
 });
 

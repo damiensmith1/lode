@@ -106,6 +106,7 @@ export interface CodeBlock {
   links: BlockLink[];
   callers: { node: NodeRef; line: number; kind: LinkKind; label?: string }[]; // line is in the caller
   trigger?: string; // a registered callback: what runs it ("addEventListener drop")
+  folds?: [number, number][]; // files: line ranges shown folded (member bodies, imports)
 }
 
 // Where to start reading: entry points by runtime and kind, plus a one-line
