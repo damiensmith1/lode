@@ -145,7 +145,7 @@ export class LodeFlow extends HTMLElement {
         <button class="crumb" data-action="undo" aria-label="Undo" title="Undo">←</button>
         <span class="count faint"></span>
         <span class="spacer"></span>
-        <span class="faint">drag to move around · scroll to zoom · drag a card by its header</span>
+        <span class="faint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header</span>
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
         <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
         <button class="crumb" data-action="clear">clear</button>
@@ -707,14 +707,23 @@ export class LodeFlow extends HTMLElement {
     };
     this.root.addEventListener("pointerup", end);
     this.root.addEventListener("pointercancel", end);
-    // Scroll (or pinch) to zoom around the pointer.
+    // Scroll to move around; pinch (which arrives as ctrl + wheel) or
+    // ⌘-scroll to zoom around the pointer.
     canvas.addEventListener(
       "wheel",
       (e) => {
         e.preventDefault();
-        const r = canvas.getBoundingClientRect();
-        const step = e.ctrlKey ? 0.01 : 0.0015; // pinches report small deltas
-        this.zoomTo(this.camera.k * Math.exp(-e.deltaY * step), { x: e.clientX - r.left, y: e.clientY - r.top });
+        if (e.ctrlKey || e.metaKey) {
+          const r = canvas.getBoundingClientRect();
+          const step = e.ctrlKey ? 0.01 : 0.0015; // pinches report small deltas
+          return this.zoomTo(this.camera.k * Math.exp(-e.deltaY * step), { x: e.clientX - r.left, y: e.clientY - r.top });
+        }
+        const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+        // Shift turns a plain mouse wheel sideways.
+        const [dx, dy] = e.shiftKey && !e.deltaX ? [e.deltaY, 0] : [e.deltaX, e.deltaY];
+        this.camera = { ...this.camera, x: this.camera.x - dx * unit, y: this.camera.y - dy * unit };
+        this.applyCamera();
+        this.changed();
       },
       { passive: false },
     );
