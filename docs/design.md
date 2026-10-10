@@ -358,6 +358,19 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   `buildFileTree` turns the file list into folders. `service.watch()`
   re-indexes on file changes (the server's `watch` uses it), and views and
   the app's tree update from `onChanged`.
+- **Editing in place.** A card's code is always editable (no edit mode):
+  what's visible is what's editable. Visible lines form runs (contiguous in
+  the file; folds and the paging cut end one), and no edit crosses runs,
+  so hidden lines are never touched. The card's own rows are the editor
+  (views/editing.ts), not CodeMirror, so folds, chips, arrows and callers
+  stay as they are: typing within a line is the browser's; Enter, joins,
+  pastes and multi-line deletes rebuild a run's rows. ⌘S saves through
+  `editFile` (or `host.saveEdits`) with each changed run's original lines,
+  refused if the file no longer matches; it re-indexes, so the graph
+  follows. Unsaved cards show it, keep their rows through re-renders, and
+  can't be closed, folded or paged until saved or discarded. Selection
+  gestures (⌘-click, header) take the caret out of code so keys act on
+  cards again.
 - **Look is the host's.** Every colour and font is a `--lode-*` token with
   its default as a `var()` fallback, so a host sets tokens on any ancestor
   (declaring defaults on `:host` would shadow inherited ones). Syntax

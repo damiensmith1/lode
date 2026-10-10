@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -95,6 +95,47 @@ describe("host helpers", () => {
     stop();
     expect(files).toContain("src/main.ts");
     expect(await watched.call("search", { query: "addedLater" })).toContainEqual(expect.objectContaining({ name: "addedLater" }));
+    rmSync(project, { recursive: true, force: true });
+  });
+});
+
+describe("editing files", () => {
+  const setup = () => {
+    const project = mkdtempSync(path.join(os.tmpdir(), "lode-edit-"));
+    cpSync("test/fixtures/ipc", project, { recursive: true });
+    const svc = createService(GraphStore.open(tsPlugin, project, { cacheDir: path.join(project, ".cache") }));
+    const file = path.join(project, "src/util.ts");
+    return { project, svc, file, lines: readFileSync(file, "utf8").split("\n") };
+  };
+
+  it("applies line edits bottom-up and re-indexes", async () => {
+    const { project, svc, file, lines } = setup();
+    const result = await svc.call("editFile", {
+      file: "src/util.ts",
+      edits: [
+        { start: 1, end: 1, expected: [lines[0]], lines: ["// first", lines[0]] },
+        { start: 3, end: 3, expected: [lines[2]], lines: [lines[2] + " // third"] },
+      ],
+    });
+    expect(result).toMatchObject({ ok: true });
+    const now = readFileSync(file, "utf8").split("\n");
+    expect(now.slice(0, 4)).toEqual(["// first", lines[0], lines[1], lines[2] + " // third"]);
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  it("refuses when the lines changed underneath, writing nothing", async () => {
+    const { project, svc, file, lines } = setup();
+    writeFileSync(file, ["changed", ...lines.slice(1)].join("\n"));
+    const result = await svc.call("editFile", { file: "src/util.ts", edits: [{ start: 1, end: 1, expected: [lines[0]], lines: ["x"] }] });
+    expect(result).toMatchObject({ ok: false, reason: "conflict" });
+    expect(readFileSync(file, "utf8").split("\n")[0]).toBe("changed");
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  it("only edits project files, with well-formed edits", async () => {
+    const { project, svc } = setup();
+    expect(await svc.call("editFile", { file: "../outside.ts", edits: [{ start: 1, end: 1, expected: [""], lines: [""] }] })).toMatchObject({ ok: false, reason: "not found" });
+    await expect(svc.call("editFile", { file: "src/util.ts", edits: [{ start: 1, end: 1, expected: [""], lines: ["a\nb"] }] })).rejects.toThrow("bad edits");
     rmSync(project, { recursive: true, force: true });
   });
 });

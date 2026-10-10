@@ -126,6 +126,8 @@ Events (bubbling, composed; types in `FlowEventMap`):
 | `lode-open` | a card was opened or gone to | `card`, `from`, `line`, `existing` |
 | `lode-close` | cards were closed | `cards` (keys) |
 | `lode-change` | anything on the canvas changed | |
+| `lode-dirty` | a card got, or lost, unsaved edits | `card`, `dirty` |
+| `lode-save` | a card's edits were saved, or refused | `card`, `file`, `ok`, `message` |
 | `lode-title` | the view's title changed | the title |
 
 `preventDefault()` on `lode-action` takes an action over, e.g. open chips
@@ -190,7 +192,32 @@ sync or async):
   database, Clance's store. A host can also keep its own tab list in the
   same storage, as the standalone app does (`app-tabs`).
 
-## 7. Look
+## 7. Editing
+
+Cards' code is always editable: what a card shows is what you can change.
+Folded and paged-off lines can't be touched from the card (an edit never
+crosses them). Typing, Enter (keeps the indent), Backspace/Delete (joining
+lines only where both are visible together), Tab, paste, cut and copy (the
+code only) and ⌘Z / ⌘⇧Z (per card) work inside a card's code. ⌘S saves the
+card; a card with unsaved edits shows "● unsaved · save · discard", and the
+toolbar counts them. Unsaved cards can't be closed, folded or paged until
+saved or discarded; other re-renders keep their edits and the caret.
+
+Saving sends the card's edits: one per run of visible lines that changed,
+as the lines the card showed (`expected`) and what they are now (`lines`).
+By default the service writes them (`editFile`), only if the file still
+reads as `expected` there, inside the project only, and re-indexes, so
+callers, chips and arrows follow. Otherwise the card says why and keeps
+the edits.
+
+- `host.editable`: `false` for read-only, or `(card) => boolean`.
+- `host.saveEdits(request)`: save it yourself, e.g. as an editor edit so
+  the editor's undo and dirty state include it; return `{ ok: true }` or
+  `{ ok: false, message }`.
+- `lode-action` is sent with `action: "save"` / `"discard"` first
+  (cancelable), then `lode-dirty` and `lode-save`.
+
+## 8. Look
 
 - **Tokens.** Every colour and font is a `--lode-*` custom property, set on
   any ancestor of a view (or on the view). Ready-made: `LIGHT_THEME` (the

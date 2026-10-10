@@ -1,8 +1,9 @@
 import type { BlockLink, BlockRegion, CodeBlock, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
-import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, DEFAULT_KEYS, OPEN_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
+import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
+import { Editing } from "./editing.js";
 
 const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
@@ -89,6 +90,17 @@ const CSS = `
 .ln .no { flex: none; width: 46px; padding-right: 12px; text-align: right; color: var(--lode-line-number); user-select: none; }
 /* Long lines wrap (hanging under their indent) rather than being cut off. */
 .ln .src { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; min-width: 0; }
+.code[contenteditable="true"] { outline: none; caret-color: var(--lode-fg); }
+.ln .text:empty { display: inline-block; min-width: 1px; }
+.ln.added .no { color: var(--lode-channel); }
+.chips, .paging, .ln .no { user-select: none; }
+.unsaved { display: none; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--lode-channel-text); }
+.unsaved .dot { color: var(--lode-channel); }
+.unsaved button { padding: 1px 8px; border-radius: 4px; background: var(--lode-sunken); color: var(--lode-fg); }
+.unsaved button:hover { background: color-mix(in srgb, var(--lode-channel) 14%, transparent); }
+.unsaved .edit-note { color: var(--lode-muted); }
+.card.dirty { border-color: var(--lode-channel); }
+.card.dirty .unsaved { display: flex; }
 .ln.linked .no { color: var(--lode-local); }
 .ln.active { background: color-mix(in srgb, var(--lode-local) 8%, transparent); box-shadow: inset 2px 0 0 var(--lode-local); }
 .fold { margin-left: 6px; padding: 0 6px; font: 11px/18px var(--lode-mono); color: var(--lode-muted); background: var(--lode-sunken); border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
@@ -129,6 +141,11 @@ export class LodeFlow extends HTMLElement {
   private selected: string | null = null; // the primary card (highlighted in the host)
   private group = new Set<string>(); // every selected card, ⌘-click adds
   private dragged = false; // the click ending a drag isn't a click
+  // Editing: cards with unsaved edits, and what each card showed (to save
+  // against and to tell edited from not).
+  private editing?: Editing;
+  private dirty = new Set<string>();
+  private bases = new Map<string, { file: string; runs: { start: number; end: number }[]; original: Map<number, string> }>();
   private built = false;
   private undo: Snapshot[] = [];
   private offset = { x: PAD, y: PAD }; // board origin, so negative positions fit
@@ -162,6 +179,13 @@ export class LodeFlow extends HTMLElement {
       </div>
       <div class="canvas" part="canvas"><div class="board" part="board"></div></div>`;
     this.root.addEventListener("click", (e) => void this.onClick(e));
+    this.editing = new Editing({
+      root: this.root,
+      file: (key) => this.cardMap.get(key)?.block.node.file,
+      highlight: (text, file) => this.host?.syntax?.(text, file)[0] ?? escape(text),
+      edited: (key) => this.edited(key),
+      save: (key) => void this.saveEdits(key, "key"),
+    });
     this.setupDrag();
     this.stateKey = this.getAttribute("state") ?? this.stateKey;
     this.ready = this.restore();
@@ -295,7 +319,8 @@ export class LodeFlow extends HTMLElement {
     }
     if (!el) {
       const e = event as MouseEvent;
-      if (cardEl && !String(window.getSelection() ?? "")) this.select(cardEl.dataset.key!, e.metaKey);
+      if (e.metaKey) this.leaveCode(); // ⌘-click selects cards; it doesn't edit
+      if (cardEl && (e.metaKey || !String(window.getSelection() ?? ""))) this.select(cardEl.dataset.key!, e.metaKey);
       return;
     }
     const { action = "", id, line, start, end } = el.dataset;
@@ -317,7 +342,10 @@ export class LodeFlow extends HTMLElement {
     if (action === "fold") return this.fold(here, Number(start), Number(end));
     if (action === "reroot" && id) return this.openCaller(key, id, Number(line), (el.dataset.kind ?? "calls") as LinkKind);
     if (action === "close") return this.close([key]);
+    if (action === "save") return void this.saveEdits(key, "click");
+    if (action === "discard") return void this.discardEdits(key);
     if (action === "more" || action === "all" || action === "less") {
+      if (this.blockedByEdits([key])) return;
       // Paging: 25 more, everything, or back 25 (to the first 25 from
       // everything).
       this.remember();
@@ -341,7 +369,109 @@ export class LodeFlow extends HTMLElement {
     }
   }
 
+  // --- editing -----------------------------------------------------------------
+
+  // Take the caret out of a card's code, so keys act on cards again.
+  private leaveCode() {
+    const active = this.root.activeElement as HTMLElement | null;
+    if (active?.isContentEditable) active.blur();
+  }
+
+  private isEditable(c: Card): boolean {
+    const e = this.host?.editable;
+    if (e === false || !c.block.node.file) return false;
+    return typeof e === "function" ? e(this.info(c.key)!) : true;
+  }
+
+  // The edits a card's rows make to its file, against what it showed: one
+  // per run whose lines differ.
+  private editsOf(key: string) {
+    const base = this.bases.get(key);
+    const code = this.cardEl(key)?.querySelector<HTMLElement>(".code");
+    if (!base || !code || !this.editing) return [];
+    const now = this.editing.runs(code);
+    return base.runs.flatMap((r, i) => {
+      const expected = Array.from({ length: r.end - r.start + 1 }, (_, k) => base.original.get(r.start + k) ?? "");
+      const lines = now.get(i) ?? expected;
+      return lines.length === expected.length && lines.every((l, k) => l === expected[k]) ? [] : [{ start: r.start, end: r.end, expected, lines }];
+    });
+  }
+
+  // After any edit: is the card different from what it showed?
+  private edited(key: string) {
+    const was = this.dirty.has(key);
+    const now = this.editsOf(key).length > 0;
+    if (now) this.dirty.add(key);
+    else this.dirty.delete(key);
+    const el = this.cardEl(key);
+    el?.classList.toggle("dirty", now);
+    if (el) el.querySelector(".edit-note")!.textContent = "";
+    if (was !== now) {
+      this.emit(DIRTY_EVENT, { card: this.info(key)!, dirty: now });
+      this.updateToolbar();
+    }
+  }
+
+  // Write a card's edits (through the host if it saves, else the service).
+  // Refused, with a note on the card, if the file changed underneath.
+  private async saveEdits(key: string, via: "click" | "key"): Promise<boolean> {
+    const base = this.bases.get(key);
+    const edits = this.editsOf(key);
+    if (!base || !edits.length) return true;
+    if (!this.emit(ACTION_EVENT, { action: "save", card: this.info(key), via, data: {} }, true)) return false;
+    const request = { file: base.file, edits };
+    let result: EditResult;
+    try {
+      result = this.host?.saveEdits ? await this.host.saveEdits(request) : await this.client!.call<EditResult>("editFile", request);
+    } catch (error) {
+      result = { ok: false, reason: "conflict", message: error instanceof Error ? error.message : String(error) };
+    }
+    this.emit(SAVE_EVENT, { card: this.info(key)!, file: base.file, ok: result.ok, ...(!result.ok && { message: result.message }) });
+    if (!result.ok) {
+      const note = this.cardEl(key)?.querySelector(".edit-note");
+      if (note) note.textContent = ` · ${result.message}`;
+      return false;
+    }
+    await this.refreshCard(key);
+    return true;
+  }
+
+  private async discardEdits(key: string) {
+    if (!this.dirty.has(key)) return;
+    await this.refreshCard(key);
+  }
+
+  // Forget a card's edits and show it fresh from the file.
+  private async refreshCard(key: string) {
+    this.dirty.delete(key);
+    this.editing?.forget(key);
+    const c = this.cardMap.get(key);
+    const block = c && (await this.fetch(c.block.node.id));
+    if (c && block) Object.assign(c, { block, ...(c.fragment ? {} : { range: fullRange(block) }) });
+    this.emit(DIRTY_EVENT, { card: this.info(key)!, dirty: false });
+    this.rerender();
+  }
+
+  // Unsaved cards can't be closed, folded or paged (that would lose or
+  // misplace edits): say so on the card instead.
+  private blockedByEdits(keys: string[]): boolean {
+    const blocked = keys.filter((k) => this.dirty.has(k));
+    for (const k of blocked) {
+      const note = this.cardEl(k)?.querySelector(".edit-note");
+      if (note) note.textContent = " · save or discard first";
+    }
+    return blocked.length > 0;
+  }
+
+  private updateToolbar() {
+    const count = this.root.querySelector(".count");
+    if (!count) return;
+    const cards = this.cardMap.size ? `${this.cardMap.size} card${this.cardMap.size === 1 ? "" : "s"}` : "";
+    count.textContent = cards + (this.dirty.size ? ` · ${this.dirty.size} unsaved` : "");
+  }
+
   private clearAll() {
+    if (this.blockedByEdits([...this.cardMap.keys()])) return;
     this.remember();
     const gone = [...this.cardMap.keys()];
     this.cardMap.clear();
@@ -397,6 +527,7 @@ export class LodeFlow extends HTMLElement {
     if (inPlace(region)) {
       // Comments and imports: open (or close) in place; the card grows by
       // the lines revealed, so what was showing stays showing.
+      if (this.blockedByEdits([card.key])) return;
       this.remember();
       const lines = region.end - region.start;
       if (card.expanded.has(start)) {
@@ -417,12 +548,14 @@ export class LodeFlow extends HTMLElement {
   // Close just these cards (× or Delete); what they opened stays. To close
   // a branch, ⌘-click its cards and press Delete.
   private close(keys: string[]) {
+    if (this.blockedByEdits(keys)) keys = keys.filter((k) => !this.dirty.has(k));
+    if (!keys.length) return;
     this.remember();
     const gone = new Set(keys);
     for (const k of gone) this.cardMap.delete(k);
     this.arrows = this.arrows.filter((a) => !gone.has(a.from) && !gone.has(a.to));
     if (this.selected && gone.has(this.selected)) this.selected = null;
-    for (const k of gone) this.group.delete(k);
+    for (const k of gone) (this.group.delete(k), this.bases.delete(k), this.editing?.forget(k));
     this.render();
     this.emit(CLOSE_EVENT, { cards: [...gone] });
     this.changed();
@@ -848,6 +981,7 @@ export class LodeFlow extends HTMLElement {
       const header = target.closest("header");
       if (!header || target.closest("button, a, input, [data-action]")) return; // controls, not a drag handle
       e.preventDefault(); // no text selection while moving a card
+      this.leaveCode(); // and keys go to the canvas, not the code last typed in
       const el = header.closest<HTMLElement>(".card")!;
       const key = el.dataset.key!;
       const keys = this.group.has(key) ? [...this.group] : [key];
@@ -930,7 +1064,7 @@ export class LodeFlow extends HTMLElement {
     const board = this.board();
     this.root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.disabled = !this.undo.length;
     this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
-    this.root.querySelector(".count")!.textContent = this.cardMap.size ? `${this.cardMap.size} card${this.cardMap.size === 1 ? "" : "s"}` : "";
+    this.updateToolbar();
     if (!this.cardMap.size) {
       board.innerHTML = `<div class="hint" part="empty">Pick an entry point, a file or a symbol to start reading from it.</div>`;
       board.style.width = board.style.height = "";
@@ -938,7 +1072,22 @@ export class LodeFlow extends HTMLElement {
       this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: "flow", bubbles: true, composed: true }));
       return;
     }
+    // Cards with unsaved edits keep their own rows (and the caret, if it's
+    // in one): rendering them from the block would lose the edits.
+    const kept = new Map([...this.dirty].flatMap((k) => (this.cardEl(k) ? [[k, this.cardEl(k)!] as const] : [])));
+    const focused = [...kept].find(([, el]) => el.contains(this.root.activeElement));
+    const caret = focused && this.editing?.selection(focused[1].querySelector<HTMLElement>(".code")!);
     board.innerHTML = [...this.cardMap.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
+    for (const [k, el] of kept) {
+      const fresh = this.cardEl(k);
+      if (!fresh) continue;
+      el.className = fresh.className + " dirty";
+      fresh.replaceWith(el);
+    }
+    if (focused && caret) {
+      focused[1].querySelector<HTMLElement>(".code")!.focus({ preventScroll: true });
+      if (caret.start.row.isConnected) this.editing?.caret(caret.start);
+    }
     this.position();
     const first = this.cardMap.values().next().value!;
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${first.block.node.name}`, bubbles: true, composed: true }));
@@ -980,6 +1129,11 @@ export class LodeFlow extends HTMLElement {
     const rows: string[] = [];
     let shownLines = 0;
     let remaining = 0;
+    // Runs of visible lines that are contiguous in the file: what can be
+    // edited as one (see editing.ts). Kept as what the card showed, to save
+    // against.
+    const runs: { start: number; end: number }[] = [];
+    const original = new Map<number, string>();
     // Show up to the limit, and always down to lines that arrows leave from.
     const mustReach = Math.max(0, ...out.map((a) => a.line));
     for (let line = c.range[0]; line <= c.range[1]; line++) {
@@ -1017,7 +1171,13 @@ export class LodeFlow extends HTMLElement {
       const hostLine = info && render?.line?.(info, line);
       const chips = [hostLine ? `<span class="host-line" part="host-line">${hostLine}</span>` : "", ...own.map((l) => chip(l, line, false)), ...rolled.slice(0, MAX_ROLLED).map((l) => chip(l, line, true)), more].join("");
       const classes = ["ln", own.length || rolled.length ? "linked" : "", out.some((a) => a.line === line) ? "active" : ""].filter(Boolean).join(" ");
-      rows.push(`<div part="line" class="${classes}" data-n="${line}"><span class="no" part="line-number">${line}</span><span class="src" part="source">${html[line - first] || " "}${foldHtml}</span>${chips ? `<span class="chips" part="chips">${chips}</span>` : ""}</div>`);
+      const run = runs.length && runs[runs.length - 1].end === line - 1 && !foldAt.has(runs[runs.length - 1].end) ? runs[runs.length - 1] : (runs.push({ start: line, end: line }), runs[runs.length - 1]);
+      run.end = line;
+      original.set(line, b.lines[line - first]?.text ?? "");
+      const lockedHtml = foldHtml && foldHtml.replace("<button ", '<button contenteditable="false" ');
+      rows.push(
+        `<div part="line" class="${classes}" data-n="${line}" data-run="${runs.length - 1}"><span class="no" part="line-number" contenteditable="false">${line}</span><span class="src" part="source"><span class="text">${b.lines[line - first]?.text ? html[line - first] : ""}</span>${lockedHtml}</span>${chips ? `<span class="chips" part="chips" contenteditable="false">${chips}</span>` : ""}</div>`,
+      );
     }
     const total = shownLines + remaining;
     const paging = [
@@ -1025,7 +1185,9 @@ export class LodeFlow extends HTMLElement {
       remaining > PAGE ? `<button part="paging-button" class="more-lines" data-action="all" data-total="${total}">show all ${remaining}</button>` : "",
       c.limit > PAGE && shownLines > PAGE ? `<button part="paging-button" class="more-lines" data-action="less" data-total="${total}">⌃ collapse</button>` : "",
     ].join("");
-    if (paging) rows.push(`<div class="paging" part="paging">${paging}</div>`);
+    if (paging) rows.push(`<div class="paging" part="paging" contenteditable="false">${paging}</div>`);
+    if (!this.dirty.has(c.key)) this.bases.set(c.key, { file: n.file ?? "", runs, original });
+    const editable = this.isEditable(c);
 
     const span = c.range[1] - c.range[0] + 1;
     const hostHeader = info && render?.header?.(info);
@@ -1037,8 +1199,9 @@ export class LodeFlow extends HTMLElement {
         <button class="title" part="card-title" data-action="source" title="Open the source">${titleHtml(c)}</button>
         <span class="meta" part="card-meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
         ${hostHeader ? `<div class="host-header" part="host-header">${hostHeader}</div>` : ""}
+        <div class="unsaved" part="unsaved"><span class="dot">●</span> unsaved <button data-action="save" title="Save (⌘S)">save</button><button data-action="discard" title="Throw these edits away">discard</button><span class="edit-note"></span></div>
       </header>
-      <div class="code" part="code">${rows.join("")}</div>
+      <div class="code" part="code"${editable ? ' contenteditable="true" spellcheck="false" autocapitalize="off" autocorrect="off"' : ""}>${rows.join("")}</div>
       ${hostFooter ? `<div class="host-footer" part="host-footer">${hostFooter}</div>` : ""}
     </section>`;
   }

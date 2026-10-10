@@ -24,6 +24,15 @@ export interface LodeHost {
   // none, e.g. when the host routes its own shortcuts to flow.run().
   // Unlisted commands keep their defaults; [] turns one off.
   keys?: false | Partial<Record<FlowCommand, string[]>>;
+  // Optional: whether cards' code can be edited (all of them, none, or
+  // per card). Default: every card from a project file.
+  editable?: boolean | ((card: CardInfo) => boolean);
+  // Optional: save a card's edits yourself (e.g. as an editor edit, so the
+  // editor's undo and dirty state include it). Default: the service writes
+  // the file. Edits are line spans as the card showed them (`expected`)
+  // and what they became (`lines`); refuse with ok:false if they don't
+  // match the file any more.
+  saveEdits?(request: { file: string; edits: LineEdit[] }): Promise<EditResult>;
   // Optional: extra markup in cards (see CardRender).
   render?: CardRender;
   // Optional: where views keep their state, per view (see ViewRequest's
@@ -95,6 +104,19 @@ export const SELECT_EVENT = "lode-select"; // the selection changed
 export const OPEN_EVENT = "lode-open"; // a card was opened, or gone to
 export const CLOSE_EVENT = "lode-close"; // cards were closed
 export const CHANGE_EVENT = "lode-change"; // the canvas changed (cards, arrows, layout, folds, camera)
+export const DIRTY_EVENT = "lode-dirty"; // a card got (or lost) unsaved edits
+export const SAVE_EVENT = "lode-save"; // a card's edits were saved, or refused
+
+// A change to a file from a card: lines start..end (1-based, inclusive) as
+// the card showed them, and what they are now (any number of lines).
+export interface LineEdit {
+  start: number;
+  end: number;
+  expected: string[];
+  lines: string[];
+}
+
+export type EditResult = { ok: true } | { ok: false; reason?: string; message: string };
 
 export interface FlowEventMap {
   [TITLE_EVENT]: string;
@@ -107,4 +129,6 @@ export interface FlowEventMap {
   [OPEN_EVENT]: { card: CardInfo; from?: string; line?: number; existing: boolean };
   [CLOSE_EVENT]: { cards: string[] };
   [CHANGE_EVENT]: Record<string, never>;
+  [DIRTY_EVENT]: { card: CardInfo; dirty: boolean };
+  [SAVE_EVENT]: { card: CardInfo; file: string; ok: boolean; message?: string };
 }

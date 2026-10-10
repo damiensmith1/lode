@@ -1,4 +1,4 @@
-import { watch as watchFiles } from "node:fs";
+import { realpathSync, watch as watchFiles } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GraphStore } from "../graph/store.js";
@@ -34,6 +34,17 @@ export interface LodeService {
   onChanged(listener: (files: string[]) => void): () => void;
 }
 
+// A change to a file, as cards make them: lines start..end (1-based,
+// inclusive) as they were (`expected`), replaced by `lines` (any number).
+export interface LineEdit {
+  start: number;
+  end: number;
+  expected: string[];
+  lines: string[];
+}
+
+export type EditResult = { ok: true; files: string[] } | { ok: false; reason: "conflict" | "not found" | "overlap"; message: string };
+
 export interface WatchOptions {
   debounceMs?: number; // default 250
   // Paths (relative to the project) to ignore. Default: node_modules,
@@ -55,7 +66,52 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     return path.join(stateDir, `layout-${key}.json`);
   };
 
+  // Project files only: resolved for real, inside the root, and indexed.
+  const projectFile = (file: unknown) => {
+    if (typeof file !== "string" || !store.graph.node(file)) return null;
+    try {
+      const root = realpathSync(store.root);
+      const absolute = realpathSync(path.resolve(store.root, file));
+      return absolute.startsWith(root + path.sep) ? absolute : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Apply line edits to one file, but only if every edited span still reads
+  // as the editor last saw it; otherwise nothing is written. Bottom-up, so
+  // earlier spans keep their line numbers. Re-indexes right away.
+  const editFile = async (file: unknown, edits: LineEdit[]): Promise<EditResult> => {
+    const absolute = projectFile(file);
+    if (!absolute) return { ok: false, reason: "not found", message: `not a project file: ${String(file)}` };
+    const original = await readFile(absolute, "utf8");
+    const eol = original.includes("\r\n") ? "\r\n" : "\n";
+    const lines = original.split(/\r?\n/);
+    const sorted = [...edits].sort((a, b) => b.start - a.start);
+    for (let i = 0; i < sorted.length; i++) {
+      const e = sorted[i];
+      if (!(e.start >= 1 && e.end >= e.start - 1 && e.end <= lines.length)) return { ok: false, reason: "conflict", message: `lines ${e.start}-${e.end} aren't in the file any more` };
+      if (i > 0 && e.end >= sorted[i - 1].start) return { ok: false, reason: "overlap", message: "edits overlap" };
+      const now = lines.slice(e.start - 1, e.end);
+      if (now.length !== e.expected.length || now.some((l, k) => l !== e.expected[k]))
+        return { ok: false, reason: "conflict", message: `${String(file)} changed since it was shown (lines ${e.start}-${e.end})` };
+    }
+    for (const e of sorted) lines.splice(e.start - 1, e.end - e.start + 1, ...e.lines);
+    await writeFile(absolute, lines.join(eol));
+    return { ok: true, files: service.refresh() };
+  };
+
   const methods: Record<string, (params: Record<string, unknown>) => unknown> = {
+    editFile: (p) => {
+      const edits = Array.isArray(p.edits) ? p.edits : [];
+      const valid = (e: unknown): e is LineEdit => {
+        const x = e as LineEdit;
+        const strings = (a: unknown) => Array.isArray(a) && a.every((l) => typeof l === "string" && !/[\r\n]/.test(l));
+        return !!x && Number.isInteger(x.start) && Number.isInteger(x.end) && strings(x.expected) && strings(x.lines);
+      };
+      if (!edits.length || !edits.every(valid)) throw new Error("bad edits");
+      return editFile(p.file, edits);
+    },
     loadState: async (p) => {
       try {
         return JSON.parse(await readFile(statePath(p.key), "utf8"));
