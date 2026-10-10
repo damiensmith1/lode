@@ -358,7 +358,11 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   it"), writers of a value, users of a type. Clicking one puts it to the
   left of that block with an arrow from the calling line; the one already
   open to the left is marked. Passing a function (`rows.map(toTranscript)`)
-  is also a chip on the passing line.
+  is also a chip on the passing line. Long caller lists show 4 and a
+  "+N more" chip that expands into a short scrolling list.
+- **Flow history.** Every move (following a chip, opening a caller, a
+  breadcrumb, starting somewhere new) is one step; ← restores exactly the
+  columns and selection before it. Expanding callers or folds isn't a step.
 - **Host syntax hook**: hosts may pass `syntax(text, file)` (escaped HTML per
   line) and `syntaxCss`; views put the CSS inside their shadow root. Views
   never bundle a highlighter.

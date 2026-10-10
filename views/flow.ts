@@ -28,6 +28,8 @@ const CSS = `
 .callers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11.5px; color: var(--lode-faint); margin-bottom: 4px; }
 .caller { font: 11.5px var(--lode-mono); color: var(--lode-muted); padding: 1px 6px; border: 1px dashed var(--lode-outline); border-radius: 5px; }
 .caller:hover { border-style: solid; color: var(--lode-fg); }
+.callers.all { max-height: 92px; overflow-y: auto; padding-right: 4px; }
+.caller.more { border-style: solid; border-color: var(--lode-border); background: var(--lode-sunken); font-family: var(--lode-font); }
 .caller.open { border-style: solid; border-color: var(--lode-local); color: var(--lode-local); }
 .code { padding: 6px 0 8px; font: 12px/20px var(--lode-mono); overflow-x: auto; }
 .ln { display: flex; align-items: flex-start; padding-right: 8px; }
@@ -60,7 +62,8 @@ export class LodeFlow extends HTMLElement {
   private readonly root = this.attachShadow({ mode: "open" });
   private columns: Column[] = [];
   private selected = 0; // the block reported to the host (highlight)
-  private rootHistory: Column[][] = [];
+  // Every move (open, caller, crumb, new start) can be undone with ←.
+  private history: { columns: Column[]; selected: number }[] = [];
   private unsubscribe?: () => void;
   private resize = new ResizeObserver(() => this.layout());
 
@@ -96,12 +99,23 @@ export class LodeFlow extends HTMLElement {
     const id = this.getAttribute("node");
     if (!id) return this.render();
     const block = await this.fetch(id);
-    if (block) {
-      if (this.columns.length) this.rootHistory.push(this.columns);
-      this.columns = [{ block, unfolded: new Set(), showAll: false }];
+    if (!block) return this.render();
+    const fresh = [{ block, unfolded: new Set<number>(), showAll: false }];
+    if (this.columns.length) this.go(fresh, 0);
+    else {
+      this.columns = fresh;
+      this.render();
+      this.select(0);
     }
+  }
+
+  // Move to a new set of columns, remembering where we were.
+  private go(columns: Column[], select: number) {
+    this.history.push({ columns: this.columns, selected: this.selected });
+    this.columns = columns;
     this.render();
-    this.select(0);
+    this.select(select);
+    this.scrollToColumn(select);
   }
 
   // Select a block, and tell the host which code it is.
@@ -134,19 +148,13 @@ export class LodeFlow extends HTMLElement {
     if (action === "open" && id) {
       const block = await this.fetch(id);
       if (!block) return;
-      this.columns = [...this.columns.slice(0, c + 1), { block, fromLine: Number(line), unfolded: new Set(), showAll: false }];
-      this.render();
-      this.select(this.columns.length - 1);
-      this.scrollToColumn(this.columns.length - 1);
+      this.go([...this.columns.slice(0, c + 1), { block, fromLine: Number(line), unfolded: new Set(), showAll: false }], c + 1);
     } else if (action === "reroot" && id) {
-      // The caller goes to the left of this block, with an arrow from its line.
+      // The caller goes to the left of this block, with an arrow from its line
+      // (← brings back what was there before).
       const block = await this.fetch(id);
       if (!block) return;
-      this.rootHistory.push(this.columns);
-      this.columns = [{ block, unfolded: new Set(), showAll: false }, { ...this.columns[c], fromLine: Number(line) }, ...this.columns.slice(c + 1)];
-      this.render();
-      this.select(0);
-      this.scrollToColumn(0);
+      this.go([{ block, unfolded: new Set(), showAll: false }, { ...this.columns[c], fromLine: Number(line) }, ...this.columns.slice(c + 1)], 0);
     } else if (action === "callers") {
       this.columns[c].allCallers = true;
       this.render();
@@ -157,18 +165,17 @@ export class LodeFlow extends HTMLElement {
       this.columns[c].showAll = !this.columns[c].showAll;
       this.render();
     } else if (action === "back") {
-      if (this.columns.length > 1) this.columns = this.columns.slice(0, -1);
-      else if (this.rootHistory.length) this.columns = this.rootHistory.pop()!;
+      const previous = this.history.pop();
+      if (!previous) return;
+      this.columns = previous.columns;
       this.render();
-      this.select(this.columns.length - 1);
+      this.select(previous.selected);
+      this.scrollToColumn(previous.selected);
     } else if (action === "source") {
       const b = this.columns[c]?.block.node;
       if (b?.file) this.host?.openSource(b.file, b.line);
     } else if (action === "crumb") {
-      this.columns = this.columns.slice(0, c + 1);
-      this.render();
-      this.select(c);
-      this.scrollToColumn(c);
+      this.go(this.columns.slice(0, c + 1), c);
     }
   }
 
@@ -186,7 +193,7 @@ export class LodeFlow extends HTMLElement {
         return i === this.columns.length - 1 ? `<span class="crumb current mono">${name}</span>` : `<button class="crumb mono" data-action="crumb" data-col="${i}">${name}</button>`;
       })
       .join(`<span class="sep">→</span>`);
-    this.root.querySelector<HTMLButtonElement>('[data-action="back"]')!.disabled = this.columns.length < 2 && !this.rootHistory.length;
+    this.root.querySelector<HTMLButtonElement>('[data-action="back"]')!.disabled = !this.history.length;
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${this.columns[0].block.node.name}`, bubbles: true, composed: true }));
     requestAnimationFrame(() => this.layout());
   }
@@ -203,7 +210,7 @@ export class LodeFlow extends HTMLElement {
     const shownCallers = c.allCallers ? b.callers : b.callers.slice(0, MAX_CALLERS);
     const allCalls = b.callers.every((cl) => cl.kind === "calls" && !cl.label);
     const callers = b.callers.length
-      ? `<div class="callers">${allCalls ? "called by" : "used by"} ${shownCallers
+      ? `<div class="callers${c.allCallers ? " all" : ""}">${allCalls ? "called by" : "used by"} ${shownCallers
           .map(
             (cl) =>
               `<button class="caller${cl.node.id === left ? " open" : ""}" data-action="reroot" data-col="${i}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(cl.node.name)}${
@@ -211,7 +218,7 @@ export class LodeFlow extends HTMLElement {
               }</button>`,
           )
           .join("")}${
-          b.callers.length > shownCallers.length ? `<button class="crumb" data-action="callers" data-col="${i}">+${b.callers.length - shownCallers.length} more</button>` : ""
+          b.callers.length > shownCallers.length ? `<button class="caller more" data-action="callers" data-col="${i}">+${b.callers.length - shownCallers.length} more</button>` : ""
         }</div>`
       : b.outline
         ? ""
