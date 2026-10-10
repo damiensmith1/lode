@@ -6,7 +6,7 @@ import { ARROW_DEFS, BASE_CSS, escape, wire } from "./theme.js";
 const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
 const SMALL = 3; // regions hiding this many lines or fewer never fold
-const PAGE = 40; // lines a card shows before "show 40 more"
+const PAGE = 25; // lines a card shows before "show 25 more"
 
 // Comments and imports open in place: a card of them is just a detour.
 const inPlace = (r: BlockRegion) => r.kind === "comment" || r.kind === "imports";
