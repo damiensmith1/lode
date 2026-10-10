@@ -1,10 +1,10 @@
-// The standalone host. The flow view is where code is read; the code pane is
-// for browsing a file, and clicking in it opens that code in the flow. Map
-// and graph give overviews. Nothing moves on its own, only on clicks. It's one host among many;
+// The standalone host: entry points to pick where to start, the flow to read
+// from there. The code pane is for browsing a file; clicking in it opens that
+// code in the flow. Nothing moves on its own, only on clicks. It's one host among many;
 // everything lode-specific comes from ../../views through LodeHost.
 import type { FileEntry, FileView, NodeRef, ProjectInfo } from "../../src/query/types.js";
 import { highlightLines, SYNTAX_CSS } from "./highlight.js";
-import { createView, LodeClient, TITLE_EVENT, type LodeHost, type SourceHighlight, type ViewRequest } from "../../views/index.js";
+import { createView, LodeClient, TITLE_EVENT, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) => {
@@ -29,6 +29,7 @@ async function showSource(file: string, line?: number) {
     const view = await client.call<FileView | null>("source", { file });
     if (!view) return;
     currentFile = file;
+    document.body.classList.add("has-file");
     renderSource(view);
   }
   if (line) scrollToLine(line);
@@ -61,9 +62,6 @@ function renderSource(view: FileView) {
       return row;
     }),
   );
-  applied = null; // the old file's highlight is gone with its lines
-  const selectedTab = tabs.find((t) => t.button.getAttribute("aria-selected") === "true");
-  if (selectedTab?.highlight?.file === view.file) applyHighlight(selectedTab.highlight);
 }
 
 // Click a line: read whatever's declared around it in the flow.
@@ -74,40 +72,12 @@ $("code").addEventListener("click", (e) => {
   if (row && currentFile) void followCode(currentFile, Number(row.dataset.line));
 });
 
-// --- Highlights from the selected view ----------------------------------
-
-let applied: SourceHighlight | null = null;
-let codeDriven: string | null = null; // a focus the code asked for: don't scroll for it
-
-function applyHighlight(h: SourceHighlight | null) {
-  if (h && h.file !== currentFile) {
-    void showSource(h.file).then(() => applyHighlight(h));
-    return;
-  }
-  const code = $("code");
-  const newFocus = h?.node !== applied?.node;
-  if (newFocus || !h) {
-    code.querySelectorAll(".in-focus, .mark, .focus-start").forEach((r) => r.classList.remove("in-focus", "mark", "focus-start"));
-    if (h?.range) {
-      for (let l = h.range[0]; l <= h.range[1]; l++) document.getElementById(`L${l}`)?.classList.add("in-focus");
-      document.getElementById(`L${h.range[0]}`)?.classList.add("focus-start");
-    }
-    for (const l of h?.marks ?? []) document.getElementById(`L${l}`)?.classList.add("mark");
-  }
-  code.querySelector(".hover")?.classList.remove("hover");
-  if (h?.hover) document.getElementById(`L${h.hover}`)?.classList.add("hover"); // marked, never scrolled to
-  if (h?.range && newFocus && codeDriven !== h.node) scrollToLine(Math.max(1, h.range[0] - 2), "start");
-  if (h && newFocus) codeDriven = null;
-  applied = h;
-}
-
 // --- Tabs of lode views ---------------------------------------------------
 
 interface Tab {
   key: string;
   button: HTMLButtonElement;
   view: HTMLElement;
-  highlight?: SourceHighlight | null;
 }
 const tabs: Tab[] = [];
 
@@ -116,7 +86,6 @@ function select(tab: Tab) {
   $("view").replaceChildren(tab.view);
   // The flow view is the code, so the code pane steps aside for it.
   document.body.classList.toggle("flow-mode", tab.view.tagName === "LODE-FLOW");
-  applyHighlight(tab.highlight ?? null);
 }
 
 function openView(request: ViewRequest): Tab {
@@ -140,17 +109,11 @@ function openView(request: ViewRequest): Tab {
   const button = el("button", { className: "tab", role: "tab" }, icon, label, close);
   const tab = { key, button } as Tab;
 
-  // Each tab gets its own host, so highlights come from the tab that sent them.
   const host: LodeHost = {
     openSource: (file, line) => void showSource(file, line),
     openView: (r) => void openView(r),
     syntax: highlightLines,
     syntaxCss: SYNTAX_CSS,
-    highlight: (h) => {
-      tab.highlight = h;
-      if (tab.view.tagName === "LODE-FLOW") return; // the flow is the code; nothing else to highlight
-      if (button.getAttribute("aria-selected") === "true") applyHighlight(h);
-    },
   };
   tab.view = createView(request, client, host);
   tab.view.addEventListener(TITLE_EVENT, (e) => (label.textContent = String((e as CustomEvent).detail)));
@@ -161,12 +124,11 @@ function openView(request: ViewRequest): Tab {
     button.remove();
     if (button.getAttribute("aria-selected") === "true") {
       if (tabs.length) select(tabs[Math.max(0, i - 1)]);
-      else $("view").replaceChildren(), applyHighlight(null);
+      else $("view").replaceChildren();
     }
   });
   tabs.push(tab);
-  if (request.kind === "flow") $("tabs").prepend(button);
-  else $("tabs").append(button);
+  $("tabs").append(button);
   select(tab);
   return tab;
 }
@@ -177,11 +139,7 @@ const readInFlow = (id: string) => void openView({ kind: "flow", id });
 async function followCode(file: string, line: number) {
   const at = await client.call<NodeRef | null>("symbolAt", { file, line });
   if (!at) return;
-  codeDriven = at.id;
-  // The graph view, when it's showing, reveals the node in place.
-  const view = $("view").firstElementChild as (HTMLElement & { reveal?: (id: string) => void }) | null;
-  if (view?.tagName === "LODE-GRAPH" && view.reveal) view.reveal(at.id);
-  else readInFlow(at.id);
+  readInFlow(at.id);
 }
 
 // --- File tree ------------------------------------------------------------
@@ -299,14 +257,11 @@ async function start() {
   });
 
   // Deep links: #token=…&flow=<node id> | file=<path>
-  openView({ kind: "map", lens: "runtime" });
-  openView({ kind: "graph", lens: "runtime" });
+  const entries = openView({ kind: "entries" });
   const start = link.get("flow") ?? link.get("focus"); // "focus" links predate the flow
   openView({ kind: "flow", ...(start && { id: start }) });
-  if (link.get("file") && !start) {
-    select(tabs.find((t) => t.view.tagName === "LODE-MAP")!);
-    void openFile(link.get("file")!);
-  }
+  if (!start) select(entries);
+  if (link.get("file") && !start) void openFile(link.get("file")!);
 
   client.onChanged(async (files) => {
     Object.assign(info, await client.call<ProjectInfo>("info"));

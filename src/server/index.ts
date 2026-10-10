@@ -61,6 +61,7 @@ export async function startServer(options: ServerOptions): Promise<LodeServer> {
     source: (p) => queries.source(String(p.file)),
     graph: (p) => queries.tree(String(p.lens ?? "runtime")),
     block: (p) => queries.block(String(p.id)),
+    entries: () => queries.entries(),
     symbolAt: (p) => queries.symbolAt(String(p.file), Number(p.line)),
   };
 

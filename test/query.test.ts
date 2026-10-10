@@ -134,3 +134,21 @@ describe("block query", () => {
     expect(b.links.map((l) => l.target.name)).toEqual(expect.arrayContaining(["saveNote", "registerIpc"]));
   });
 });
+
+describe("entries query", () => {
+  it("groups ways in by runtime and kind", () => {
+    const r = q.entries();
+    const cat = (runtime: string, name: string) => r.groups.find((g) => g.runtime === runtime)?.categories.find((c) => c.name === name)?.entries ?? [];
+    expect(cat("main", "ipc handlers").map((e) => e.label).sort()).toEqual(["notes:clear", "notes:save"]);
+    expect(cat("preload", "bridge api").map((e) => e.label)).toEqual(expect.arrayContaining(["notes.save", "notes.clear"]));
+    expect(cat("renderer", "events").map((e) => e.label)).toContain("onCleared");
+    expect(cat("preload", "messages from main").map((e) => e.label)).toEqual(["notes:cleared"]);
+    expect(r.summary).toContainEqual(expect.objectContaining({ from: "renderer", to: "preload", kind: "channel" }));
+  });
+
+  it("leaves timers out, and folds what nothing calls", () => {
+    const all = q.entries().groups.flatMap((g) => g.categories);
+    expect(all.flatMap((c) => c.entries).some((e) => /^setTimeout/.test(e.node.name))).toBe(false);
+    expect(all.filter((c) => c.name === "not called in the project").every((c) => c.collapsed)).toBe(true);
+  });
+});

@@ -1,4 +1,4 @@
-import type { Edge, EdgeKind, GraphData, Node, NodeId } from "../schema/index.js";
+import type { ChannelEndpoint, Edge, EdgeKind, GraphData, Node, NodeId } from "../schema/index.js";
 import { containmentLens, folderLens, type Lens, tagLens } from "./lens.js";
 
 export type Direction = "up" | "down"; // up: what feeds a node; down: what it feeds
@@ -10,6 +10,7 @@ export class Graph {
   private readonly children = new Map<NodeId, NodeId[]>();
   private readonly withinIndex = new Map<NodeId, Edge[]>();
   private readonly lenses = new Map<string, Lens>();
+  private endpoints: ChannelEndpoint[] = [];
 
   // Rejects data the core can't trust: duplicate ids, dangling parents or edges.
   static from(data: GraphData): Graph {
@@ -32,6 +33,7 @@ export class Graph {
       push(graph.incoming, edge.to, edge);
       if (edge.within) push(graph.withinIndex, edge.within, edge);
     }
+    graph.endpoints = (data.channels ?? []).filter((e) => graph.nodes.has(e.node));
     return graph;
   }
 
@@ -73,6 +75,11 @@ export class Graph {
     let edges = 0;
     for (const list of this.outgoing.values()) edges += list.length;
     return { nodes: this.nodes.size, edges };
+  }
+
+  // Both ends of every string-keyed channel, matched or not.
+  channels(): ChannelEndpoint[] {
+    return this.endpoints;
   }
 
   toData(): GraphData {

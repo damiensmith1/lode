@@ -6,6 +6,9 @@ import type {
   Annotation,
   BlockLink,
   CodeBlock,
+  EntriesResult,
+  EntryCategory,
+  EntryPoint,
   FileEntry,
   FileView,
   GraphDump,
@@ -55,6 +58,72 @@ export class Queries {
     }
     scored.sort((a, b) => a.score - b.score || a.node.id.length - b.node.id.length);
     return scored.slice(0, limit).map((s) => this.ref(s.node));
+  }
+
+  // Where to start reading: what the outside world (another process, the
+  // UI, the runtime itself) calls into, grouped by runtime and kind.
+  entries(): EntriesResult {
+    const g = this.graph();
+    const byRuntime = new Map<string | null, Map<string, EntryPoint[]>>();
+    const taken = new Set<NodeId>();
+    const add = (category: string, node: Node, label: string, detail = `${node.loc?.file.split("/").pop() ?? ""}:${node.loc?.line ?? ""}`) => {
+      if (node.external || taken.has(node.id)) return;
+      taken.add(node.id);
+      const ref = this.ref(node);
+      const runtime = ref.runtime ?? null;
+      const cats = byRuntime.get(runtime) ?? byRuntime.set(runtime, new Map()).get(runtime)!;
+      (cats.get(category) ?? cats.set(category, []).get(category)!).push({ node: ref, label, detail });
+    };
+
+    // Files that run project code as soon as they load.
+    const onLoad = new Map<NodeId, number>();
+    for (const n of g.allNodes()) {
+      if (n.parent !== null || n.external || !n.loc || n.id !== n.loc.file) continue;
+      const calls = g.neighbors(n.id, "down", ["calls"]).filter((e) => !g.node(e.to)?.external).length;
+      if (calls >= 2) onLoad.set(n.id, calls);
+    }
+    for (const [id, calls] of [...onLoad].sort((a, b) => b[1] - a[1])) add("on load", g.node(id)!, id, `${calls} calls when it loads`);
+
+    // Channel receivers: handlers in another process, and the bridge API.
+    const CHANNEL_CATEGORIES: [RegExp, string][] = [
+      [/invoke|to-main/, "ipc handlers"],
+      [/to-renderer/, "messages from main"],
+      [/bridge/, "bridge api"],
+    ];
+    const receivers = g.channels().filter((e) => e.role === "receive").sort((a, b) => a.key.localeCompare(b.key));
+    for (const e of receivers) {
+      const category = CHANNEL_CATEGORIES.find(([re]) => re.test(e.family))?.[1] ?? "channels";
+      const node = g.node(e.node);
+      if (node) add(category, node, e.key);
+    }
+
+    // Other registered callbacks: app events, hotkeys, listeners. Timers and
+    // tests aren't ways in.
+    const NOT_ENTRIES = /^(setTimeout|setInterval|setImmediate|queueMicrotask|nextTick|requestAnimationFrame|requestIdleCallback|describe|it|test|before\w*|after\w*|then|exposeIn\w*World)$/;
+    for (const n of g.allNodes()) {
+      const reg = n.detail?.registration as { call: string; key: string | null } | undefined;
+      if (reg && !NOT_ENTRIES.test(reg.call)) add("events", n, reg.key ? `${reg.call} ${reg.key}` : reg.call);
+    }
+
+    // Functions nothing in the project reaches: called by a framework, HTML,
+    // or from outside. Last, and folded.
+    for (const n of g.allNodes()) {
+      if (n.kind !== "callable" || n.external || !n.loc || n.detail?.registration) continue;
+      const reached = g.neighbors(n.id, "up").some((e) => e.kind === "calls" || (e.kind === "flows" && e.via) || (e.kind === "references" && e.access === "read"));
+      if (!reached) add("not called in the project", n, `${n.name}()`);
+    }
+
+    const ORDER = ["on load", "ipc handlers", "messages from main", "bridge api", "events", "channels", "not called in the project"];
+    const RUNTIME_ORDER = ["main", "preload", "renderer", "shared"];
+    const groups = [...byRuntime]
+      .map(([runtime, cats]) => ({
+        runtime,
+        categories: ORDER.filter((c) => cats.has(c)).map((name): EntryCategory => ({ name, collapsed: name === "not called in the project", entries: cats.get(name)! })),
+      }))
+      .sort((a, b) => rank(RUNTIME_ORDER, a.runtime) - rank(RUNTIME_ORDER, b.runtime));
+
+    const summary = this.map("runtime").edges.map((e) => ({ ...e, from: e.from.replace(/^runtime:/, ""), to: e.to.replace(/^runtime:/, "") }));
+    return { summary, groups };
   }
 
   // The innermost node whose declaration spans `line` in `file`, or the file
@@ -302,6 +371,11 @@ export class Queries {
     for (const e of this.graph().neighbors(value, "up", ["references"])) if (e.access === access) nodes.add(e.from);
     return [...nodes];
   }
+}
+
+function rank(order: string[], value: string | null): number {
+  const i = value === null ? -1 : order.indexOf(value);
+  return i === -1 ? order.length : i;
 }
 
 function linkKind(e: Edge): LinkKind | null {

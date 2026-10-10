@@ -106,3 +106,27 @@ export interface CodeBlock {
   links: BlockLink[];
   callers: { node: NodeRef; line: number; kind: LinkKind; label?: string }[]; // line is in the caller
 }
+
+// Where to start reading: entry points by runtime and kind, plus a one-line
+// summary of how the runtimes talk.
+export interface EntryPoint {
+  node: NodeRef;
+  label: string; // what it answers to: a channel, an event, a file
+  detail: string; // where it is, or how much it does
+}
+
+export interface EntryCategory {
+  name: string; // "on load", "ipc handlers", …
+  collapsed: boolean; // long tails start folded
+  entries: EntryPoint[];
+}
+
+export interface EntryGroup {
+  runtime: string | null;
+  categories: EntryCategory[];
+}
+
+export interface EntriesResult {
+  summary: { from: string; to: string; kind: LinkKind; count: number }[];
+  groups: EntryGroup[];
+}

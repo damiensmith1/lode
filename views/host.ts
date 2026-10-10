@@ -24,8 +24,7 @@ export interface SourceHighlight {
 }
 
 export type ViewRequest =
-  | { kind: "map"; lens?: string; parent?: string }
-  | { kind: "graph"; lens?: string; select?: string }
+  | { kind: "entries" }
   | { kind: "flow"; id?: string };
 
 // Views dispatch this (bubbling, composed) when their title changes, so the

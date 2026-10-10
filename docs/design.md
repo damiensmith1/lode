@@ -295,9 +295,10 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
 ```
 
 - **Queries** (`src/query`): deterministic, from the graph alone:
-  `info`, `files`, `search`, `block(id)`, `map(lens, parent?)`,
-  `graph(lens)`, `symbolAt(file, line)`, `source(file)` (text + inline
-  annotations + symbols). Results are plain
+  `info`, `files`, `search`, `entries`, `block(id)`, `symbolAt(file,
+  line)`, `source(file)` (text + inline annotations + symbols), plus
+  `map(lens, parent?)` and `graph(lens)` (lens overviews; no view uses them
+  now, but they stay for the query layer and MCP). Results are plain
   JSON (`src/query/types.ts`), the only thing views depend on.
 - **Server** (`src/server`): JSON-RPC over a WebSocket at `/rpc`, localhost
   only; watches the project and pushes `changed` after re-indexing.
@@ -308,10 +309,16 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   the token in the URL fragment, which never goes over HTTP. `source` checks
   real paths, so symlinks can't escape the project.
 - **Views** (`views/`): framework-free web components with shadow DOM,
-  themed by `--lode-*` CSS custom properties from the host: `<lode-flow>`
-  (reading), `<lode-map>` (overview by lens), `<lode-graph>` (experiment).
+  themed by `--lode-*` CSS custom properties from the host:
+  `<lode-entries>` (where to start) and `<lode-flow>` (reading).
   Wires are measured from the laid-out DOM, so layout stays plain CSS.
-- **Focus was removed.** It showed one symbol's steps and links as names;
+- **Map, graph and focus were removed.** Map (one lens level at a time,
+  merged edge counts) and graph (a zoomable tree of the whole project)
+  answered "what are the parts and how do they talk", but boxes with counts
+  didn't say what anything does or where to start, and took clicks to reach
+  readable code. Their one useful fact, how the runtimes talk, is the
+  entries view's summary line.
+- **Focus** It showed one symbol's steps and links as names;
   flow shows the same links on the real code (callers in each block header,
   calls / IPC / state as chips on lines), so focus added nothing.
 - **Host contract** (`views/host.ts`): a host passes a `LodeClient` and a
@@ -355,19 +362,19 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
 - **Host syntax hook**: hosts may pass `syntax(text, file)` (escaped HTML per
   line) and `syntaxCss`; views put the CSS inside their shadow root. Views
   never bundle a highlighter.
-- **Graph view (experiment)** (`<lode-graph>`): the whole project as one
-  horizontal tree you zoom around, a different take from focus/map. Columns
-  are tree levels, highest on the left (runtimes › files › symbols ›
-  callbacks). Clicking a node selects it, opens its children to the right
-  and flies the camera there; only the path to the selection stays open
-  (an accordion) so columns stay short, and the camera never zooms out past
-  a readable level on its own. The selection's connections are drawn to
-  whatever's visible, rolled up to the nearest visible ancestor; "reveal
-  connections" opens their real endpoints. Same-column links bracket on
-  the left. ← → step through what you've selected; wheel zooms, drag pans.
-  Backed by one `graph` query (the lens tree plus edges merged per pair,
-  ~850KB for glance), with rollup done in the view.
-- **Standalone host** (`hosts/app`): code on the left with syntax colours
+- **Entry points view** (`<lode-entries>`, the app's first tab): where to
+  start reading. The `entries` query lists what the outside world calls
+  into, by runtime and kind: files that run code on load, IPC handlers,
+  messages from main, the preload bridge API, other registered callbacks
+  (app events, hotkeys, UI listeners; timers and tests left out), and,
+  folded, functions nothing in the project reaches (a framework, HTML or
+  the outside calls them). All from data lode already had: channel
+  endpoints (now kept on `Graph`), registrations, call edges. A summary line
+  says how the runtimes talk (`preload ⇄ renderer · 460 calls`). Filter by
+  text; clicking an entry starts the flow there. Next idea: a model-written
+  one-line summary per entry.
+- **Standalone host** (`hosts/app`): entry points and flow tabs; a code pane
+  that appears once a file is opened, with syntax colours
   (highlight.js, Clance's palette; a host concern, so not in views) and ◇
   annotations,
   lode views in tabs on the right, file tree, symbol search, deep links
@@ -412,7 +419,7 @@ outlines; library code is hidden behind a toggle.
 ```
 lode-core      graph, plugins, derive, cache (this repo today)
 lode-query     query layers: deterministic cut + model-scored (Jev / LLM)
-lode-views     framework-free view components (flow, map; trace and impact later)
+lode-views     framework-free view components (entries, flow; impact later)
 lode-<host>    thin adapters: VS Code first, Clance later
 ```
 
