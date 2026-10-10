@@ -18,7 +18,7 @@ const CSS = `
 :host { display: flex; flex-direction: column; overflow: hidden; }
 .canvas { position: relative; flex: 1; min-height: 0; overflow: auto; }
 .row { position: relative; display: flex; align-items: flex-start; gap: 72px; padding: 24px 32px 120px; width: max-content; }
-.block { position: relative; z-index: 1; width: 600px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
+.block { position: relative; z-index: 1; width: max-content; min-width: 520px; max-width: 860px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px rgba(23,22,20,.04); }
 .block.root { border-color: var(--lode-fg); }
 .block.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 1px 2px rgba(23,22,20,.04); }
 .block header { padding: 10px 14px 8px; border-bottom: 1px solid var(--lode-border); display: flex; flex-direction: column; gap: 3px; }
@@ -31,13 +31,14 @@ const CSS = `
 .callers.all { max-height: 92px; overflow-y: auto; padding-right: 4px; }
 .caller.more { border-style: solid; border-color: var(--lode-border); background: var(--lode-sunken); font-family: var(--lode-font); }
 .caller.open { border-style: solid; border-color: var(--lode-local); color: var(--lode-local); }
-.code { padding: 6px 0 8px; font: 12px/20px var(--lode-mono); overflow-x: auto; }
+.code { padding: 6px 0 8px; font: 12px/20px var(--lode-mono); }
 .ln { display: flex; align-items: flex-start; padding-right: 8px; }
 .ln .no { flex: none; width: 46px; padding-right: 12px; text-align: right; color: #a3a09a; user-select: none; }
-.ln .src { white-space: pre; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Long lines wrap (hanging under their indent) rather than being cut off. */
+.ln .src { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 .ln.linked .no { color: var(--lode-local); }
 .ln.active { background: rgba(47, 95, 168, .08); box-shadow: inset 2px 0 0 var(--lode-local); }
-.chips { flex: none; width: 150px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; }
+.chips { flex: none; max-width: 170px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; }
 .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .chip { font: 10.5px/18px var(--lode-mono); padding: 0 6px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
 .chip:hover, .chip.active { border-color: currentColor; }
@@ -252,7 +253,7 @@ export class LodeFlow extends HTMLElement {
         .map((link) => `<button class="chip k-${link.kind}${l.n === activeLine && link.target.id === activeTarget ? " active" : ""}" data-action="open" data-col="${i}" data-id="${escape(link.target.id)}" data-line="${l.n}" title="${escape(link.target.id)}">${escape(chipText(link))}</button>`)
         .join("");
       const classes = ["ln", links.length ? "linked" : "", l.n === activeLine ? "active" : ""].filter(Boolean).join(" ");
-      rows.push(`<div class="${classes}" data-n="${l.n}"><span class="no">${l.n}</span><span class="src" title="${escape(l.text.trim())}">${html[k] || " "}</span><span class="chips">${chips}</span></div>`);
+      rows.push(`<div class="${classes}" data-n="${l.n}"><span class="no">${l.n}</span><span class="src">${html[k] || " "}</span>${chips ? `<span class="chips">${chips}</span>` : ""}</div>`);
     });
     flushFold((b.lines.at(-1)?.n ?? 0) + 1);
 
