@@ -237,19 +237,31 @@ export class Editing {
   private rehighlight(row: HTMLElement) {
     const code = row.closest<HTMLElement>(".code");
     if (!code) return;
-    // Text typed next to the fold button (outside .text) belongs in it.
+    // Text typed beside the line's text (before it, or next to a fold
+    // button) belongs in it, where it was typed; the caret goes after it.
     const src = row.querySelector(".src")!;
     const text = row.querySelector<HTMLElement>(".text")!;
-    let stray = "";
-    for (const node of [...src.childNodes]) if (node !== text && node.nodeType === Node.TEXT_NODE) (stray += node.textContent), node.remove();
-    const sel = this.selection(code);
+    let before = "";
+    let after = "";
+    for (const node of [...src.childNodes]) {
+      if (node === text || (node instanceof Element && node.classList.contains("fold"))) continue;
+      const position = text.compareDocumentPosition(node);
+      if (position & Node.DOCUMENT_POSITION_PRECEDING) before += node.textContent ?? "";
+      else after += node.textContent ?? "";
+      node.remove();
+    }
+    const sel = before || after ? null : this.selection(code);
     const offset = sel && sel.start.row === row ? sel.start.offset : null;
-    this.setText(row, textOf(row) + stray, this.host.file(cardKeyOf(code)) ?? "");
-    if (offset !== null || stray) this.caret({ row, offset: offset ?? textOf(row).length });
+    const own = textOf(row);
+    this.setText(row, before + own + after, this.host.file(cardKeyOf(code)) ?? "");
+    if (before) this.caret({ row, offset: before.length });
+    else if (after) this.caret({ row, offset: own.length + after.length });
+    else if (offset !== null) this.caret({ row, offset });
   }
 
   private setText(row: HTMLElement, text: string, file: string) {
-    row.querySelector<HTMLElement>(".text")!.innerHTML = text ? this.host.highlight(text, file) : "";
+    // An empty line holds a <br>, so the caret can sit in it.
+    row.querySelector<HTMLElement>(".text")!.innerHTML = text ? this.host.highlight(text, file) : "<br>";
   }
 
   // --- undo ------------------------------------------------------------------
@@ -341,7 +353,7 @@ function newRow(run: string): HTMLElement {
   row.setAttribute("part", "line line-added");
   row.dataset.run = run;
   row.dataset.new = "";
-  row.innerHTML = `<span class="no" part="line-number" contenteditable="false">+</span><span class="src" part="source"><span class="text"></span></span>`;
+  row.innerHTML = `<span class="no" part="line-number" contenteditable="false">+</span><span class="src" part="source"><span class="text"><br></span></span>`;
   return row;
 }
 

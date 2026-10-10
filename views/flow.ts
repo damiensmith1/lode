@@ -91,7 +91,6 @@ const CSS = `
 /* Long lines wrap (hanging under their indent) rather than being cut off. */
 .ln .src { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 .code[contenteditable="true"] { outline: none; caret-color: var(--lode-fg); }
-.ln .text:empty { display: inline-block; min-width: 1px; }
 .ln.added .no { color: var(--lode-channel); }
 .chips, .paging, .ln .no { user-select: none; }
 .unsaved { display: none; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--lode-channel-text); }
@@ -1176,7 +1175,7 @@ export class LodeFlow extends HTMLElement {
       original.set(line, b.lines[line - first]?.text ?? "");
       const lockedHtml = foldHtml && foldHtml.replace("<button ", '<button contenteditable="false" ');
       rows.push(
-        `<div part="line" class="${classes}" data-n="${line}" data-run="${runs.length - 1}"><span class="no" part="line-number" contenteditable="false">${line}</span><span class="src" part="source"><span class="text">${b.lines[line - first]?.text ? html[line - first] : ""}</span>${lockedHtml}</span>${chips ? `<span class="chips" part="chips" contenteditable="false">${chips}</span>` : ""}</div>`,
+        `<div part="line" class="${classes}" data-n="${line}" data-run="${runs.length - 1}"><span class="no" part="line-number" contenteditable="false">${line}</span><span class="src" part="source"><span class="text">${b.lines[line - first]?.text ? html[line - first] : "<br>"}</span>${lockedHtml}</span>${chips ? `<span class="chips" part="chips" contenteditable="false">${chips}</span>` : ""}</div>`,
       );
     }
     const total = shownLines + remaining;
