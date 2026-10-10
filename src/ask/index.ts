@@ -11,6 +11,7 @@ import type { Judge, JudgeAnswer, JudgeQuestion } from "./judge.js";
 // facts and those scores. See docs/design.md, "Asking for a flow".
 
 export interface AskOptions {
+  route?: FlowRoute; // skip routing: treat the question as this kind
   budget?: number; // most cards in a flow (default 12)
   hops?: number; // how far to follow from the start (default 2)
   base?: string; // git ref for change questions (default HEAD)
@@ -28,6 +29,42 @@ const ROUTES: Record<FlowRoute, string> = {
 const STOP = new Set(
   "show me how we our the a an of to in on for and or is are was be do does did what which who whom where when why with from this that these those it its into most likely can could would will should code work works working get gets made make makes use uses used about all any some there here i you".split(" "),
 );
+
+// Symbols a question names or is about, by words alone: names and file
+// paths matching the question's words (a word that is a symbol's exact
+// name counts most), top-level declarations and methods (not callbacks).
+// Deterministic; the first step of asking, and a question's seeds when no
+// model is used.
+export function lexicalCandidates(question: string, queries: Queries, limit = 120): NodeRef[] {
+  const g = queries.graph();
+  const words = tokens(question).filter((w) => !STOP.has(w));
+  const aboutTests = /\btests?\b|\bspecs?\b/i.test(question);
+  // Words in the question that look like code ("showAll", "read_config")
+  // and so may be a symbol's exact name; plain words ("built") aren't.
+  const named = new Set((question.match(/[A-Za-z_$][\w$]*/g) ?? []).filter((w) => /[a-z][A-Z]|[_$\d]/.test(w)));
+  const nested = (n: Node) => {
+    for (let p = n.parent ? g.node(n.parent) : undefined; p; p = p.parent ? g.node(p.parent) : undefined) if (p.kind === "callable") return true;
+    return false;
+  };
+  const scored: { node: NodeRef; score: number }[] = [];
+  for (const n of g.allNodes()) {
+    if (n.external || !n.loc || n.kind === "block" || n.id === n.loc.file || nested(n)) continue;
+    // A class's fields aren't where to start; its class or methods are.
+    if (n.kind === "value" && n.parent && n.parent !== n.loc.file) continue;
+    // Nor is test code, unless the question is about tests.
+    if (!aboutTests && /(^|\/)(tests?|__tests__|specs?)\/|\.(test|spec)\.[a-z]+$/i.test(n.loc.file)) continue;
+    const name = tokens(n.name);
+    const file = tokens(n.loc.file);
+    let score = named.has(n.name) && n.name.length > 2 ? 12 : 0;
+    for (const w of words) {
+      if (name.some((t) => similar(t, w))) score += 3;
+      else if (file.some((t) => similar(t, w))) score += 1;
+    }
+    if (score > 0) scored.push({ node: queries.ref(n), score: score + (n.kind === "callable" ? 0.5 : 0) });
+  }
+  scored.sort((a, b) => b.score - a.score || a.node.id.length - b.node.id.length);
+  return scored.slice(0, limit).map((s) => s.node);
+}
 
 export async function askFlow(question: string, queries: Queries, judge: Judge, options: AskOptions = {}): Promise<FlowPlan> {
   const started = Date.now();
@@ -53,29 +90,8 @@ export async function askFlow(question: string, queries: Queries, judge: Judge, 
     ms: Date.now() - started,
   });
 
-  // 1. Candidates, cheaply: symbols whose name or file matches the
-  // question's words (top-level declarations and methods, not callbacks).
-  const words = tokens(question).filter((w) => !STOP.has(w));
-  // Words in the question that are a symbol's exact name ("showAll").
-  const named = new Set(question.match(/[A-Za-z_$][\w$]*/g) ?? []);
-  const nested = (n: Node) => {
-    for (let p = n.parent ? g.node(n.parent) : undefined; p; p = p.parent ? g.node(p.parent) : undefined) if (p.kind === "callable") return true;
-    return false;
-  };
-  const scored: { node: NodeRef; score: number }[] = [];
-  for (const n of g.allNodes()) {
-    if (n.external || !n.loc || n.kind === "block" || n.id === n.loc.file || nested(n)) continue;
-    const name = tokens(n.name);
-    const file = tokens(n.loc.file);
-    let score = named.has(n.name) && n.name.length > 2 ? 12 : 0;
-    for (const w of words) {
-      if (name.some((t) => similar(t, w))) score += 3;
-      else if (file.some((t) => similar(t, w))) score += 1;
-    }
-    if (score > 0) scored.push({ node: queries.ref(n), score: score + (n.kind === "callable" ? 0.5 : 0) });
-  }
-  scored.sort((a, b) => b.score - a.score || a.node.id.length - b.node.id.length);
-  const shortlist = scored.slice(0, 120).map((s) => s.node);
+  // 1. Candidates, cheaply (see lexicalCandidates).
+  const shortlist = lexicalCandidates(question, queries, 120);
   const ids = shortlist.map((_, i) => `S${i + 1}`);
   const RELEVANCE = 30; // nouls for the best lexical matches
 
@@ -105,7 +121,7 @@ export async function askFlow(question: string, queries: Queries, judge: Judge, 
       ),
     },
   );
-  const route = (first.route as Extract<JudgeAnswer, { type: "choice" }>).choice as FlowRoute;
+  const route = options.route ?? ((first.route as Extract<JudgeAnswer, { type: "choice" }>).choice as FlowRoute);
 
   if (route === "breakage" || route === "changes") return done(route, await changesFlow(route), undefined);
   if (route === "other") return done(route, [], "That doesn't look like a question about this code.");

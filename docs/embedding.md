@@ -295,7 +295,28 @@ the environment or lode's `.env`), or pass `createService(store, { judge
 e.g. an LLM. `lodeApi(connection).ask(question)` returns the `FlowPlan`
 for a host's own UI, and `flow.loadPlan(plan)` lays one out.
 
-## 10. Look
+## 10. Context for LLMs
+
+`contextFor(request, queries, judge?)` (service method `context`) returns
+a slice of the code formatted for a language model: `{ title, markdown,
+items, edges, tokens, dropped }`. Where it starts: `seeds` (symbol ids),
+`question`, `changes` (a git ref: changed symbols and what depends on
+them) or `canvas` (cards and arrows, as a flow has them). It grows `hops`
+along the graph (`direction`: down, up, both), then fits `budget` tokens:
+full code at distance 0 (folds collapsed unless they hold changes),
+signature plus the connecting line at 1, names beyond; detail drops
+before items do. `rank: "graph"` (default) is deterministic; `"judge"`
+uses the judge to pick a question's seeds and steps, or what a change
+puts at risk.
+
+`serveMcp(service, { input, output })` (or `lode mcp <project>`) serves
+it to agents over MCP: `lode_search`, `lode_read`, `lode_context`,
+`lode_impact`, `lode_changes`, `lode_entries`. A flow's "copy context"
+button (or `flow.context(budget)`) builds it from the canvas; the
+cancelable `lode-context` event lets a host send it to its own agent
+instead of the clipboard.
+
+## 11. Look
 
 - **Tokens.** Every colour and font is a `--lode-*` custom property, set on
   any ancestor of a view (or on the view). Ready-made: `LIGHT_THEME` (the

@@ -1,9 +1,10 @@
 import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, FlowPlan, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
-import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, COMMAND_HELP, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
+import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, COMMAND_HELP, CONTEXT_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
+import type { ContextResult } from "../src/context/index.js";
 
 const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
@@ -214,6 +215,7 @@ export class LodeFlow extends HTMLElement {
         <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
         <button class="crumb" data-action="fit" title="Show every card">fit</button>
         <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
+        <button class="crumb" data-action="copy-context" title="Copy these cards (or the selected ones) as context for an LLM">copy context</button>
         <button class="crumb diff-toggle" data-action="diff" title="Show what changed since the last commit (git)">changes</button>
         <button class="crumb" data-action="clear">clear</button>
       </div>
@@ -646,6 +648,49 @@ export class LodeFlow extends HTMLElement {
   }
 
   // Show a node: select its card if it's open, else add it as a new tree.
+  // --- context for LLMs -------------------------------------------------------------
+
+  // These cards (the selection, if two or more are selected) as context for
+  // a language model: their code, how they connect, their notes and any
+  // changes, sized to `budget` tokens (see src/context).
+  async context(budget = 12_000): Promise<ContextResult | null> {
+    if (!this.client || !this.cardMap.size) return null;
+    const keys = this.group.size > 1 ? [...this.group] : this.readingOrder();
+    const chosen = new Set(keys);
+    return this.client.call<ContextResult>("context", {
+      canvas: {
+        cards: keys.map((k) => {
+          const c = this.cardMap.get(k)!;
+          return { id: k, ...(c.note && { note: c.note }), ...(c.fragment && { range: c.range }) };
+        }),
+        arrows: this.arrows.filter((a) => chosen.has(a.from) && chosen.has(a.to)),
+      },
+      ...(this.diffBase !== null && { changes: this.diffBase }),
+      budget,
+    });
+  }
+
+  // "copy context": the host hears it first (lode-context, cancelable: a
+  // host can send it to its own agent); otherwise it goes to the clipboard.
+  private async copyContext() {
+    const count = this.root.querySelector(".count");
+    const say = (text: string) => {
+      if (!count) return;
+      count.textContent = text;
+      setTimeout(() => this.updateToolbar(), 2500);
+    };
+    try {
+      const result = await this.context();
+      if (!result) return;
+      const go = this.dispatchEvent(new CustomEvent(CONTEXT_EVENT, { detail: result, bubbles: true, composed: true, cancelable: true }));
+      if (!go) return say(`context sent · ${result.tokens.toLocaleString()} tokens`);
+      await navigator.clipboard.writeText(result.markdown);
+      say(`copied ${result.items.length} pieces · ${result.tokens.toLocaleString()} tokens`);
+    } catch (error) {
+      say(`couldn't copy: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   // --- asking ------------------------------------------------------------------
 
   private banner = "";
@@ -900,6 +945,7 @@ export class LodeFlow extends HTMLElement {
     if (action === "focus") return this.run("focus");
     if (action === "zoom-reset") return this.run("zoomReset");
     if (action === "diff") return void this.setDiff(this.diffBase === null ? "HEAD" : null);
+    if (action === "copy-context") return void this.copyContext();
     if (action === "clear") return this.run("clear");
     if (!here) return;
     if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);

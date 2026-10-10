@@ -66,6 +66,27 @@ what the card shows; hidden lines are never touched. Saves are checked
 against the file (a conflicting change is refused, not overwritten), the
 graph re-indexes, and undo goes back past a save.
 
+### Context for LLMs
+lode knows which code matters, so it can hand a model exactly that instead
+of whole files: full code at the centre (unrelated folds collapsed),
+signatures and the connecting line one hop out, names further out, and
+the connections spelled out, sized to a token budget.
+
+- **`lode mcp`** serves it to any agent over MCP (Claude Code, Cursor,
+  Clance…): `lode_read` (a symbol and its surroundings), `lode_context` (a
+  question or symbols), `lode_impact` (what your changes touch),
+  `lode_search`, `lode_changes`, `lode_entries`. `skills/lode/SKILL.md`
+  teaches agents when to use which.
+- **Copy context** on any flow copies its cards (or the selected ones) as
+  Markdown for a chat, with the diff if changes are shown.
+- Deterministic by default (same commit and request, same context);
+  `rank: "judge"` lets Jev choose what's relevant.
+
+```sh
+npm run build
+claude mcp add lode -- node /path/to/lode/dist/lib/src/cli.js mcp /path/to/project
+```
+
 ### Keyboard
 A line cursor in the selected card: **↑↓** lines, **→** follow a chip or
 fold (**Tab** picks which), **←** back along the arrow, **[ ]** cards in
@@ -104,6 +125,7 @@ Other commands:
 npm run lode -- serve <project> [--port n] [--origin url]   # just the server, for another host
 npm run lode -- index <project> [--json out.json]            # build the graph, print a summary
 npm run lode -- node <project> 'src/main.ts#run'             # one node, its edges each way
+node dist/lib/src/cli.js mcp <project>                       # MCP server on stdio, for agents (after npm run build)
 ```
 
 ## How it fits together
@@ -127,6 +149,8 @@ npm run lode -- node <project> 'src/main.ts#run'             # one node, its edg
   git changes mapped to symbols.
 - **Ask** (`src/ask`): a flow for a question, built from graph candidates
   that a `Judge` (Jev by default) scores.
+- **Context** (`src/context`, `src/mcp`): slices of the graph formatted
+  for language models, and an MCP server that serves them.
 - **Service and server** (`src/service`, `src/server`): the queries as
   methods with no transport, a file watcher, and an optional localhost
   WebSocket server.
@@ -143,7 +167,7 @@ where their state lives, how they look, which keys do what, and what
 "open this file" means. Everything below is in
 [`docs/embedding.md`](docs/embedding.md).
 
-**Packages:** `lode` (core, queries, service, ask), `lode/server`,
+**Packages:** `lode` (core, queries, service, ask, context), `lode/server`, `lode/mcp`,
 `lode/views`, `lode/views/highlight`, self-contained bundles in
 `dist/views` for pages without a bundler, and the `lode` command
 (`npm run build` makes them).
@@ -193,6 +217,7 @@ What a host can plug in or take over:
 | **Editing** | read-only, per card, or yours: `host.saveEdits` lets the editor apply saves with its own undo |
 | **Your own UI** | `lodeApi(connection)`: files, `buildFileTree`, search, entries, changes, symbol at cursor, ask |
 | **Asking** | `flow.ask(question)`, `flow.loadPlan(plan)`, or your own model behind the `Judge` interface |
+| **LLM context** | `contextFor(request)` in Node, `lode/mcp` (`serveMcp`) for agents, `flow.context()` and the cancelable `lode-context` event to send a canvas to your own agent |
 | **Languages** | a `LanguagePlugin` reads a project into nodes, edges, channels and fold regions; the core does the rest |
 
 `hosts/minimal/index.html` is a complete host in one page, from the

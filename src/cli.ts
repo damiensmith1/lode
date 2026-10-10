@@ -10,6 +10,9 @@
 //   allows a browser page from another origin (a host's webview) to connect.
 // lode open <project> [--port <n>] [--cache <dir>]
 //   Run the server with the standalone app, and open it in the browser.
+// lode mcp <project> [--cache <dir>]
+//   Serve lode's tools to an agent over MCP (stdio), e.g. in Claude Code:
+//   claude mcp add lode -- npx lode mcp /path/to/project
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -44,7 +47,7 @@ const cacheDir = option("cache");
 const port = Number(option("port") ?? 0);
 const [command, project, nodeId] = args;
 
-const COMMANDS = ["index", "node", "serve", "open"];
+const COMMANDS = ["index", "node", "serve", "open", "mcp"];
 if (!project || !COMMANDS.includes(command) || (command === "node" && !nodeId)) {
   console.error(
     [
@@ -52,6 +55,7 @@ if (!project || !COMMANDS.includes(command) || (command === "node" && !nodeId)) 
       "       lode node <project> <node-id> [--cache dir]",
       "       lode serve <project> [--port n] [--cache dir] [--origin url]…",
       "       lode open <project> [--port n] [--cache dir]",
+      "       lode mcp <project> [--cache dir]",
     ].join("\n"),
   );
   process.exit(1);
@@ -62,7 +66,15 @@ const store = GraphStore.open(tsPlugin, project, { cacheDir });
 const ms = Math.round(performance.now() - start);
 const { graph } = store;
 
-if (command === "serve" || command === "open") {
+if (command === "mcp") {
+  // stdout is the protocol: everything else goes to stderr.
+  const { createService } = await import("./service/index.js");
+  const { serveMcp } = await import("./mcp/index.js");
+  const service = createService(store);
+  service.watch();
+  serveMcp(service);
+  process.stderr.write(`lode mcp · ${graph.size.nodes} nodes (${ms}ms) · ${store.root}\n`);
+} else if (command === "serve" || command === "open") {
   const { startServer } = await import("./server/index.js");
   let staticDir: string | undefined;
   if (command === "open") {

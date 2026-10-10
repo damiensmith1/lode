@@ -5,6 +5,7 @@ import type { GraphStore } from "../graph/store.js";
 import { Queries } from "../query/index.js";
 import { askFlow } from "../ask/index.js";
 import { jevJudge, type Judge } from "../ask/judge.js";
+import { contextFor, type ContextRequest } from "../context/index.js";
 
 // lode's methods with no transport attached: what views call, as plain async
 // functions. The WebSocket server is one way to reach them; a host that runs
@@ -109,6 +110,10 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     return { ok: true, files: files.length ? files : [String(file)] };
   };
 
+  // The judge for "/" questions and judged context: the host's, or Jev
+  // when a key is set (read when needed).
+  const judgeOf = () => options.judge ?? (process.env.TYPESAFE_API_KEY ? jevJudge({ apiKey: process.env.TYPESAFE_API_KEY }) : null);
+
   const methods: Record<string, (params: Record<string, unknown>) => unknown> = {
     editFile: (p) => {
       const edits = Array.isArray(p.edits) ? p.edits : [];
@@ -144,11 +149,18 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
     block: (p) => queries.block(String(p.id)),
     entries: () => queries.entries(),
     changes: (p) => queries.changes(typeof p.base === "string" && p.base ? p.base : "HEAD"),
+    // Context for a language model: a slice of the code, formatted (see
+    // src/context). Deterministic unless rank is "judge".
+    context: (p) => {
+      const request = p as ContextRequest;
+      if (request.rank === "judge" && !judgeOf()) throw new Error("rank \"judge\" needs a model: set TYPESAFE_API_KEY (Jev)");
+      return contextFor(request, queries, judgeOf() ?? undefined);
+    },
     // Build a flow for a question ("how do we create tabs?").
     ask: (p) => {
       const question = String(p.question ?? "").trim().slice(0, 500);
       if (!question) throw new Error("ask: no question");
-      const judge = options.judge ?? (process.env.TYPESAFE_API_KEY ? jevJudge({ apiKey: process.env.TYPESAFE_API_KEY }) : null);
+      const judge = judgeOf();
       if (!judge) throw new Error("Asking needs a model: set TYPESAFE_API_KEY (Jev) in the environment or lode's .env");
       return askFlow(question, queries, judge, { base: typeof p.base === "string" && p.base ? p.base : "HEAD" });
     },

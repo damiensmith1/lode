@@ -21,6 +21,10 @@
       "types": "./dist/lib/src/server/index.d.ts",
       "import": "./dist/lib/src/server/index.js"
     },
+    "./mcp": {
+      "types": "./dist/lib/src/mcp/index.d.ts",
+      "import": "./dist/lib/src/mcp/index.js"
+    },
     "./views": {
       "types": "./dist/lib/views/index.d.ts",
       "import": "./dist/lib/views/index.js"
@@ -39,7 +43,8 @@
     "dist/views",
     "hosts/minimal",
     "README.md",
-    "docs/embedding.md"
+    "docs/embedding.md",
+    "skills"
   ],
   "scripts": {
     "test": "vitest run",

@@ -16,6 +16,8 @@ export function lodeApi(connection: LodeConnection) {
     // Symbols by name (best first); open one with flow.show(node.id).
     search: (query: string) => connection.call<NodeRef[]>("search", { query }),
     entries: () => connection.call<EntriesResult>("entries"),
+    // Context for an LLM: a slice of the code, formatted (see src/context).
+    context: (request: Record<string, unknown>) => connection.call<{ title: string; markdown: string; tokens: number; dropped: number }>("context", request),
     // A flow built for a question ("how do we create tabs?"); needs a judge
     // (Jev) on the server.
     ask: (question: string) => connection.call<FlowPlan>("ask", { question }),

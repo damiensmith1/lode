@@ -705,6 +705,30 @@ lays the plan out by step, left to right; notes show under each card's
 header and are saved with the tab. In the app, "/" in the top box asks in
 a new flow tab, and a flow's "/" key starts a question there.
 
+## Context for LLMs
+
+lode owns choosing and formatting the slice (a raw graph dump is useless
+to a model); hosts choose how it's delivered. **Seeds** come from symbols,
+a canvas, git changes, or a question (lexical, or judged by Jev with
+`rank: "judge"`). The slice **grows** a few hops along calls, callers or
+both (state writes only to module-level state, not class fields). It's
+**ranked** seeds first, then by distance, utilities last, then by how
+connected each is, and **fitted** to a token budget (about 4 characters a
+token) by detail: full code at the centre, signature and connecting line
+one hop out, names further; detail drops before items do, and what's left
+out is counted. The **format** is Markdown: a title, the connections as
+edges, then Code / Nearby / Also related, with line numbers, `⋯` folds
+and `+`/`-` change lines. Deterministic by default, so the same commit
+and request give the same context (cacheable, testable).
+
+Delivered as: the `context` service method; **`lode mcp`**, a thin MCP
+server (stdio JSON-RPC, written directly: initialize, ping, tools/list,
+tools/call; stdout is the protocol, logs go to stderr) with six tools;
+**copy context** in flows (canvas or selection; a host can take it via
+the cancelable `lode-context` event); and `skills/lode/SKILL.md` for
+agents. Clance can run `lode mcp` for its agent or call `contextFor`
+in-process.
+
 ## Build vs buy: existing code graphs
 
 Joern (code property graph) and CodeQL were considered as the core and

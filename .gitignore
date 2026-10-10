@@ -5,3 +5,6 @@ dist
 .env
 .env.*
 !.env.example
+
+# a local MCP client for trying lode mcp (see mcp-playground/README.md)
+/mcp-playground/

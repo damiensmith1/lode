@@ -161,6 +161,7 @@ export const CLOSE_EVENT = "lode-close"; // cards were closed
 export const CHANGE_EVENT = "lode-change"; // the canvas changed (cards, arrows, layout, folds, camera)
 export const DIRTY_EVENT = "lode-dirty"; // a card got (or lost) unsaved edits
 export const SAVE_EVENT = "lode-save"; // a card's edits were saved, or refused
+export const CONTEXT_EVENT = "lode-context"; // "copy context" built LLM context; cancelable (the host takes it instead of the clipboard)
 
 // A change to a file from a card: lines start..end (1-based, inclusive) as
 // the card showed them, and what they are now (any number of lines).
@@ -186,4 +187,5 @@ export interface FlowEventMap {
   [CHANGE_EVENT]: Record<string, never>;
   [DIRTY_EVENT]: { card: CardInfo; dirty: boolean };
   [SAVE_EVENT]: { card: CardInfo; file: string; ok: boolean; message?: string };
+  [CONTEXT_EVENT]: { title: string; markdown: string; tokens: number; items: unknown[]; edges: unknown[]; dropped: number };
 }
