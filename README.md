@@ -19,7 +19,7 @@ and query core, an embeddable canvas, an MCP server for agents, and a small
 host contract, so any editor or app can show it (Clance does). This repo
 also has a standalone app that runs on any folder.
 
-![Asking "/how do we create the tabs": a flow of the code that does it, built in 0.6s](https://raw.githubusercontent.com/damiensmith1/lode/main/docs/images/ask.png)
+![Asking "/how do we create the tabs": a flow of the code that does it, built in 0.6s](https://raw.githubusercontent.com/damiensmith1/lode-graph/main/docs/images/ask.png)
 
 ## Features
 
@@ -169,7 +169,7 @@ models or limit which are allowed.
 
 ### Git changes
 
-![The changes sidebar and a flow with the diff shown on its cards](https://raw.githubusercontent.com/damiensmith1/lode/main/docs/images/changes.png)
+![The changes sidebar and a flow with the diff shown on its cards](https://raw.githubusercontent.com/damiensmith1/lode-graph/main/docs/images/changes.png)
 
 - **Changes sidebar:** every changed file, dropping down into the
   declarations that changed as a hierarchy (a class over its methods),
@@ -243,7 +243,7 @@ See [Embed it anywhere](#embed-it-anywhere) and
 **Run the standalone app** (from a clone; it isn't in the package):
 
 ```sh
-git clone https://github.com/damiensmith1/lode.git && cd lode
+git clone https://github.com/damiensmith1/lode-graph.git && cd lode-graph
 npm install
 npm run lode -- open path/to/any/project     # the app, in your browser
 ```

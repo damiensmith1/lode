@@ -17,13 +17,13 @@
     "web-components",
     "tree-sitter"
   ],
-  "homepage": "https://github.com/damiensmith1/lode#readme",
+  "homepage": "https://github.com/damiensmith1/lode-graph#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/damiensmith1/lode.git"
+    "url": "git+https://github.com/damiensmith1/lode-graph.git"
   },
   "bugs": {
-    "url": "https://github.com/damiensmith1/lode/issues"
+    "url": "https://github.com/damiensmith1/lode-graph/issues"
   },
   "author": "Damien Smith",
   "license": "MIT",
