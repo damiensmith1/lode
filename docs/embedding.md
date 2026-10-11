@@ -214,7 +214,7 @@ const host: LodeHost = {
   highlight: (h) => editor.decorate(h),        // optional: lines the selected card covers (null clears)
   syntax: (text, file) => htmlLines,           // optional: one HTML string per line, source escaped
   syntaxCss: "…",                              // CSS for what `syntax` emits
-  storage: myStorage,                          // optional: where views keep state (default: the project's cache)
+  storage: myStorage,                          // optional: where flows keep their canvas (default: not saved)
   css: "…",                                    // optional: CSS added last inside every view
   keys: { … } | false,                         // optional: see above
   render: { header, footer, line, chip },      // optional: your markup in cards (below)
@@ -248,9 +248,10 @@ Without them, code is plain.
 a file to start reading"); default nothing.
 
 **Storage** (`LodeStorage`: `load(key)`, `save(key, value)`, null removes;
-sync or async):
+sync or async). Opt-in: without `host.storage` a flow saves nothing, and a
+new view starts empty. Ready-made:
 
-- `serviceStorage(connection)`: in lode's cache, with the project (default).
+- `serviceStorage(connection)`: in lode's cache, with the project.
 - `localStorageStorage(prefix)`: this browser.
 - `memoryStorage()`: this page only.
 - your own: VS Code `context.workspaceState`, a webview's `getState`, a
@@ -358,9 +359,9 @@ just the pieces to build one:
   order (from `action` events as they stream, or the result's `actions`).
   Actions sharing an `undoGroup` undo as one step; added cards glow.
 - `flow.highlight(id | null)`: light up a card (a name hovered in an answer).
-- `renderMarkdown(text, link)` and `codeNames(text)` (in `lode/views`): an
-  answer's Markdown, safely, with code names that `link` knows (resolve
-  them with the service's `resolve`) as `<code class="sym" data-id>`.
+- `api.resolve(names, prefer)`: which code names in an answer are real
+  symbols (name → id), to link them to cards. How the answer's Markdown
+  is drawn is the host's (the app's: `hosts/app/markdown.ts`).
 
 The standalone app's panel (`hosts/app/explain.ts`) is one such UI, built
 only on these: suggestions, streaming, a stop button (`explainCancel`), a

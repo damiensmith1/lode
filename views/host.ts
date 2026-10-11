@@ -38,8 +38,10 @@ export interface LodeHost {
   empty?: string;
   // Optional: extra markup in cards (see CardRender).
   render?: CardRender;
-  // Optional: where views keep their state, per view (see ViewRequest's
-  // `state`). Defaults to the project's cache, through the connection.
+  // Optional: where a flow keeps its canvas, per view (see ViewRequest's
+  // `state`), so a tab comes back as it was. Without it, nothing is saved:
+  // pass serviceStorage(connection) for lode's cache with the project,
+  // localStorageStorage(), or your own.
   storage?: LodeStorage;
 }
 

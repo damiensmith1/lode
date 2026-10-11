@@ -1,6 +1,9 @@
-import { escape } from "./theme.js";
+// The explain panel's Markdown (lode doesn't show answers; how they look is
+// the host's). Names in an answer become links once the service's
+// `resolve` says they're real symbols.
 
-// Helpers for a host's explain UI (lode doesn't show answers itself).
+const escape = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
 //
 // An answer's Markdown, safely: escaped first, then code blocks, lists,
 // paragraphs, **bold** and `code`. A code name that `link` knows (a real

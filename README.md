@@ -355,7 +355,7 @@ What a host can plug in or take over:
 | | |
 | --- | --- |
 | **Transport** | `LodeConnection`: WebSocket client, `MessageConnection`, or your own `{ call, onChanged }` |
-| **State** | `LodeStorage` per view key: the project's cache (default), `localStorage`, memory, or yours (VS Code `workspaceState`, a database) |
+| **State** | opt-in `LodeStorage` per view key: the project's cache (`serviceStorage`), `localStorage`, memory, or yours (VS Code `workspaceState`, a database) |
 | **Look** | every colour and font is a `--lode-*` token (light and dark themes included, syntax colours too); `::part()` on every piece; `host.css` inside every view |
 | **Markup** | `host.render` hooks add your own HTML to card headers, footers, line ends and chip labels, with `data-action="host:…"` buttons |
 | **Interaction** | events for every action (cancelable, so you can take any over: open chips in your editor), selection, open, close, edits, saves |

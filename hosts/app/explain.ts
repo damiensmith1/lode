@@ -6,7 +6,8 @@
 //
 //   const panel = new ExplainPanel(element, client, storage);
 //   panel.attach(flow, "flow-1"); // the flow it talks about, and where its chat is kept
-import { codeNames, lodeApi, renderMarkdown, type CanvasAction, type LodeConnection, type LodeFlow, type LodeStorage } from "../../views/index.js";
+import { codeNames, renderMarkdown } from "./markdown.js";
+import { lodeApi, type CanvasAction, type LodeConnection, type LodeFlow, type LodeStorage } from "../../views/index.js";
 
 type Model = { id: string; label: string; group?: string };
 

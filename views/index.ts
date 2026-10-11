@@ -34,7 +34,6 @@ export {
   type ViewRequest,
 } from "./host.js";
 export { buildFileTree, lodeApi, type FileTreeNode, type LodeApi } from "./api.js";
-export { codeNames, renderMarkdown } from "./markdown.js";
 export { LodeFlow } from "./flow.js";
 export type { CanvasAction, ExplainEvent } from "../src/explain/index.js";
 export type * from "../src/query/types.js";

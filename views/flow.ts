@@ -1,6 +1,6 @@
 import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, FlowPlan, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
-import { serviceStorage, type LodeStorage } from "./storage.js";
+import type { LodeStorage } from "./storage.js";
 import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, CLOSE_EVENT, CURSOR_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, type AskState, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
@@ -1544,8 +1544,9 @@ export class LodeFlow extends HTMLElement {
     this.saveTimer = window.setTimeout(() => void this.save(), 400);
   }
 
+  // Only where the host says: without host.storage, nothing is saved.
   private storage(): LodeStorage | undefined {
-    return this.host?.storage ?? (this.client && serviceStorage(this.client));
+    return this.host?.storage;
   }
 
   private async save() {

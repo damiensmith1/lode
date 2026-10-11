@@ -10,8 +10,9 @@ export interface LodeStorage {
   save(key: string, value: unknown): void | Promise<void>;
 }
 
-// With the project, in lode's cache directory, through the connection. The
-// default: it survives restarts and follows the project, whatever shows it.
+// With the project, in lode's cache directory, through the connection: it
+// survives restarts and follows the project, whatever shows it. Opt-in, as
+// LodeHost.storage (the standalone app uses it).
 export function serviceStorage(connection: LodeConnection): LodeStorage {
   return {
     load: (key) => connection.call("loadState", { key }).catch(() => null),

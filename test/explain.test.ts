@@ -8,7 +8,7 @@ import { GraphStore } from "../src/graph/store.js";
 import { tsPlugin } from "../src/ingest/ts/index.js";
 import { Queries } from "../src/query/index.js";
 import { createService } from "../src/service/index.js";
-import { codeNames, renderMarkdown } from "../views/markdown.js";
+import { codeNames, renderMarkdown } from "../hosts/app/markdown.js";
 
 const cacheDir = mkdtempSync(path.join(os.tmpdir(), "lode-explain-"));
 afterAll(() => rmSync(cacheDir, { recursive: true, force: true }));

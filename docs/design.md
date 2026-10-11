@@ -352,8 +352,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   channel (a webview's postMessage, Electron IPC), with no server or port.
 - **State is the host's.** Each flow saves its canvas (cards, arrows,
   camera, selection) under its own key (`ViewRequest.state`) in
-  `host.storage`: lode's cache through the connection by default, or
-  localStorage, memory, or the host's own store. The standalone app keeps
+  `host.storage`, which is opt-in (without it nothing is saved): lode's
+  cache through the connection (`serviceStorage`), localStorage, memory,
+  or the host's own store. The standalone app keeps
   any number of flow tabs this way, plus its tab list (`app-tabs`); the
   first flow keeps the key `flow`, so canvases saved before tabs still load.
 - **Interaction is the host's too.** Every click and key action is
@@ -544,7 +545,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   Panning and moving cards never select text. Keys (while the flow is
   showing, not while typing in a field): Delete/Backspace closes the
   selected cards (like ×, the cards they opened stay), ⌘Z / Ctrl+Z undoes.
-- **Layouts are saved with the project.** The server keeps a view's layout
+- **Layouts can be saved with the project** (`serviceStorage`, which the app
+  uses). The server keeps a view's layout
   (`loadLayout` / `saveLayout`, `layout-<name>.json` in the project's cache
   dir, name-checked and size-capped), so it survives restarts in any host;
   the browser's storage wouldn't (each `lode open` gets a new port, so a new
@@ -785,8 +787,9 @@ the pieces, a host builds the feature, so a host can show answers in a
 side panel, an overlay or inside cards). The flow view exposes
 `scope(selection)` (what a question is about, as the request's fields),
 `apply(actions, { undoGroup })` (do the model's canvas actions, one undo
-step per group) and `highlight(id)`; `renderMarkdown` and `codeNames` are
-helpers. The server side: the context is `contextFor` over the cards (or the
+step per group) and `highlight(id)`; `resolve` says which names in an
+answer are real symbols, and the host draws the Markdown (the app's:
+`hosts/app/markdown.ts`). The server side: the context is `contextFor` over the cards (or the
 selection, which also becomes what "these" means), plus the question the
 flow was built for and the diff when shown. The model (`ChatModel`;
 Claude over the Anthropic API by default, streaming SSE, the context
