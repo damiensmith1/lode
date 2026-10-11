@@ -1,12 +1,18 @@
 # ◇ lode
 
 **Read a codebase as a flow of real code.** lode builds a live graph of how
-your code fits together (TypeScript, JavaScript, and Ruby with Rails) and
-lets you read it as cards
-of actual code on a canvas, connected by arrows: what calls what, what
-flows where, what reads and writes which state, across processes. Ask it a
-question and it lays out the answer. Point it at your git changes and it
-shows what changed and what might break. Edit right in the cards.
+your code fits together and lets you read it as cards of actual code on a
+canvas, connected by arrows: what calls what, what flows where, what reads
+and writes which state, across processes. Ask it a question with **/** and
+it lays out the answer as a flow. Talk to an LLM about what's on the
+canvas, and it explains the code and works the canvas for you. Point it at
+your git changes and it shows what changed and what might break. Edit right
+in the cards.
+
+**Languages:** TypeScript and JavaScript (React, Next.js, React Native,
+Vue, Svelte, Angular, Express, Nest…), Python (Django, FastAPI, Flask,
+Celery, pytest…) and Ruby (Rails, Sinatra, RSpec…). Point it at a folder;
+it works out what's there.
 
 It's a library first: a code graph and query core, embeddable views, and a
 small host contract, so any editor or app can show it. It also ships a
@@ -15,6 +21,72 @@ standalone app that runs on any folder.
 ![Asking "/how do we create the tabs": a flow of the code that does it, built in 0.6s](docs/images/ask.png)
 
 ## Features
+
+### Languages
+Each language comes with its frameworks' conventions, detected from the
+project (its package.json, Gemfile, pyproject.toml…): routes, views,
+templates, jobs and commands become entry points, and the links frameworks
+make by name (a route to its handler, a template to its view, a link to
+its page) become arrows. Mixed repos get every language they have.
+
+| | parsed with | frameworks |
+| --- | --- | --- |
+| **TypeScript / JavaScript** | the TypeScript compiler: exact, type-checked links | React, Next.js, Remix / React Router, React Native (React Navigation, Expo Router), Vue, Nuxt, Svelte, SvelteKit, Angular, Express, Nest, Electron |
+| **Python** | tree-sitter (no Python install needed) | Django, FastAPI, Flask, Starlette, Celery, pytest, click / typer / argparse |
+| **Ruby** | tree-sitter (no Ruby install needed) | Rails (incl. ERB and jbuilder views), Sinatra, RSpec, FactoryBot, Thor, rake |
+
+<details>
+<summary>What each language and framework resolves</summary>
+
+- **TypeScript and JavaScript** through the TypeScript compiler: exact,
+  type-checked links, plus Electron IPC and events across processes.
+  Monorepos work (each file resolves imports with its nearest tsconfig's
+  path aliases; workspace packages by name; Nx-style solution configs).
+- **TS/JS frameworks**, detected per app from its package.json: React
+  (JSX renders are links), Next.js (app and pages routers, API routes,
+  server actions), Remix / React Router (file and object routes, loaders),
+  React Native (React Navigation screens, Expo Router), Vue and Nuxt
+  (single-file components, templates, named routes), Svelte and SvelteKit,
+  Angular (templates' bindings, child components by selector, router
+  links, lifecycle hooks), Express and Nest (routes as entry points).
+  Navigation (`<Link href>`, `router.push`, `navigation.navigate("Profile")`,
+  `routerLink`, `:to="{ name }"`, path helpers like
+  `paths.post.getHref(id)`) links to the page or screen it opens; Express
+  routes carry their mounted prefixes (`/api/articles/:slug`).
+- **Python** through tree-sitter: names resolved through imports
+  (relative, absolute, re-exported by packages), classes and their bases,
+  and what variables hold, from type annotations, assignments and return
+  types (`user = repo.get(1)` with `get` annotated `-> User`).
+- **Python web frameworks**, detected automatically: FastAPI, Flask and
+  Starlette routes (with router prefixes) and `Depends`; Django URLs (with
+  `include()`), class-based views, the ORM, management commands and
+  signals, custom managers and querysets, the hooks Django calls (views'
+  `get_queryset`, models' `save`…), templates (views to templates,
+  `{% extends %}`, `{% include %}`, `{% url 'ns:name' %}` to views); Celery tasks and
+  `.delay()`. Also pytest fixtures (a test's
+  parameter is the fixture), CLI commands (click, typer, argparse,
+  console scripts) as entry points, `@property` reads, functions passed as
+  callbacks, and abstract methods to their implementations.
+- **Ruby** through tree-sitter (no Ruby install needed): calls resolved the
+  way Ruby looks them up (self, constants, `new`, mixins, superclasses,
+  `module_function`, `extend self`), and typed through whole chains: what a
+  variable was assigned, what a method returns (its last expression,
+  `@user ||= User.find(…)`), block parameters (`users.each do |user|`),
+  `attr_reader`, `self.class`, `send(:name)`; name-matched only when
+  there's exactly one candidate, and marked as inferred.
+- **Rails**, detected automatically: routes to controller actions (entry
+  points by verb and path), callbacks, associations as typed methods
+  (`user.posts.published.first` reaches `Post`'s scope and methods),
+  `delegate`, scopes, concerns, finders and relations, mailers, jobs, rake
+  tasks and test fixtures. **Views** (ERB and jbuilder): an action links
+  to its view and a view to its partials; a view's code runs as its
+  controller's, so `@post.title` and helpers resolve. **Sinatra** routes and filters; **RSpec** `let`
+  and `subject` (typed, with FactoryBot's `create(:user)`) and
+  `described_class`; **Thor** commands.
+
+</details>
+
+Go and Java are next, on the same tree-sitter base.
 
 ### The flow canvas
 - **Cards of real code**, one per function, class, type or file, with
@@ -32,31 +104,55 @@ standalone app that runs on any folder.
 - **Any file:** README, docs, JSON, CSS and other project files open as
   text cards too (Markdown headings fold into sections).
 
-### Ask for a flow
-Type **/** and a question: `/how do we create the tabs`,
-`/what calls showAll`, `/where are the theme colours defined`,
-`/what most likely breaks from these changes`. lode builds the answer as a
-flow in a new tab, in well under a second: where to start, then each step
-it leads to, each card with a note on why it's there.
+### Ask for a flow (/)
+Type **/** in the top box (or press **/** on a flow) and ask in plain words:
+`/how do we create the tabs`, `/what happens when a gem is pushed`,
+`/what calls showAll`, `/where are api keys checked`,
+`/what most likely breaks from these changes`. lode answers with a flow in
+a new tab, usually in under half a second: the card to start reading at,
+then each step it leads to, in reading order, each with a note on why it's
+there.
 
-It isn't an LLM writing an answer. The graph supplies every candidate;
-[TypeSafe's Jev](https://docs.typesafe.ai) makes fast, typed judgments
-about them (what kind of question it is, where to start, whether each next
-step belongs, how risky each dependent of a change is), and code builds
-the flow. Every card is a real piece of your code, and it takes 2-3 model
-calls and a fraction of a cent.
+How it works: it isn't an LLM writing an answer, and every card is a real
+piece of your code.
+1. **Find candidates.** A text search over every symbol's name, path,
+   comment and code (forgiving typos: `acount balence` still finds
+   `Account#balance`), plus any symbol the question names exactly.
+2. **Judge them.** [TypeSafe's Jev](https://docs.typesafe.ai), a fast
+   model that makes typed judgments, decides in one request what kind of
+   question it is (how something works, where something is, what calls
+   something, what changed, what might break) and which candidates are
+   about it, and picks where to start.
+3. **Follow the graph.** From the start, lode walks what it calls (or what
+   calls it, for "what calls…"), and Jev judges whether each next step
+   belongs. Change questions start from your git diff instead and score
+   how likely each dependent is to break.
 
-### Explain, and build it out, in conversation
-Every flow has an **explain** panel (**i**): explain the whole flow, the
-selected cards, or ask follow-ups ("why does closeTab call select?"). The
-answer streams in, grounded in the exact code on the canvas, and every
-name in it is a link to its card. Ask for more ("also show where the tabs
-get saved") and the model searches and reads lode's graph, then **works the
-canvas for you**: adds cards, builds a whole flow (with Jev), expands
-cards, opens folds, closes cards, focuses, shows changes. One ⌘Z undoes
-everything it did in a message, and it opens new tabs only when you ask for
-one. Flows built with **/** get
-an "explain this flow" button. Conversations are saved with the tab.
+Two or three model calls, a fraction of a cent. Questions worded in your
+own terms work when they share words with the code (or a typo of them);
+pure synonyms the code never uses ("ledger" for code that says journal)
+are the known limit. `eval/` measures it against real repos.
+
+### Explain with an LLM, and let it work the canvas
+Every flow has an **explain** panel (press **i**, or the toolbar's
+"explain"): a conversation with an LLM about what's on the canvas. Ask it
+to explain the whole flow or the cards you've selected, what could break,
+or anything ("why does closeTab call select?"). The answer streams in,
+grounded in the exact code on the canvas (the cards, how they connect, the
+diff if changes are shown), and every code name in it is a link to its
+card.
+
+It can also **do things on the canvas** when you ask ("also show where the
+tabs get saved", "expand that", "build the flow for checkout"):
+- search and read the graph, beyond what's on the canvas;
+- add cards, build a whole flow for a question (with Jev), expand a card,
+  open or close a fold (and read what it revealed), close cards;
+- select, focus or fit the view, and turn git changes on or off.
+
+Each action shows as a chip in the answer (click it to see those cards),
+one ⌘Z undoes everything it did in a message, it opens new tabs only when
+you ask for one, and it never edits code. Flows built with **/** get an
+"explain this flow" button; conversations are saved with the tab.
 
 Explaining works with Claude (Anthropic API) and anything OpenAI-compatible
 (OpenAI, OpenRouter, Groq, Together, Ollama, LM Studio, vLLM), all at once:
@@ -115,59 +211,14 @@ open and fold, **Space** focus, **f** fit, **/** ask, **?** every key.
 
 ### Entry points
 Where to start reading an unfamiliar codebase: what the outside world calls
-into (IPC handlers, messages between processes, events, Rails routes by
-verb and path, jobs, rake tasks, exports nothing in the project calls),
-grouped by runtime, with a line on how the runtimes
-talk (`renderer → preload: 230 · preload → main: 139`).
-
-### Languages
-- **TypeScript and JavaScript** through the TypeScript compiler: exact,
-  type-checked links, plus Electron IPC and events across processes.
-  Monorepos work (each file resolves imports with its nearest tsconfig's
-  path aliases; workspace packages by name; Nx-style solution configs).
-- **TS/JS frameworks**, detected per app from its package.json: React
-  (JSX renders are links), Next.js (app and pages routers, API routes,
-  server actions), Remix / React Router (file and object routes, loaders),
-  React Native (React Navigation screens, Expo Router), Vue and Nuxt
-  (single-file components, templates, named routes), Svelte and SvelteKit,
-  Angular (templates' bindings, child components by selector, router
-  links, lifecycle hooks), Express and Nest (routes as entry points).
-  Navigation (`<Link href>`, `router.push`, `navigation.navigate("Profile")`,
-  `routerLink`, `:to="{ name }"`, path helpers like
-  `paths.post.getHref(id)`) links to the page or screen it opens; Express
-  routes carry their mounted prefixes (`/api/articles/:slug`).
-- **Ruby** through tree-sitter (no Ruby install needed): calls resolved the
-  way Ruby looks them up (self, constants, `new`, mixins, superclasses,
-  `module_function`, `extend self`), and typed through whole chains: what a
-  variable was assigned, what a method returns (its last expression,
-  `@user ||= User.find(…)`), block parameters (`users.each do |user|`),
-  `attr_reader`, `self.class`, `send(:name)`; name-matched only when
-  there's exactly one candidate, and marked as inferred.
-- **Rails**, detected automatically: routes to controller actions (entry
-  points by verb and path), callbacks, associations as typed methods
-  (`user.posts.published.first` reaches `Post`'s scope and methods),
-  `delegate`, scopes, concerns, finders and relations, mailers, jobs, rake
-  tasks and test fixtures. **Views** (ERB and jbuilder): an action links
-  to its view and a view to its partials; a view's code runs as its
-  controller's, so `@post.title` and helpers resolve. **Sinatra** routes and filters; **RSpec** `let`
-  and `subject` (typed, with FactoryBot's `create(:user)`) and
-  `described_class`; **Thor** commands.
-- **Python** through tree-sitter: names resolved through imports
-  (relative, absolute, re-exported by packages), classes and their bases,
-  and what variables hold, from type annotations, assignments and return
-  types (`user = repo.get(1)` with `get` annotated `-> User`).
-- **Python web frameworks**, detected automatically: FastAPI, Flask and
-  Starlette routes (with router prefixes) and `Depends`; Django URLs (with
-  `include()`), class-based views, the ORM, management commands and
-  signals, custom managers and querysets, the hooks Django calls (views'
-  `get_queryset`, models' `save`…), templates (views to templates,
-  `{% extends %}`, `{% include %}`, `{% url 'ns:name' %}` to views); Celery tasks and
-  `.delay()`. Also pytest fixtures (a test's
-  parameter is the fixture), CLI commands (click, typer, argparse,
-  console scripts) as entry points, `@property` reads, functions passed as
-  callbacks, and abstract methods to their implementations.
-- Mixed repos get all of theirs. Go and Java are next, on the same
-  tree-sitter base.
+into. Routes by verb and path (Rails, Django, FastAPI, Flask, Express,
+Nest, Next.js pages and API routes, Sinatra), pages and screens, server
+actions, jobs (Celery, ActiveJob, Sidekiq), tasks and commands (rake,
+manage.py, click, Thor, console scripts), IPC handlers and messages
+between processes, events, the hooks a framework calls, and exports
+nothing in the project calls; grouped by runtime (web, jobs, tasks; main,
+renderer…), with a line on how the runtimes talk
+(`renderer → preload: 230 · preload → main: 139`).
 
 ## Quick start
 
@@ -177,8 +228,12 @@ npm install
 npm run lode -- open path/to/any/project     # the app, in your browser
 ```
 
-A project is any folder, or a `tsconfig.json` / `jsconfig.json`. JavaScript
-is always included (ESM, CommonJS, JSDoc types). The graph is cached in
+A project is any folder (or a `tsconfig.json` / `jsconfig.json`). lode
+picks the languages from what's there: TS/JS from a tsconfig or .ts/.js
+files (JavaScript always included: ESM, CommonJS, JSDoc types), Python from
+a pyproject.toml, setup.py, requirements.txt or .py files, Ruby from a
+Gemfile, Rakefile or .rb files, and each one's frameworks from its
+dependencies. The graph is cached in
 `~/.cache/lode/` (`--cache <dir>` to change it); nothing is written into
 the project unless you save an edit.
 
@@ -211,7 +266,8 @@ node dist/lib/src/cli.js mcp <project>                       # MCP server on std
 
 ```
  any folder ──▶ language plugin ──▶ graph (core) ──▶ queries ──▶ service ──┬─▶ WebSocket server ─▶ views in any web page
-                (TS/JS today)       nodes, edges,    block,      the       └─▶ any message channel ─▶ views in a webview, Electron, …
+                TS/JS, Python,      nodes, edges,    block,      the       └─▶ any message channel ─▶ views in a webview, Electron, …
+                Ruby + frameworks
                                     channels,        entries,    methods,
                                     regions          search,     no transport        views: <lode-flow>, <lode-entries>, <lode-changes>
                                                      changes,                        host: your editor or app (opens files,
@@ -261,7 +317,7 @@ where their state lives, how they look, which keys do what, and what
 ```ts
 import { GraphStore, pluginFor, createService } from "lode";
 
-const service = createService(GraphStore.open(await pluginFor(folder), folder)); // TS/JS, Ruby, or both
+const service = createService(GraphStore.open(await pluginFor(folder), folder)); // TS/JS, Python, Ruby: whatever's there
 service.watch(); // re-index as files change; views update
 ```
 
@@ -325,8 +381,10 @@ npm run build       # dist/lib, dist/app, dist/views
 npm run build:web   # just the app
 ```
 
-`docs/` holds the background, requirements and design notes, kept current
-with the code.
+`eval/` measures **/** answers against questions with known answers:
+`npx tsx eval/run.ts eval/example.json` (needs `TYPESAFE_API_KEY`); put
+your own suites in `eval/local/` (git-ignored). `docs/` holds the
+background, requirements and design notes, kept current with the code.
 
 ## License
 
