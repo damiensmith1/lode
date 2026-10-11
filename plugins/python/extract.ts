@@ -41,7 +41,9 @@ export interface PyDecl {
   items?: TypeRef[]; // functions returning a tuple: each position (`-> tuple[A, B]`, or `return a, b`)
   abstract?: true; // functions: @abstractmethod, or a body that's only `...`, `pass` or `raise NotImplementedError`
   attrs?: Record<string, { ref: TypeRef; scope: string }>; // classes: self.x, and the method it's assigned in
+  strings?: Record<string, string>; // classes: string fields in the body (template_name = "blog/entry.html")
   value?: TypeRef; // module variables: what they hold (app = FastAPI())
+  text?: string; // module variables assigned a string (app_name = "blog")
   args?: PyArg[]; // module variables assigned a call: its arguments (APIRouter(prefix="/x"))
 }
 
@@ -68,6 +70,8 @@ export interface PyCall {
 
 export interface PyFacts {
   file: string;
+  // A template (Django/Jinja): what it extends, includes and links to by URL name.
+  template?: { kind: "extends" | "include" | "url"; name: string; line: number }[];
   decls: PyDecl[];
   imports: PyImport[];
   calls: PyCall[];
@@ -144,6 +148,7 @@ export function extractPython(tree: Tree, file: string, text: string): PyFacts {
           } else if (scope.cls && scope.decl === scope.cls) {
             // A field in the class body (a dataclass's, a model's): `members: Counts = field(…)`.
             if (ref) (scope.cls.attrs ??= {})[left.text] ??= { ref, scope: scope.cls.id };
+            if (right?.type === "string") (scope.cls.strings ??= {})[left.text] = argValue(right).v;
           } else if (!scope.cls && scope.decl.kind === "file") {
             declare({
               id: `${file}#${left.text}`,
@@ -154,6 +159,7 @@ export function extractPython(tree: Tree, file: string, text: string): PyFacts {
               line: lineOf(node),
               endLine: endLineOf(node),
               ...(ref && { value: ref }),
+              ...(right?.type === "string" && { text: argValue(right).v }),
               ...(right?.type === "call" && { args: argsOf(right.childForFieldName("arguments")) }),
             });
           }
@@ -403,4 +409,14 @@ function regionsOf(root: SyntaxNode, file: string, lines: string[]): Region[] {
   const imports = root.namedChildren.filter((c): c is SyntaxNode => c?.type === "import_statement" || c?.type === "import_from_statement");
   if (imports.length >= 2) add(lineOf(imports[0]), endLineOf(imports[imports.length - 1]), "imports");
   return out.sort((a, b) => a.start - b.start || b.end - a.end);
+}
+
+// A Django / Jinja template: a file node, and what it refers to:
+// {% extends "base.html" %}, {% include "x.html" %}, {% url 'name' … %}.
+export function extractTemplate(file: string, raw: string): PyFacts {
+  const lines = raw.split("\n");
+  const template: NonNullable<PyFacts["template"]> = [];
+  const tag = /\{%-?\s*(extends|include|url)\s+["']([^"']+)["']/g;
+  for (let m = tag.exec(raw); m; m = tag.exec(raw)) template.push({ kind: m[1] as "extends" | "include" | "url", name: m[2], line: raw.slice(0, m.index).split("\n").length });
+  return { file, decls: [{ id: file, name: file.split("/").pop()!, kind: "file", qual: "", parent: null, line: 1, endLine: lines.length }], imports: [], calls: [], reads: [], regions: [], template };
 }

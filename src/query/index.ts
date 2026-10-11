@@ -184,9 +184,13 @@ export class Queries {
     ];
     const receivers = g.channels().filter((e) => e.role === "receive").sort((a, b) => a.key.localeCompare(b.key));
     for (const e of receivers) {
-      const category = CHANNEL_CATEGORIES.find(([re]) => re.test(e.family))?.[1] ?? "channels";
       const node = g.node(e.node);
-      if (node) add(category, node, e.key);
+      // A page or screen: its route registration names it better (below);
+      // a screen without one (React Navigation) is a route by its name.
+      const family = e.family.split("@")[0]; // route@apps/web: routes are per app
+      if (!node || (/^(route|screen|route-name)$/.test(family) && node.detail?.registration)) continue;
+      if (/^(route|screen|route-name)$/.test(family)) add("routes", node, `${family === "route-name" ? "route" : family} ${e.key}`);
+      else add(CHANNEL_CATEGORIES.find(([re]) => re.test(e.family))?.[1] ?? "channels", node, e.key);
     }
 
     // Other registered callbacks: app events, hotkeys, listeners, and what a
@@ -338,7 +342,8 @@ export class Queries {
       const to = g.node(e.to);
       if (!to) continue;
       if (e.kind === "flows" && e.via && !e.reply && g.node(e.from)?.loc?.file === file) {
-        add({ line: e.loc.line, kind: "channel", text: `${e.via.family.startsWith("electron-bridge") ? "bridge" : "ipc"} ⇢ ${to.name}`, target: to.id });
+        const how = e.via.family.startsWith("electron-bridge") ? "bridge" : /^(route|screen|route-name)@/.test(e.via.family) ? "goes to" : "ipc";
+        add({ line: e.loc.line, kind: "channel", text: `${how} ⇢ ${to.name}`, target: to.id });
       } else if (e.kind === "flows" && e.within && e.to !== e.within && !to.external) {
         const from = g.node(e.from);
         if (from && !from.external) add({ line: e.loc.line, kind: "local", text: `← ${from.name}`, target: from.id });

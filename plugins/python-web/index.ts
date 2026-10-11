@@ -27,6 +27,12 @@ export const pythonWebPack: PyPack = {
   },
 
   prepare(project) {
+    // EntryQuerySet.as_manager() / Manager.from_queryset(QS)(): the queryset's methods.
+    project.callTypes.push((callee, ctx) => {
+      if (callee[callee.length - 1] !== "as_manager") return null;
+      const qs = project.evalPath(callee.slice(0, -1), ctx);
+      return qs?.kind === "decl" && project.decls.get(qs.id)?.kind === "class" ? { kind: "instance", cls: qs.id } : null;
+    });
     // Model.objects.<finder>(…) gives a Model (or rows of them, which call like one).
     project.callTypes.push((callee, ctx) => {
       const at = callee.lastIndexOf("objects");
@@ -70,14 +76,31 @@ export const pythonWebPack: PyPack = {
 
     // Django urls: path("x/", view) / re_path / url, under include() prefixes.
     const includes = new Map<string, string>(); // urls file → its prefix
+    const namespaces = new Map<string, string>(); // urls file → its namespace (include(…, namespace=) or its app_name)
     const urlFiles = project.facts.filter((f) => /(^|\/)urls\.py$|(^|\/)urls\/[^/]+\.py$/.test(f.file));
     for (const f of urlFiles) {
       for (const c of f.calls) {
         if (!/^(path|re_path|url)$/.test(c.name) || c.args[0]?.t !== "str" || c.args[1]?.t !== "call" || !/(^|\.)include$/.test(c.args[1].v)) continue;
         const included = includeArg(f.file, c.line, project);
         const target = included && project.resolveModule(included, f.file);
-        if (target) includes.set(target, join(includes.get(f.file) ?? "", c.args[0].v));
+        if (target) {
+          includes.set(target, join(includes.get(f.file) ?? "", c.args[0].v));
+          const ns = /namespace\s*=\s*["'](\w+)["']/.exec(read(project.root, f.file).split("\n")[c.line - 1] ?? "")?.[1];
+          if (ns) namespaces.set(target, ns);
+        }
       }
+    }
+    // path(…, name="entry") → the view: by "blog:entry" (namespaced) and, when
+    // only one urls file uses it, by "entry".
+    const urlNames = new Map<string, string>();
+    const bare = new Map<string, string | null>();
+    const namespaceOf = (file: string) => namespaces.get(file) ?? project.facts.find((x) => x.file === file)?.decls.find((d) => d.kind === "variable" && d.name === "app_name")?.text;
+    // How many urls files name each route, resolved or not (a TemplateView is
+    // a name too): a bare name links only when there's one.
+    const named = new Map<string, number>();
+    for (const f of urlFiles) for (const c of f.calls) {
+      const n = /^(path|re_path|url)$/.test(c.name) ? c.args.find((a) => a.key === "name" && a.t === "str")?.v : undefined;
+      if (n) named.set(n, (named.get(n) ?? 0) + 1);
     }
     for (const f of urlFiles) {
       for (const c of f.calls) {
@@ -88,6 +111,12 @@ export const pythonWebPack: PyPack = {
         if (sym?.kind !== "decl") continue;
         const key = join(includes.get(f.file) ?? "", c.args[0].v.replace(/^\^|\$$/g, ""));
         project.addEdge(c.from, sym.id, f.file, c.line, "pattern");
+        const urlName = c.args.find((a) => a.key === "name" && a.t === "str")?.v;
+        if (urlName) {
+          const ns = namespaceOf(f.file);
+          if (ns) urlNames.set(`${ns}:${urlName}`, sym.id);
+          bare.set(urlName, named.get(urlName) === 1 ? sym.id : null);
+        }
         const d = project.decls.get(sym.id)!;
         if (d.kind === "function") project.register(d.id, { call: "path", key, category: "routes" });
         else
@@ -98,6 +127,32 @@ export const pythonWebPack: PyPack = {
       }
     }
 
+    // Templates: a view renders one (render(request, "blog/entry.html"),
+    // template_name = …); a template extends and includes others, and links
+    // to views by URL name ({% url 'entry' %}).
+    const templates = new Map<string, string>(); // "blog/entry.html" → its file
+    for (const f of project.facts) {
+      const m = /(?:^|\/)templates\/(.+)$/.exec(f.file);
+      if (m && f.template) templates.set(m[1], f.file);
+    }
+    if (templates.size) {
+      for (const f of project.facts) {
+        for (const t of f.template ?? []) {
+          const to = t.kind === "url" ? (t.name.includes(":") ? urlNames.get(t.name.split(":").slice(-2).join(":")) : (bare.get(t.name) ?? undefined)) : templates.get(t.name);
+          if (to) project.addEdge(f.file, to, f.file, t.line, "pattern");
+        }
+        for (const c of f.calls) {
+          if (!/^(render|render_to_response|render_to_string|render_template|TemplateResponse|get_template|select_template)$/.test(c.name)) continue;
+          const name = c.args.find((a) => a.t === "str" && templates.has(a.v))?.v;
+          if (name) project.addEdge(c.from, templates.get(name)!, f.file, c.line, "pattern");
+        }
+      }
+      for (const d of project.decls.values()) {
+        const name = d.kind === "class" ? d.strings?.template_name : undefined;
+        if (name && templates.has(name)) project.addEdge(d.id, templates.get(name)!, d.file, d.line, "pattern");
+      }
+    }
+
     // Django management commands: <app>/management/commands/<name>.py → Command.handle.
     for (const f of project.facts) {
       const m = /\/management\/commands\/([^/]+)\.py$/.exec(f.file);
@@ -105,6 +160,16 @@ export const pythonWebPack: PyPack = {
       const cmd = f.decls.find((d) => d.kind === "class" && d.name === "Command");
       const handle = cmd && project.classMember(cmd.id, "handle");
       if (handle) project.register(handle, { call: "manage.py", key: m[1], category: "tasks" });
+    }
+
+    // (After commands and routes, which name these more precisely.)
+    // Django calls these on the classes it drives: views' hooks, models',
+    // forms', admins', apps', commands'.
+    const DJANGO_BASE = /(^|\.)(\w*View|\w*Mixin|Model|Form|ModelForm|ModelAdmin|AppConfig|BaseCommand|LabelCommand|Serializer|ModelSerializer|ViewSet|ModelViewSet|APIView|Feed|Sitemap|Middleware\w*|Field|Widget|Storage|TestCase)$/;
+    const HOOK = /^(get|post|put|patch|delete|head|options|dispatch|setup|get_queryset|get_object|get_context_data|get_template_names|get_success_url|form_valid|form_invalid|get_form|get_form_kwargs|get_initial|get_redirect_url|save|delete|clean|clean_\w+|full_clean|validate|__str__|get_absolute_url|ready|handle|handle_label|add_arguments|items|item_\w+|location|lastmod|has_\w+_permission|get_\w+_display|save_model|get_list_display|create|update|perform_\w+|to_representation|to_internal_value|process_request|process_response|process_view|__call__)$/;
+    for (const d of project.decls.values()) {
+      if (d.kind !== "function" || !d.classOf || !HOOK.test(d.name) || project.registrations.has(d.id)) continue;
+      if (project.inherits(d.classOf, DJANGO_BASE)) project.register(d.id, { call: "django", key: `${project.decls.get(d.classOf)?.name}.${d.name}`, category: "events" });
     }
 
     // A file that declares routes serves the web, wherever it is (main.py).

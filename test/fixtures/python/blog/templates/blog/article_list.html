@@ -1,0 +1,5 @@
+{% extends "blog/base.html" %}
+{% block content %}
+  {% include "blog/_card.html" %}
+  <a href="{% url 'blog:article-detail' pk=1 %}">read</a>
+{% endblock %}

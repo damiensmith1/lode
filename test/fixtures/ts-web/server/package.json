@@ -1,0 +1,1 @@
+{ "name": "server", "dependencies": { "express": "4.21.0", "@nestjs/common": "10.0.0" } }

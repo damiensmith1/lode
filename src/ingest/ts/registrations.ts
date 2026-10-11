@@ -67,7 +67,10 @@ const ASSIGNED_HANDLER = /^on[a-z]+$/;
 export interface Registration {
   call: string; // the registering method, function or property name
   key: string | null; // the channel/event/route, when it's a string literal
+  category?: string; // the entries category ("routes"); default "events"
 }
+
+const HTTP = new Set(["get", "post", "put", "patch", "delete", "head", "options", "all"]);
 
 // If `node` is a function literal (or object of them) handed to a
 // registration, describe it.
@@ -92,7 +95,9 @@ export function registrationOf(node: ts.Node, checker: ts.TypeChecker): Registra
     : REGISTRATION_CALLS.some((p) => (typeof p === "string" ? p === call : p.test(call)));
   if (!matches) return null;
 
-  return { call, key: literalKey(args[0], node, checker) };
+  const key = literalKey(args[0], node, checker);
+  // app.get("/users", …): a route.
+  return HTTP.has(call) && key?.startsWith("/") ? { call: call.toUpperCase(), key, category: "routes" } : { call, key };
 }
 
 function objectRegistrationOf(node: ts.ObjectLiteralExpression, checker: ts.TypeChecker): Registration | null {

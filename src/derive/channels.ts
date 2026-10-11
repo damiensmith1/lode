@@ -10,8 +10,14 @@ export function deriveChannelFlows(endpoints: ChannelEndpoint[]): Edge[] {
   const edges: Edge[] = [];
   for (const send of endpoints) {
     if (send.role !== "send") continue;
-    for (const receive of receivers.get(send.family) ?? []) {
-      const confidence = matchKeys(send, receive);
+    let matched = (receivers.get(send.family) ?? []).map((receive) => ({ receive, confidence: matchKeys(send, receive) })).filter((m) => m.confidence);
+    // Routes: a link goes to the most specific route that matches, as a router
+    // picks it (a /article/* page, not the ** catch-all).
+    if (ROUTE_FAMILIES.has(send.family.split("@")[0]) && matched.length > 1) {
+      const best = Math.max(...matched.map((m) => specificity(m.receive.key)));
+      matched = matched.filter((m) => specificity(m.receive.key) === best);
+    }
+    for (const { receive, confidence } of matched) {
       if (!confidence) continue;
       const via = { family: send.family, key: send.pattern ? receive.key : send.key };
       edges.push({ kind: "flows", from: send.node, to: receive.node, confidence, loc: send.loc, type: send.payload, via });
@@ -32,8 +38,16 @@ function matchKeys(a: ChannelEndpoint, b: ChannelEndpoint): Confidence | null {
 
 function toRegex(e: ChannelEndpoint): RegExp {
   if (!e.pattern) return new RegExp(`^${escape(e.key)}$`);
+  // A route's * is one path segment; ** (a catch-all) is any number.
+  if (ROUTE_FAMILIES.has(e.family.split("@")[0])) return new RegExp(`^${e.key.split("**").map((part) => part.split("*").map(escape).join("[^/]*")).join("[^]*")}$`);
   return new RegExp(`^${e.key.split("*").map(escape).join("[^]*")}$`);
 }
+
+// Route-like families, scoped to an app: route@apps/web.
+const ROUTE_FAMILIES = new Set(["route", "screen", "route-name"]);
+
+// How specific a route is: its literal characters, less for each wildcard.
+const specificity = (key: string) => key.replace(/\*+/g, "").length * 4 - (key.match(/\*\*/g)?.length ?? 0) * 100 - (key.match(/(?<!\*)\*(?!\*)/g)?.length ?? 0);
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

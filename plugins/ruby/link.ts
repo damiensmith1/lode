@@ -105,6 +105,9 @@ export class RubyProject {
   readonly associations = new Map<string, Map<string, { target: string; many: boolean }>>();
   readonly delegates = new Map<string, Map<string, string>>();
   readonly attrReaders = new Map<string, Set<string>>();
+  // When a call with no receiver isn't a method of its class: a pack's other
+  // answer (Rails views: the helpers).
+  readonly receiverless: ((call: RubyCall, file: string) => string | null)[] = [];
   readonly typeHooks: ((e: Extract<RExpr, { k: "send" }>, base: RType | null, ctx: TypeCtx) => RType | null)[] = [];
   readonly edges: Edge[] = [];
   readonly registrations = new Map<string, Registration>();
@@ -413,6 +416,10 @@ export class RubyProject {
     if (call.recv.kind === "none" || call.recv.kind === "self") {
       const found = this.findMethod(call.owner, name, singleton) ?? (call.owner ? this.topLevel(name, file) : this.topLevel(name, file));
       if (found) return { to: found, confidence: "exact" };
+      for (const hook of this.receiverless) {
+        const hit = hook({ ...call, name }, file);
+        if (hit) return { to: hit, confidence: "exact" };
+      }
       // A model's own association (versions.where(…)): its class.
       const assoc = this.associations.get(call.owner)?.get(name);
       if (assoc && !call.singleton) {

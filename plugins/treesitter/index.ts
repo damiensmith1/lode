@@ -47,9 +47,12 @@ export interface TreeSitterLanguage<Facts> {
   grammar: string;
   // Is this one of the language's files? (relative path)
   owns(file: string): boolean;
+  // The source to parse, when a file isn't plain code (an ERB template:
+  // its Ruby, with everything else blanked out so lines stay where they are).
+  source?(file: string, text: string): string;
   // One file's facts, from its syntax alone. JSON-serializable: they're
   // kept between runs.
-  extract(tree: Tree, file: string, text: string): Facts;
+  extract(tree: Tree, file: string, text: string, raw: string): Facts; // raw: the file as it is, when `source` changed it
   // The project's graph from every file's facts. `root` for anything a
   // pack wants to know about the project (a Gemfile, config files).
   link(facts: Facts[], root: string): GraphData;
@@ -85,9 +88,10 @@ export async function treeSitterPlugin<Facts>(language: TreeSitterLanguage<Facts
           next[file] = cached;
           continue;
         }
-        const text = readFileSync(path.join(root, file), "utf8");
+        const raw = readFileSync(path.join(root, file), "utf8");
+        const text = language.source ? language.source(file, raw) : raw;
         try {
-          next[file] = { hash, facts: language.extract(parse(text), file, text) };
+          next[file] = { hash, facts: language.extract(parse(text), file, text, raw) };
         } catch {
           // A file the grammar chokes on is left out, not the project.
         }

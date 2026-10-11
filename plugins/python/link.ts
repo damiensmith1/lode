@@ -171,10 +171,9 @@ export class PythonProject {
     if (d?.kind === "class") {
       const hit = this.classMember(cls, name);
       if (hit) return { kind: "decl", id: hit };
-      if (base.kind === "instance") {
-        const attr = this.classAttr(cls, name);
-        if (attr) return this.evalRef(attr.ref, this.ctxOf(attr.scope), depth + 1);
-      }
+      // An attribute: self.x on an instance; on the class, one set in its body (objects = Manager()).
+      const attr = this.classAttr(cls, name);
+      if (attr && (base.kind === "instance" || attr.scope === cls || this.decls.get(attr.scope)?.kind === "class")) return this.evalRef(attr.ref, this.ctxOf(attr.scope), depth + 1);
     }
     if (d?.kind === "variable" && d.value) {
       const v = this.evalRef(d.value, { file: d.file }, depth + 1);

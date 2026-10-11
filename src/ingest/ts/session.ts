@@ -5,7 +5,7 @@ import ts from "typescript";
 import type { GraphData, PluginSession } from "../../schema/index.js";
 import type { FileFacts } from "./facts.js";
 import { createExtractor, mergeFacts } from "./ingest.js";
-import { loadProject } from "./project.js";
+import { loadProject, realFile, withProjectResolution } from "./project.js";
 import { toGraph } from "./toGraph.js";
 
 interface CachedFile {
@@ -27,18 +27,18 @@ export function openTsSession(projectPath: string, state?: unknown): PluginSessi
   let host: ts.CompilerHost | undefined;
 
   const root = loadProject(projectPath).root; // fixed for the session
-  const rel = (abs: string) => path.relative(root, abs).split(path.sep).join("/");
+  const rel = (abs: string) => path.relative(root, realFile(abs)).split(path.sep).join("/");
 
   const files = () => {
     const hashes: Record<string, string> = {};
-    for (const abs of loadProject(projectPath).files) hashes[rel(abs)] = hashOf(readFileSync(abs));
+    for (const abs of loadProject(projectPath).files) hashes[rel(abs)] = hashOf(readFileSync(realFile(abs)));
     return hashes;
   };
 
   const update = (changed?: string[]): GraphData => {
     const project = loadProject(projectPath);
     const current = files();
-    host ??= cachingHost(project.options);
+    host ??= withProjectResolution(cachingHost(project.options), project.root, project.options);
     program = ts.createProgram(project.files, project.options, host, program);
 
     const affected = changed ? withImporters(new Set(changed), cache) : new Set(Object.keys(current));
@@ -51,7 +51,7 @@ export function openTsSession(projectPath: string, state?: unknown): PluginSessi
         next[file] = cache[file];
         continue;
       }
-      const sf = program.getSourceFile(path.join(root, file));
+      const sf = program.getSourceFile(path.join(root, /\.(vue|svelte)$/.test(file) ? `${file}.ts` : file));
       if (sf) next[file] = { hash: current[file], facts: extract(sf) };
     }
     cache = next; // files that disappeared drop out here

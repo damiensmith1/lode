@@ -20,7 +20,7 @@ export interface DeclFact {
   // Set on CommonJS exports whose value is an object literal (`module.exports = {…}`).
   objectValue?: true;
   // Set when this is a callback handed to a registration (event, IPC, route…).
-  registration?: { call: string; key: string | null };
+  registration?: { call: string; key: string | null; category?: string };
 }
 
 export interface CallFact {
@@ -67,6 +67,17 @@ export interface TsFacts {
 // One file's facts, before cross-file resolution (channel wrappers).
 export interface FileFacts {
   file: string;
+  // Framework conventions (frameworks.ts): navigation to and from routes and
+  // screens, and handlers registered by name (app.get("/x", listUsers)).
+  endpoints?: ChannelEndpoint[];
+  namedRegistrations?: { id: string; registration: { call: string; key: string | null; category?: string } }[];
+  // Express: routers mounted under prefixes (parent.use("/api", child)), and
+  // routes on routers (router.get("/x", handler)): composed across files.
+  mounts?: { parent: string; child: string; prefix: string }[];
+  routerRoutes?: { router: string; verb: string; path: string; handlers: string[] }[];
+  // Components used by tag in templates (Angular selectors, Vue components): matched across files.
+  selectors?: { selector: string; id: string }[];
+  templateTags?: { from: string; tag: string; line: number }[];
   imports: string[]; // project files this one imports (relative paths)
   decls: DeclFact[];
   calls: CallFact[];

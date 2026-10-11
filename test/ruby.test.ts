@@ -103,6 +103,23 @@ describe("ruby, typed through chains", () => {
   });
 });
 
+describe("rails views (ERB, jbuilder)", () => {
+  it("an action renders its view; a view, its partials", () => {
+    const all = arrows();
+    expect(all).toContain("PostsController.show → app/views/posts/show.html.erb (pattern)");
+    expect(all).toContain("PostsController.index → app/views/posts/index.json.jbuilder (pattern)");
+    expect(all).toContain("app/views/posts/show.html.erb → app/views/posts/_comment.html.erb (pattern)"); // render "comment"
+  });
+
+  it("a view's code runs as its controller's: @variables from its actions, helpers, partials' locals", () => {
+    const all = arrows();
+    expect(all).toContain("app/views/posts/show.html.erb → PostsHelper.headline_for (exact)");
+    expect(all).toContain("app/views/posts/show.html.erb → Post.headline (inferred)"); // @post = Post.find(…)
+    expect(all).toContain("app/views/posts/_comment.html.erb → Post.headline (inferred)"); // comment (a local), delegated to post
+    expect(store.graph.node("app/views/posts/show.html.erb")?.loc).toEqual({ file: "app/views/posts/show.html.erb", line: 1, endLine: 7 });
+  });
+});
+
 describe("ruby tools and sinatra", () => {
   it("RSpec: let and subject are typed methods, described_class is the class", () => {
     const all = arrows();

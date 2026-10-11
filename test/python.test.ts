@@ -83,7 +83,7 @@ describe("python, beyond annotations", () => {
 describe("python web frameworks", () => {
   it("routes, with router prefixes and Django's include(), are entries by verb and path", () => {
     const web = queries.entries().groups.find((g) => g.runtime === "web")!;
-    expect(web.categories.find((c) => c.name === "routes")!.entries.map((e) => e.label).sort()).toEqual(["GET /blog/articles/<int:pk>", "GET /health", "GET /users/{user_id}", "POST /users", "path /blog/articles"]);
+    expect(web.categories.find((c) => c.name === "routes")!.entries.map((e) => e.label).sort()).toEqual(["GET /blog/articles/<int:pk>", "GET /health", "GET /users/{user_id}", "POST /users", "path /blog/articles", "path /shop/items/<int:pk>"]);
     const all = arrows();
     expect(all).toContain("blog/urls.py → article_list (pattern)");
     expect(all).toContain("blog/urls.py → ArticleDetail (pattern)"); // ArticleDetail.as_view()
@@ -93,11 +93,24 @@ describe("python web frameworks", () => {
   it("the ORM, tasks and management commands", () => {
     const all = arrows();
     expect(all).toContain("ArticleDetail.get → Article.publish (inferred)"); // Article.objects.get(…)
+    expect(all).toContain("article_list → ArticleQuerySet.published (inferred)"); // objects = ArticleQuerySet.as_manager()
+    const events = queries.entries().groups.flatMap((g) => g.categories).filter((c) => c.name === "events").flatMap((c) => c.entries.map((e) => e.label));
+    expect(events).toContain("django ArticleDetail.get_context_data"); // a view hook Django calls
     expect(all).toContain("Command.handle → Article.publish (inferred)"); // for article in Article.objects.filter(…)
     expect(all).toContain("UserService.register → send_welcome (exact)"); // send_welcome.delay(…)
     const groups = queries.entries().groups;
     expect(groups.find((g) => g.runtime === "jobs")?.categories[0]).toMatchObject({ name: "jobs", entries: [{ label: "task send_welcome" }] });
     expect(groups.find((g) => g.runtime === "tasks")?.categories[0]).toMatchObject({ name: "tasks", entries: [{ label: "manage.py cleanup" }] });
+  });
+
+  it("Django templates: a view renders one; a template extends, includes and links to views by URL name", () => {
+    const all = arrows();
+    expect(all).toContain("article_list → blog/templates/blog/article_list.html (pattern)"); // render(request, "blog/article_list.html")
+    expect(all).toContain("ArticleDetail → blog/templates/blog/_card.html (pattern)"); // template_name = …
+    expect(all).toContain("blog/templates/blog/article_list.html → blog/templates/blog/base.html (pattern)"); // {% extends %}
+    expect(all).toContain("blog/templates/blog/article_list.html → blog/templates/blog/_card.html (pattern)"); // {% include %}
+    expect(all).toContain("blog/templates/blog/article_list.html → ArticleDetail (pattern)"); // {% url 'blog:article-detail' %}
+    expect(all).not.toContain("blog/templates/blog/article_list.html → item_detail (pattern)"); // shop's article-detail: another namespace
   });
 
   it("is chosen for a Python project, and re-indexes only what changed", async () => {

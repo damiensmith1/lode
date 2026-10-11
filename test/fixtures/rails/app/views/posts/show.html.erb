@@ -1,0 +1,7 @@
+<h1><%= headline_for(@post) %></h1>
+<% if @post.published? %>
+  <p><%= @post.headline %></p>
+<% end %>
+<% @post.comments.each do |comment| %>
+  <%= render "comment", comment: comment %>
+<% end %>

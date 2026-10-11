@@ -30,6 +30,7 @@ export const railsPack: RubyPack = {
   },
 
   prepare(project) {
+    views(project);
     for (const f of FINDERS) project.instanceReturns.add(f);
     for (const m of RELATION) project.relationMethods.add(m);
 
@@ -145,6 +146,7 @@ export const railsPack: RubyPack = {
     }
 
     routes(project);
+    renders(project);
 
     for (const file of project.files) {
       if (/^app\/(controllers|helpers|views)\/|^config\/routes(\.rb|\/)/.test(file)) project.tag(file, "web");
@@ -153,6 +155,82 @@ export const railsPack: RubyPack = {
     }
   },
 };
+
+// --- views ------------------------------------------------------------------------
+
+// app/views/admin/users/show.html.erb → its controller's (Admin::UsersController),
+// or a mailer's (app/views/user_mailer/…): the class whose code the view
+// runs as, for its @variables and the methods it calls. Helpers
+// (app/helpers) are available to every view.
+const VIEW = /^app\/views\/(.+)\/([^/]+?)\.[^/]*(erb|jbuilder)$/;
+
+function controllerOfView(project: RubyProject, file: string): string | null {
+  const m = VIEW.exec(file);
+  if (!m || m[1].startsWith("layouts")) return null;
+  const base = camelize(m[1]);
+  for (const c of [`${base}Controller`, base]) if (project.classes.get(c)?.decls.length) return c;
+  return null;
+}
+
+function views(project: RubyProject) {
+  for (const f of project.facts) {
+    const owner = controllerOfView(project, f.file);
+    if (!owner) continue;
+    const nesting = owner.split("::").map((_, i, parts) => parts.slice(0, i + 1).join("::"));
+    for (const c of f.calls) if (c.owner === "") Object.assign(c, { owner, nesting });
+    for (const a of f.assigns) if (!a.scope.startsWith("@")) a.nesting = nesting;
+  }
+  const helpers = [...project.classes.values()].filter((c) => c.kind === "module" && c.decls.some((d) => d.file.startsWith("app/helpers/")));
+  project.receiverless.push((call, file) => {
+    if (!VIEW.test(file) && !/^app\/helpers\//.test(file)) return null;
+    for (const h of helpers) {
+      const hit = project.findMethod(h.path, call.name, false);
+      if (hit) return hit;
+    }
+    return null;
+  });
+}
+
+// An action renders its view (by name, or as `render :edit`, `render
+// "posts/edit"`); a view renders partials (`render "form"` → _form, `render
+// @comments` → comments/_comment).
+function renders(project: RubyProject) {
+  const files = [...project.files].filter((f) => VIEW.test(f) || /^app\/views\/layouts\//.test(f));
+  const find = (dir: string, name: string, partial: boolean): string | null => {
+    const [d, n] = name.includes("/") ? [name.split("/").slice(0, -1).join("/"), name.split("/").pop()!] : [dir, name];
+    const want = `app/views/${d}/${partial ? "_" : ""}${n}.`;
+    return files.find((f) => f.startsWith(want)) ?? null;
+  };
+  // Actions → their implicit views.
+  for (const file of files) {
+    const m = VIEW.exec(file);
+    const owner = controllerOfView(project, file);
+    if (!m || !owner || m[2].startsWith("_")) continue;
+    const action = project.findMethod(owner, m[2].split(".")[0], false);
+    const d = action && project.decls.get(action);
+    if (d && project.decls.has(file)) project.addEdge(d.id, file, d.file, d.line, "pattern");
+  }
+  // Explicit renders.
+  for (const f of project.facts) {
+    const inView = VIEW.exec(f.file);
+    const controller = /^app\/controllers\/(.+)_controller\.rb$/.exec(f.file);
+    const dir = inView ? inView[1] : controller ? controller[1] : null;
+    if (!dir) continue;
+    for (const c of f.calls) {
+      if (c.name !== "render" || c.recv.kind !== "none" || !c.args?.length) continue;
+      const a = c.args[0];
+      const named = a.t === "sym" || a.t === "str" ? a.v : a.t === "pair" && /^(partial|template|action)$/.test(a.k) && (a.v.t === "sym" || a.v.t === "str") ? a.v.v : null;
+      const partial = !!inView || (a.t === "pair" && a.k === "partial");
+      let target = named ? find(dir, named, partial) : null;
+      // render @comments / render @post: the model's partial.
+      if (!target && a.t === "other" && /^@?\w+$/.test(a.v)) {
+        const plural = a.v.replace(/^@/, "");
+        target = find(plural.endsWith("s") ? plural : `${plural}s`, singularize(plural), true);
+      }
+      if (target && project.decls.has(target)) project.addEdge(c.from, target, f.file, c.line, "pattern");
+    }
+  }
+}
 
 // --- routes -------------------------------------------------------------------
 

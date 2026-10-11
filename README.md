@@ -123,6 +123,19 @@ talk (`renderer → preload: 230 · preload → main: 139`).
 ### Languages
 - **TypeScript and JavaScript** through the TypeScript compiler: exact,
   type-checked links, plus Electron IPC and events across processes.
+  Monorepos work (each file resolves imports with its nearest tsconfig's
+  path aliases; workspace packages by name; Nx-style solution configs).
+- **TS/JS frameworks**, detected per app from its package.json: React
+  (JSX renders are links), Next.js (app and pages routers, API routes,
+  server actions), Remix / React Router (file and object routes, loaders),
+  React Native (React Navigation screens, Expo Router), Vue and Nuxt
+  (single-file components, templates, named routes), Svelte and SvelteKit,
+  Angular (templates' bindings, child components by selector, router
+  links, lifecycle hooks), Express and Nest (routes as entry points).
+  Navigation (`<Link href>`, `router.push`, `navigation.navigate("Profile")`,
+  `routerLink`, `:to="{ name }"`, path helpers like
+  `paths.post.getHref(id)`) links to the page or screen it opens; Express
+  routes carry their mounted prefixes (`/api/articles/:slug`).
 - **Ruby** through tree-sitter (no Ruby install needed): calls resolved the
   way Ruby looks them up (self, constants, `new`, mixins, superclasses,
   `module_function`, `extend self`), and typed through whole chains: what a
@@ -134,7 +147,9 @@ talk (`renderer → preload: 230 · preload → main: 139`).
   points by verb and path), callbacks, associations as typed methods
   (`user.posts.published.first` reaches `Post`'s scope and methods),
   `delegate`, scopes, concerns, finders and relations, mailers, jobs, rake
-  tasks and test fixtures. **Sinatra** routes and filters; **RSpec** `let`
+  tasks and test fixtures. **Views** (ERB and jbuilder): an action links
+  to its view and a view to its partials; a view's code runs as its
+  controller's, so `@post.title` and helpers resolve. **Sinatra** routes and filters; **RSpec** `let`
   and `subject` (typed, with FactoryBot's `create(:user)`) and
   `described_class`; **Thor** commands.
 - **Python** through tree-sitter: names resolved through imports
@@ -144,7 +159,10 @@ talk (`renderer → preload: 230 · preload → main: 139`).
 - **Python web frameworks**, detected automatically: FastAPI, Flask and
   Starlette routes (with router prefixes) and `Depends`; Django URLs (with
   `include()`), class-based views, the ORM, management commands and
-  signals; Celery tasks and `.delay()`. Also pytest fixtures (a test's
+  signals, custom managers and querysets, the hooks Django calls (views'
+  `get_queryset`, models' `save`…), templates (views to templates,
+  `{% extends %}`, `{% include %}`, `{% url 'ns:name' %}` to views); Celery tasks and
+  `.delay()`. Also pytest fixtures (a test's
   parameter is the fixture), CLI commands (click, typer, argparse,
   console scripts) as entry points, `@property` reads, functions passed as
   callbacks, and abstract methods to their implementations.

@@ -895,6 +895,20 @@ instance; `class_name:` respected, polymorphic skipped); relation methods
 `first`, `create`…) give an instance; fixtures (`users(:one)`) in tests
 are instances.
 
+**Views.** `.erb` and `.jbuilder` files are Ruby too: an ERB template
+becomes its tags' code with the HTML blanked to spaces (lines kept, each
+tag ended with `;`), parsed as Ruby (`plugins/ruby/erb.ts`, through the
+tree-sitter base's `source` hook). A view runs as its controller's (or
+mailer's) code, `app/views/admin/users/show.html.erb` →
+`Admin::UsersController`, so `@post` is typed from the action and
+`current_user` is the controller's; helpers (`app/helpers`) answer what
+the class doesn't. An action links to its view by name; `render :edit`,
+`render "posts/edit"`, `render partial:`, a view's `render "form"`
+(→ `_form`) and `render @comments` (→ `comments/_comment`) link too.
+Measured on rubygems.org: 216 views, 856 links out of them (helpers,
+components, models through @variables), 248 into them (actions, mailers,
+partials); sampled, all right.
+
 **`sinatraPack`** (`plugins/sinatra`): `get "/x" do … end` (top level or
 in a `Sinatra::Base` subclass) is a callable named by verb and path, an
 entry; `before`/`after` filters too. **`rubyToolsPack`**
@@ -913,6 +927,45 @@ Measured: keepr (an ActiveRecord gem, 35 files) 0.13s; sinatra (plain
 Ruby, ~200 files) 0.4s; rubygems.org (Rails + JS, 1,400 .rb files) ~4s
 with its TypeScript. Sampled name-only links there are mostly right; the
 misses were library and core methods, now excluded.
+
+**TS/JS frameworks** (`src/ingest/ts/frameworks.ts`, inside the TS
+plugin: they need the checker). Detected per app, from the nearest
+package.json's dependencies. JSX elements are calls (`<UserCard />` renders
+`UserCard`, resolved by the checker). File-based routes register pages,
+layouts and API handlers as entries by path: Next.js (app router `page`,
+`layout`, `route` with `GET`/`POST`…, special files; pages router incl.
+`pages/api`), Expo Router, Nuxt (`pages/`, `server/api`), SvelteKit
+(`+page`, `+server`, `load`), Remix flat routes (`posts.$slug.tsx`,
+`loader`/`action`); a page re-exported from elsewhere (`export { Feed as
+default } from …`) or wrapped (`export default memo(Page)`) is the real
+component. Server actions ("use server") are entries. Route tables (`{ path,
+component | element | loadComponent | lazy }`, children under their
+parents, `<Stack.Screen name component>`) say what's where. Navigation is a
+channel, scoped to the app (`route@apps/web`): `<Link href|to>`, `<a href>`,
+`router.push/replace/navigate`, `redirect()`, Angular's
+`router.navigate([…])` and `routerLink`, Vue's `:to` and named routes
+(`{ name: "article" }`, `routerPush("article")`, `<AppLink name>`), React
+Navigation's `navigation.navigate("Profile")`. Route params are one path
+segment, catch-alls any number, and a link goes to the most specific
+matching route. Vue and Svelte components are read through virtual
+`.vue.ts` / `.svelte.ts` files holding their scripts (lines kept); their
+templates, like Angular's (inline or `templateUrl`), link their bindings
+(`@click="save"`, `on:click={save}`, `(click)="save()"`, `{{ total() }}`)
+to the script's functions and child components by name or selector.
+Express routes (named handlers too) carry their full path: a router is the
+variable holding it (or a file's anonymous default export), `.use("/api",
+child)` mounts one in another (chained `Router().use(a).use(b)` too, across
+files through imports), and a route's path is every prefix up the chain
+(`/api/articles/:slug`). A path the code computes from something static
+counts as written: a constant the checker knows (`ROUTES.HOME`), a helper
+returning a template (`paths.discussion.getHref(id)` →
+`/app/discussions/*`), a variable or property holding one. Nest's decorators (`@Get`,
+`@MessagePattern`, `@Cron`…) are entries; Angular lifecycle hooks too.
+Monorepos: imports resolve with each file's nearest tsconfig (paths,
+baseUrl), workspace packages by package.json name, solution configs
+through their references. Measured on bulletproof-react, vercel/commerce,
+an Expo app, Express and Nest RealWorld, Angular and Vue 3 RealWorld:
+navigation sampled correct, routes and actions complete.
 
 **Python** (`plugins/python`), detected by a pyproject.toml, setup.py,
 setup.cfg, requirements.txt or Pipfile, or 3+ .py files. Ids are dotted
@@ -953,7 +1006,18 @@ urls.py (`path`/`re_path` → function or class-based views, under
 management commands (`manage.py <name>` → `Command.handle`) and
 `@receiver` signals; Celery/Dramatiq tasks (entries) and `.delay(…)` /
 `.apply_async(…)` → the task. Files with routes are tagged web, task
-modules jobs, management commands tasks. **`pythonToolsPack`**
+modules jobs, management commands tasks. On a real site
+(djangoproject.com): custom managers and querysets (`objects =
+EntryQuerySet.as_manager()`, class attributes on a model) resolve; the
+hooks Django calls on the classes it drives (views' `get_queryset` /
+`get_context_data`, models' `save`, forms' `clean`, apps' `ready`…) are
+entries; templates (`templates/**`) are file nodes: a view renders one
+(`render(request, "x.html")`, `template_name`), templates extend and
+include others and link to views by URL name: `{% url 'blog:entry' %}` by the namespace
+(`include(…, namespace=)` or the urls module's `app_name`), a bare
+`{% url 'entry' %}` only when one urls file names it (two sites' `homepage`
+links nowhere rather than to the wrong one). 133 templates there, 174
+links into them, about 316 out. **`pythonToolsPack`**
 (`plugins/python-tools`): pytest (a test's or fixture's parameter is the
 fixture of that name, from its file or a conftest.py above it: an arrow
 to it, and the parameter holds what it returns); CLI entries (click and
