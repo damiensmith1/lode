@@ -5,12 +5,16 @@ import { listFiles } from "../src/query/git.js";
 import type { GraphData, LanguagePlugin, PluginSession } from "../src/schema/index.js";
 import { railsPack } from "./rails/index.js";
 import { isRubyFile, rubyPlugin } from "./ruby/index.js";
+import { rubyToolsPack } from "./ruby-tools/index.js";
+import { sinatraPack } from "./sinatra/index.js";
 import { isPythonFile, pythonPlugin } from "./python/index.js";
 import { pythonWebPack } from "./python-web/index.js";
 import { pythonToolsPack } from "./python-tools/index.js";
 
 export { railsPack } from "./rails/index.js";
 export { rubyPlugin, isRubyFile } from "./ruby/index.js";
+export { rubyToolsPack } from "./ruby-tools/index.js";
+export { sinatraPack } from "./sinatra/index.js";
 export { pythonPlugin, isPythonFile } from "./python/index.js";
 export { pythonWebPack } from "./python-web/index.js";
 export { pythonToolsPack } from "./python-tools/index.js";
@@ -36,7 +40,7 @@ export async function pluginFor(projectPath: string): Promise<LanguagePlugin> {
   const hasPython = python.length >= 3 || files.some((f) => /^(pyproject\.toml|setup\.py|setup\.cfg|requirements\.txt|Pipfile)$/.test(f));
   const plugins: LanguagePlugin[] = [];
   if (hasTs || (!hasRuby && !hasPython)) plugins.push(tsPlugin);
-  if (hasRuby) plugins.push(await rubyPlugin({ packs: [railsPack] }));
+  if (hasRuby) plugins.push(await rubyPlugin({ packs: [railsPack, sinatraPack, rubyToolsPack] }));
   if (hasPython) plugins.push(await pythonPlugin({ packs: [pythonWebPack, pythonToolsPack] }));
   return plugins.length === 1 ? plugins[0] : combinePlugins(plugins);
 }

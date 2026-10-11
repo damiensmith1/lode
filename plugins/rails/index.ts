@@ -15,6 +15,7 @@ import { camelize } from "../ruby/link.js";
 //   jobs          SomeJob.perform_later / Worker.perform_async → #perform (entries: jobs)
 //   rake          task :x do … end → a callable (entries: tasks)
 
+const RELATION = "where not or rewhere order reorder in_order_of limit offset includes preload eager_load joins left_joins left_outer_joins references distinct select group having all none unscope only except merge lock readonly strict_loading extending from excluding without page per padding".split(" ");
 const FINDERS = "new find find_by find_by! first first! last last! take take! sole find_sole_by second third create create! find_or_create_by find_or_create_by! find_or_initialize_by create_or_find_by build".split(" ");
 const CALLBACK = /^(before|after|around|skip_before|skip_after|skip_around)_(action|filter|save|create|update|destroy|validation|commit|rollback|initialize|find|touch|create_commit|update_commit|destroy_commit|save_commit|enqueue|perform|deliver)$|^(validate|validates_with|rescue_from|helper_method)$/;
 const ASSOCIATION = /^(has_many|has_one|belongs_to|has_and_belongs_to_many)$/;
@@ -30,6 +31,41 @@ export const railsPack: RubyPack = {
 
   prepare(project) {
     for (const f of FINDERS) project.instanceReturns.add(f);
+    for (const m of RELATION) project.relationMethods.add(m);
+
+    // Associations as typed methods: has_many :posts → user.posts is Posts
+    // (a collection: scopes and finders apply), belongs_to :author,
+    // class_name: "User" → post.author is a User. And delegate :name, to: :user.
+    for (const f of project.facts) {
+      for (const c of f.calls) {
+        if (c.recv.kind !== "none" || !c.args?.length || !project.classes.get(c.owner)) continue;
+        if (ASSOCIATION.test(c.name) && c.args[0].t === "sym") {
+          if (pairValue(c.args, "polymorphic") || pairArg(c.args, "polymorphic")) continue;
+          const many = c.name === "has_many" || c.name === "has_and_belongs_to_many";
+          const written = pairValue(c.args, "class_name") ?? camelize(many ? singularize(c.args[0].v) : c.args[0].v);
+          const target = project.resolveConst(written, c.nesting);
+          if (target) (project.associations.get(c.owner) ?? project.associations.set(c.owner, new Map()).get(c.owner)!).set(c.args[0].v, { target, many });
+        }
+        if (c.name === "delegate") {
+          const via = pairValue(c.args, "to");
+          const prefix = pairValue(c.args, "prefix");
+          if (!via) continue;
+          for (const a of c.args) {
+            if (a.t !== "sym") continue;
+            const name = prefix === "true" ? `${via}_${a.v}` : prefix ? `${prefix}_${a.v}` : a.v;
+            (project.delegates.get(c.owner) ?? project.delegates.set(c.owner, new Map()).get(c.owner)!).set(name, via);
+          }
+        }
+      }
+    }
+    // Fixtures: users(:one) is a User (in tests).
+    project.typeHooks.push((e, _base, ctx) => {
+      if (e.recv || e.args?.[0]?.t !== "sym" || !/(^|\/)(test|spec)\//.test(ctx.file)) return null;
+      const one = singularize(e.name);
+      if (one === e.name) return null;
+      const path = project.resolveConst(camelize(one), ctx.nesting);
+      return path && project.classes.get(path)?.kind === "class" ? { path, singleton: false, confidence: "inferred" } : null;
+    });
     // UserMailer.welcome(…): the instance method. SomeJob.perform_later(…): perform.
     project.singletonFallbacks.push((cls, name) => {
       if (/^(perform_later|perform_now|perform_async|perform_in|perform_at|perform_bulk|set)$/.test(name)) return project.findMethod(cls.path, "perform", false);

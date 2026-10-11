@@ -125,11 +125,18 @@ talk (`renderer → preload: 230 · preload → main: 139`).
   type-checked links, plus Electron IPC and events across processes.
 - **Ruby** through tree-sitter (no Ruby install needed): calls resolved the
   way Ruby looks them up (self, constants, `new`, mixins, superclasses,
-  what a variable was assigned), name-matched only when there's exactly one
-  candidate, and marked as inferred.
+  `module_function`, `extend self`), and typed through whole chains: what a
+  variable was assigned, what a method returns (its last expression,
+  `@user ||= User.find(…)`), block parameters (`users.each do |user|`),
+  `attr_reader`, `self.class`, `send(:name)`; name-matched only when
+  there's exactly one candidate, and marked as inferred.
 - **Rails**, detected automatically: routes to controller actions (entry
-  points by verb and path), callbacks, associations, scopes, concerns,
-  finders, mailers, jobs and rake tasks.
+  points by verb and path), callbacks, associations as typed methods
+  (`user.posts.published.first` reaches `Post`'s scope and methods),
+  `delegate`, scopes, concerns, finders and relations, mailers, jobs, rake
+  tasks and test fixtures. **Sinatra** routes and filters; **RSpec** `let`
+  and `subject` (typed, with FactoryBot's `create(:user)`) and
+  `described_class`; **Thor** commands.
 - **Python** through tree-sitter: names resolved through imports
   (relative, absolute, re-exported by packages), classes and their bases,
   and what variables hold, from type annotations, assignments and return

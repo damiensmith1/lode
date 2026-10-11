@@ -21,7 +21,7 @@ export async function rubyPlugin(options: { packs?: RubyPack[] } = {}): Promise<
   const packs = options.packs ?? [];
   return treeSitterPlugin<RubyFacts>({
     name: packs.length ? `ruby+${packs.map((p) => p.name).join("+")}` : "ruby",
-    version: 1,
+    version: 3,
     grammar: "ruby",
     owns: isRubyFile,
     extract: extractRuby,

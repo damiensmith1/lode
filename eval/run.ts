@@ -27,7 +27,7 @@
 // coverage (share of `include` found), noise (cards matching `exclude`).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,10 +106,14 @@ function folderOf(repo: Repo, suiteDir: string): string {
   return dir;
 }
 
+// Graphs are indexed fresh each run, never from lode's cache: a cache built
+// by other code (same plugin version, different rules) would be measured instead.
+const graphs = mkdtempSync(path.join(os.tmpdir(), "lode-eval-"));
+process.on("exit", () => rmSync(graphs, { recursive: true, force: true }));
 const stores = new Map<string, Queries>();
 async function queriesFor(folder: string): Promise<Queries> {
   if (!stores.has(folder)) {
-    const store = GraphStore.open(await pluginFor(folder), folder);
+    const store = GraphStore.open(await pluginFor(folder), folder, { cacheDir: path.join(graphs, String(stores.size)) });
     stores.set(folder, new Queries(() => store.graph, store.root));
   }
   return stores.get(folder)!;

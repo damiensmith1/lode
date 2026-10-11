@@ -405,7 +405,7 @@ does the rest. `GraphStore.open(yourPlugin, folder)` uses it in place of
 `tsPlugin`; `combinePlugins([a, b])` runs several on one repo (each
 re-indexes only when its own files change).
 
-**Ruby:** `await rubyPlugin({ packs: [railsPack] })` (async: the grammar
+**Ruby:** `await rubyPlugin({ packs: [railsPack, sinatraPack, rubyToolsPack] })` (async: the grammar
 is WASM). A pack adds what a framework does by convention, and runs only
 where it detects its framework: `{ name, detect(project), prepare?(project),
 link?(project) }`. `prepare` runs before calls are resolved (turn a DSL

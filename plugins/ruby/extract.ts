@@ -18,6 +18,7 @@ export interface RubyDecl {
   superclass?: string; // classes: as written
   nesting?: string[]; // classes: lexical nesting, for resolving the superclass
   generated?: string; // a method a call defines (define_method)
+  ret?: RExpr; // methods: what the last expression (or a return) gives
 }
 
 // An argument, simplified: what DSLs (routes, callbacks, associations) need.
@@ -34,6 +35,17 @@ export type Receiver =
   | { kind: "call"; const?: string; method: string; text: string } // User.find(1)…, x.y…
   | { kind: "other"; text: string };
 
+// An expression, as far as typing it goes: self, a constant, a variable,
+// a method sent to something (nothing: self, or a bare name), or an
+// element of a collection (a block's parameter).
+export type RExpr =
+  | { k: "self" }
+  | { k: "const"; text: string }
+  | { k: "ivar" | "lvar"; name: string }
+  | { k: "send"; recv: RExpr | null; name: string; args?: RubyArg[] }
+  | { k: "elem"; of: RExpr }
+  | { k: "other" };
+
 export interface RubyCall {
   from: string; // the declaration it's in (a method, or a class/module/file body)
   name: string;
@@ -44,16 +56,17 @@ export interface RubyCall {
   singleton: boolean; // in a class method (self is the class)
   method?: string; // the method it's in (for super)
   args?: RubyArg[]; // receiverless calls only (the DSL ones)
-  block?: { start: number; end: number; params: string[] };
+  block?: { start: number; end: number; params: string[]; last?: RExpr }; // last: what the block gives (a let's value)
   bare?: true; // `save` alone: maybe a local the parser couldn't tell
+  inBlock?: true; // inside a block (do … end, { … }): in a class body, those usually run as instances
+  expr?: RExpr; // the receiver, fully (chains: user.posts.published.first)
 }
 
 // What a variable was assigned: `user = User.find(id)`, `@post = Post.new`.
 export interface RubyAssign {
-  scope: string; // locals: the declaration; ivars: the class path
+  scope: string; // locals: the declaration; ivars: "@" + the class path
   name: string;
-  const: string;
-  method: string; // what was called on it ("new", "find", "" for the constant itself)
+  value: RExpr; // what it was given (a block parameter: an element of what the block iterates)
   nesting: string[];
 }
 
@@ -73,7 +86,11 @@ interface Scope {
   singleton: boolean;
   method?: string;
   locals: Set<string>;
+  inBlock?: boolean;
 }
+
+// Methods whose block's first parameter is an element of the receiver.
+const ITERATORS = /^(each|map|flat_map|collect|select|filter|filter_map|reject|find|detect|each_with_index|each_with_object|find_each|sort_by|group_by|min_by|max_by|sum|count|any\?|all\?|none\?|partition|index_by|each_entry|reverse_each|lazy|tap)$/;
 
 // Identifiers in these places aren't calls (names, parameters, targets).
 const NOT_A_CALL = new Set([
@@ -151,6 +168,12 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
         const inner: Scope = { decl: decl.id, owner, nesting: scope.nesting, singleton, method: name, locals };
         const skip = new Set([node.childForFieldName("name")?.id, node.childForFieldName("object")?.id]);
         for (const child of node.namedChildren) if (child && child.type !== "method_parameters" && !skip.has(child.id)) visit(child, inner);
+        // What it returns: its last expression (`@user ||= User.find(…)`), or a `return`.
+        const body = node.childForFieldName("body");
+        const statements = body?.type === "body_statement" ? body.namedChildren.filter((c): c is SyntaxNode => !!c && c.type !== "comment") : body ? [body] : [];
+        let ret = exprOf(statements.at(-1), inner);
+        if (ret.k === "other") ret = exprOf(body?.descendantsOfType("return")[0], inner);
+        if (ret.k !== "other") decl.ret = ret;
         return;
       }
       case "call": {
@@ -166,7 +189,7 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
         // A bare name that isn't a local: a call with no receiver or arguments.
         const parent = node.parent;
         if (!scope.locals.has(node.text) && parent && !NOT_A_CALL.has(parent.type) && !isField(parent, "left", node) && !isField(parent, "name", node)) {
-          calls.push({ from: scope.decl, name: node.text, recv: { kind: "none" }, line: lineOf(node), owner: scope.owner, nesting: scope.nesting, singleton: scope.singleton, bare: true, ...(scope.method && { method: scope.method }) });
+          calls.push({ from: scope.decl, name: node.text, recv: { kind: "none" }, line: lineOf(node), owner: scope.owner, nesting: scope.nesting, singleton: scope.singleton, bare: true, ...(scope.method && { method: scope.method }), ...(scope.inBlock && { inBlock: true as const }) });
         }
         return;
       }
@@ -181,10 +204,10 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
         } else if (left?.type === "left_assignment_list") {
           for (const n of left.descendantsOfType("identifier")) if (n) scope.locals.add(n.text);
         } else if (left) visit(left, scope);
-        // What it holds, when that's plain: User.new, User.find(…), User.
+        // What it holds: User.new, User.find(…), current_user, @post.comments…
         if (left && right && (left.type === "identifier" || left.type === "instance_variable")) {
-          const held = constCall(right);
-          if (held) assigns.push({ scope: left.type === "instance_variable" ? `@${scope.owner}` : scope.decl, name: left.text, const: held.const, method: held.method, nesting: scope.nesting });
+          const value = exprOf(right, scope);
+          if (value.k !== "other") assigns.push({ scope: left.type === "instance_variable" ? `@${scope.owner}` : scope.decl, name: left.text, value, nesting: scope.nesting });
         }
         return;
       }
@@ -193,7 +216,7 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
       case "lambda": {
         const locals = new Set(scope.locals);
         for (const p of paramNames(node.childForFieldName("parameters"))) locals.add(p);
-        visitChildren(node, { ...scope, locals }, ["block_parameters", "lambda_parameters"]);
+        visitChildren(node, { ...scope, locals, inBlock: true }, ["block_parameters", "lambda_parameters"]);
         return;
       }
       case "block_argument": {
@@ -228,15 +251,29 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
     const blockNode = node.childForFieldName("block");
     const name = methodNode?.text ?? "call"; // foo.() is foo.call
     const recv = receiverOf(receiverNode, scope);
-    const call: RubyCall = { from: scope.decl, name, recv, line: lineOf(methodNode ?? node), owner: scope.owner, nesting: scope.nesting, singleton: scope.singleton, ...(scope.method && { method: scope.method }) };
-    if (recv.kind === "none") {
+    const call: RubyCall = { from: scope.decl, name, recv, line: lineOf(methodNode ?? node), owner: scope.owner, nesting: scope.nesting, singleton: scope.singleton, ...(scope.method && { method: scope.method }), ...(scope.inBlock && { inBlock: true as const }) };
+    // Arguments for DSLs: calls with no receiver, or with a block (RSpec.describe User do).
+    if (recv.kind === "none" || blockNode) {
       call.args = argsNode ? argsNode.namedChildren.filter((a): a is SyntaxNode => !!a).map(argOf) : [];
       if (name === "require" || name === "require_relative") {
         const target = call.args[0];
         if (target?.t === "str") requires.push(name === "require_relative" ? relative(file, target.v) : target.v);
       }
     }
-    if (blockNode) call.block = { start: lineOf(blockNode), end: endLineOf(blockNode), params: paramNames(blockNode.childForFieldName("parameters")) };
+    if (blockNode) {
+      const body = blockNode.childForFieldName("body");
+      const statements = (body ? body.namedChildren : []).filter((c): c is SyntaxNode => !!c && c.type !== "comment");
+      const last = statements.length ? exprOf(statements.at(-1), scope) : undefined;
+      call.block = { start: lineOf(blockNode), end: endLineOf(blockNode), params: paramNames(blockNode.childForFieldName("parameters")), ...(last && last.k !== "other" && { last }) };
+    }
+    if (receiverNode) call.expr = exprOf(receiverNode, scope);
+    // send(:foo) and friends: which method, by name.
+    if (/^(send|public_send|__send__|try|try!|method|respond_to\?)$/.test(name) && argsNode && !call.args) call.args = argsNode.namedChildren.filter((a): a is SyntaxNode => !!a).slice(0, 2).map(argOf);
+    // A block's first parameter is an element of what it iterates: users.each do |user|.
+    if (blockNode && receiverNode && ITERATORS.test(name)) {
+      const first = paramNames(blockNode.childForFieldName("parameters"))[0];
+      if (first) assigns.push({ scope: scope.decl, name: first, value: { k: "elem", of: exprOf(receiverNode, scope) }, nesting: scope.nesting });
+    }
     calls.push(call);
 
     // define_method(:name) { … } in a class body: a method.
@@ -251,6 +288,35 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
     if (receiverNode && recv.kind !== "lvar" && recv.kind !== "ivar" && recv.kind !== "const" && recv.kind !== "self") visit(receiverNode, scope);
     if (argsNode) visitChildren(argsNode, scope);
     if (blockNode) visit(blockNode, scope);
+  };
+
+  const exprOf = (n: SyntaxNode | null | undefined, scope: Scope, depth = 0): RExpr => {
+    if (!n || depth > 12) return { k: "other" };
+    switch (n.type) {
+      case "self":
+        return { k: "self" };
+      case "constant":
+      case "scope_resolution":
+        return { k: "const", text: n.text };
+      case "instance_variable":
+        return { k: "ivar", name: n.text };
+      case "identifier":
+        return scope.locals.has(n.text) ? { k: "lvar", name: n.text } : { k: "send", recv: null, name: n.text };
+      case "call": {
+        const recv = n.childForFieldName("receiver");
+        const name = n.childForFieldName("method")?.text ?? "call";
+        const args = n.childForFieldName("arguments");
+        return { k: "send", recv: recv ? exprOf(recv, scope, depth + 1) : null, name, ...(args && { args: args.namedChildren.filter((a): a is SyntaxNode => !!a).slice(0, 4).map(argOf) }) };
+      }
+      case "parenthesized_statements":
+        return n.namedChildCount === 1 ? exprOf(n.namedChildren[0], scope, depth + 1) : { k: "other" };
+      case "operator_assignment": // @user ||= User.find(…)
+        return exprOf(n.childForFieldName("right"), scope, depth + 1);
+      case "return":
+        return exprOf(n.namedChildren[0]?.namedChildren[0] ?? n.namedChildren[0], scope, depth + 1);
+      default:
+        return { k: "other" };
+    }
   };
 
   const receiverOf = (n: SyntaxNode | null, scope: Scope): Receiver => {

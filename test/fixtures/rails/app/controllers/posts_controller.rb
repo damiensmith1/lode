@@ -8,6 +8,15 @@ class PostsController < ApplicationController
     @post.view!
   end
 
+  def mine
+    current_user.posts.published.each { |post| post.view! }
+    current_user.posts.first.view!
+  end
+
+  def headline
+    Comment.new.headline
+  end
+
   def publish
     @post = Post.find(params[:id])
     @post.publish!

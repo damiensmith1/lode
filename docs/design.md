@@ -862,7 +862,20 @@ Calls resolve as a reader would:
   one, it isn't a common or core-library name or a test helper, and the
   receiver isn't a known class (whose method would have been found), an
   unknown chain or a library constant (inferred).
-A call that can't be resolved gets no arrow: missing beats wrong. Folds:
+Beyond single receivers, every expression is kept whole (self, a
+constant, a variable, a method sent to another expression, an element of
+a collection), so chains type step by step: `current_user` (its last
+expression, `@current_user ||= User.find_by(…)`) → a User; `.posts` (an
+association) → Posts, a collection: its scopes and finders apply;
+`.published` (a scope) → Posts; `.each { |post| … }` → each a Post. Also
+`attr_reader`s (typed by the ivar), `delegate :x, to: :y`, `self.class`,
+`send(:x)` / `method(:x)` / `try(:x)`, `module_function` and `extend
+self`, and a bare name read as what it says (`current_user` → User,
+`posts` → Posts). Calls written directly in a class body (`set :x`,
+`register Foo`) are on the class; calls in that body's blocks (`test do`,
+`included do`, a scope's lambda) on instances. A global (`$stdout`) or a
+literal never gets a name-only guess. A call that can't be resolved gets
+no arrow: missing beats wrong. Folds:
 class, module, method and block bodies, control flow, multi-line literals
 and argument lists, comment runs, the requires.
 
@@ -875,7 +888,26 @@ conditions; associations (with `class_name:`); `scope` as a class method;
 concerns' `class_methods`; finders returning instances; mailer class
 methods → instance methods; `perform_later`/`perform_async` → `perform`
 (jobs are entries); rake tasks in namespaces (entries). Files are tagged
-web / jobs / tasks, the runtime lens for entries.
+web / jobs / tasks, the runtime lens for entries. Associations are typed
+methods (has_many → a collection of the class, belongs_to/has_one → an
+instance; `class_name:` respected, polymorphic skipped); relation methods
+(`where`, `order`, `includes`…) keep a collection, finders (`find`,
+`first`, `create`…) give an instance; fixtures (`users(:one)`) in tests
+are instances.
+
+**`sinatraPack`** (`plugins/sinatra`): `get "/x" do … end` (top level or
+in a `Sinatra::Base` subclass) is a callable named by verb and path, an
+entry; `before`/`after` filters too. **`rubyToolsPack`**
+(`plugins/ruby-tools`): RSpec `let`/`let!`/`subject` as methods typed by
+what their block gives, FactoryBot's `create(:user)` / `build` /
+`create_list` typed, `described_class`; Thor commands (`desc` + method)
+as entries. Examples (`it "…"`) aren't made callables: the eval showed
+thousands of sentence-named nodes crowding the word search.
+
+Measured again after this (eval, 34 questions): `/` answers unchanged
+(79% of starts right), while rubygems.org links went from 5,707 to 6,373
+of its non-test calls and what stays unlinked is overwhelmingly framework
+DSL (Avo, Phlex, Pundit, I18n, config) and libraries.
 
 Measured: keepr (an ActiveRecord gem, 35 files) 0.13s; sinatra (plain
 Ruby, ~200 files) 0.4s; rubygems.org (Rails + JS, 1,400 .rb files) ~4s

@@ -8,6 +8,10 @@ class Post < ApplicationRecord
 
   before_save :normalize_title
 
+  def headline
+    title.upcase
+  end
+
   def view!
     increment!(:views)
   end
