@@ -1,4 +1,4 @@
-# ◇ lode
+# ◇ lode-graph
 
 **Read a codebase as a flow of real code.** lode builds a live graph of how
 your code fits together and lets you read it as cards of actual code on a
