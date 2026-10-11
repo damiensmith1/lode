@@ -130,7 +130,18 @@ talk (`renderer → preload: 230 · preload → main: 139`).
 - **Rails**, detected automatically: routes to controller actions (entry
   points by verb and path), callbacks, associations, scopes, concerns,
   finders, mailers, jobs and rake tasks.
-- Mixed repos get both. Python, Go and Java are next, on the same
+- **Python** through tree-sitter: names resolved through imports
+  (relative, absolute, re-exported by packages), classes and their bases,
+  and what variables hold, from type annotations, assignments and return
+  types (`user = repo.get(1)` with `get` annotated `-> User`).
+- **Python web frameworks**, detected automatically: FastAPI, Flask and
+  Starlette routes (with router prefixes) and `Depends`; Django URLs (with
+  `include()`), class-based views, the ORM, management commands and
+  signals; Celery tasks and `.delay()`. Also pytest fixtures (a test's
+  parameter is the fixture), CLI commands (click, typer, argparse,
+  console scripts) as entry points, `@property` reads, functions passed as
+  callbacks, and abstract methods to their implementations.
+- Mixed repos get all of theirs. Go and Java are next, on the same
   tree-sitter base.
 
 ## Quick start
@@ -187,7 +198,8 @@ node dist/lib/src/cli.js mcp <project>                       # MCP server on std
   references, and data flows in three tiers (within a function, through
   shared state, across process boundaries such as Electron IPC). Language
   support is a plugin: TypeScript in `src/ingest/ts`; Ruby and Rails in
-  `plugins/` on a shared tree-sitter base (`plugins/treesitter`).
+  `plugins/` on a shared tree-sitter base (`plugins/treesitter`), as are
+  Python and its web frameworks.
 - **Queries** (`src/query`): what the views need, all deterministic: code
   blocks with their links and callers, entry points, search, file lists,
   git changes mapped to symbols.

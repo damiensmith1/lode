@@ -1,0 +1,6 @@
+[project]
+name = "fixture"
+dependencies = ["fastapi", "celery", "django"]
+
+[project.scripts]
+fixture-cli = "app.cli:main"

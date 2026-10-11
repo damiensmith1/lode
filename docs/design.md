@@ -882,6 +882,60 @@ Ruby, ~200 files) 0.4s; rubygems.org (Rails + JS, 1,400 .rb files) ~4s
 with its TypeScript. Sampled name-only links there are mostly right; the
 misses were library and core methods, now excluded.
 
+**Python** (`plugins/python`), detected by a pyproject.toml, setup.py,
+setup.cfg, requirements.txt or Pipfile, or 3+ .py files. Ids are dotted
+names in the module: `app/services.py#UserService.find`. A declaration
+spans its decorators, so a route's `@router.get("/x")` is on its card.
+Python has what Ruby lacks, type annotations, so more resolves:
+- names: the enclosing functions, the module, its imports: absolute
+  (`app.repo`, found among the project's files, shallowest then nearest),
+  relative (`..core`), through a package's `__init__.py` re-exports and
+  `import *`; a library import leaves the call alone;
+- attributes: through modules, classes and their bases (in order), and
+  instances; `super()` goes to the bases;
+- what a variable holds: its annotation (`repo: Repo`), what it was
+  assigned (`repo = Repo()`), a call's return annotation (`user =
+  repo.get(1)` with `-> User`, `"User"`, `Optional[User]`), or `self.repo`
+  set in any method (traced back to `__init__`'s `repo: Repo`);
+- what a function gives without an annotation: its first `return` (or a
+  fixture's `yield`); a tuple (`return repo, user`, or `-> tuple[A, B]`)
+  position by position, for `repo, user = make()`;
+- loop and comprehension variables (an element of what they loop over;
+  `dict[K, V]` reads as V), `with … as x`, and fields in a class body
+  (dataclasses, models);
+- calling a class is its `__init__` (or the class); calls in parameter
+  defaults (`Depends(get_db)`) are the function's;
+- a `@property` (or `cached_property`) read runs it: an arrow, though it
+  isn't called; a function handed over as a value (`Thread(target=work)`,
+  `set_defaults(run=cmd_sync)`, callbacks) is "passes it";
+- a call to an abstract method (`@abstractmethod`, or a body of just `...`,
+  `pass` or `raise NotImplementedError`) also reaches the classes that
+  implement it, when there are four or fewer.
+Through a variable's type it's inferred; directly, exact. An unknown
+receiver links only to the one project method with that name (not a
+common one, not a test helper). **`pythonWebPack`** (`plugins/python-web`):
+FastAPI/Flask/Starlette routes by decorator (verb and path, with
+`APIRouter(prefix=…)` / `Blueprint(url_prefix=…)`) and `Depends`; Django's
+urls.py (`path`/`re_path` → function or class-based views, under
+`include()` prefixes), `Model.objects.<finder>(…)` as an instance,
+management commands (`manage.py <name>` → `Command.handle`) and
+`@receiver` signals; Celery/Dramatiq tasks (entries) and `.delay(…)` /
+`.apply_async(…)` → the task. Files with routes are tagged web, task
+modules jobs, management commands tasks. **`pythonToolsPack`**
+(`plugins/python-tools`): pytest (a test's or fixture's parameter is the
+fixture of that name, from its file or a conftest.py above it: an arrow
+to it, and the parameter holds what it returns); CLI entries (click and
+typer commands, argparse subcommands by `set_defaults(func=…)` and the
+nearest `add_parser("name")`, pyproject's `[project.scripts]` and
+`[tool.poetry.scripts]`).
+
+Measured on two typed, real projects (jevfilter, 45 files, 0.2s;
+jev-gmail-filter, 25 files plus its JS, 0.6s): sampled inferred links all
+right; what stays unlinked is libraries (sqlite3, datetime, the Gmail
+client, dataclasses' `field`), `Any`, and callables passed in as
+parameters. Untyped and heavily dynamic Python (`getattr`, metaclasses,
+monkeypatching) will link less, falling back to the one-method-by-name rule.
+
 ## Build vs buy: existing code graphs
 
 Joern (code property graph) and CodeQL were considered as the core and

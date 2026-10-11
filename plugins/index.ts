@@ -5,15 +5,22 @@ import { listFiles } from "../src/query/git.js";
 import type { GraphData, LanguagePlugin, PluginSession } from "../src/schema/index.js";
 import { railsPack } from "./rails/index.js";
 import { isRubyFile, rubyPlugin } from "./ruby/index.js";
+import { isPythonFile, pythonPlugin } from "./python/index.js";
+import { pythonWebPack } from "./python-web/index.js";
+import { pythonToolsPack } from "./python-tools/index.js";
 
 export { railsPack } from "./rails/index.js";
 export { rubyPlugin, isRubyFile } from "./ruby/index.js";
+export { pythonPlugin, isPythonFile } from "./python/index.js";
+export { pythonWebPack } from "./python-web/index.js";
+export { pythonToolsPack } from "./python-tools/index.js";
+export type { PyPack, PythonProject } from "./python/index.js";
 export type { RubyPack, RubyProject } from "./ruby/index.js";
 export { treeSitterPlugin, loadParser, type TreeSitterLanguage } from "./treesitter/index.js";
 
 // The plugin for a project, from what's in it: TypeScript/JavaScript (a
 // tsconfig/jsconfig, or .ts/.js files), Ruby (with Rails where Rails is),
-// or several at once. A TS-only project gets tsPlugin exactly as before.
+// Python (with its web frameworks where they are), or several at once. A TS-only project gets tsPlugin exactly as before.
 export async function pluginFor(projectPath: string): Promise<LanguagePlugin> {
   const absolute = path.resolve(projectPath);
   const root = statSync(absolute).isDirectory() ? absolute : path.dirname(absolute);
@@ -24,9 +31,13 @@ export async function pluginFor(projectPath: string): Promise<LanguagePlugin> {
   // one stray Homebrew formula, not test fixtures).
   const ruby = files.filter((f) => isRubyFile(f) && !/(^|\/)fixtures\//.test(f));
   const hasRuby = ruby.length >= 3 || ruby.some((f) => /(^|\/)(Gemfile|Rakefile|config\.ru)$|\.gemspec$/.test(f));
+  // Python: a pyproject.toml, setup.py, requirements.txt or Pipfile, or a few .py files.
+  const python = files.filter((f) => isPythonFile(f) && !/(^|\/)fixtures\//.test(f));
+  const hasPython = python.length >= 3 || files.some((f) => /^(pyproject\.toml|setup\.py|setup\.cfg|requirements\.txt|Pipfile)$/.test(f));
   const plugins: LanguagePlugin[] = [];
-  if (hasTs || !hasRuby) plugins.push(tsPlugin);
+  if (hasTs || (!hasRuby && !hasPython)) plugins.push(tsPlugin);
   if (hasRuby) plugins.push(await rubyPlugin({ packs: [railsPack] }));
+  if (hasPython) plugins.push(await pythonPlugin({ packs: [pythonWebPack, pythonToolsPack] }));
   return plugins.length === 1 ? plugins[0] : combinePlugins(plugins);
 }
 

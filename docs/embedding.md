@@ -418,6 +418,13 @@ file's facts (declarations, calls with their receivers and DSL arguments,
 assignments). `railsPack` is one: routes, callbacks, associations, scopes,
 concerns, finders, mailers, jobs and rake tasks.
 
+**Python:** `await pythonPlugin({ packs: [pythonWebPack, pythonToolsPack] })`, the same
+shape: a `PyPack` is `{ name, detect, prepare?, link? }` over a
+`PythonProject` (`resolveModule`, `resolveName`, `evalPath`, `evalRef`,
+`classMember`, `inherits`, `addEdge`, `register`, `tag`; `callTypes` and
+`memberHooks` to say what a framework's calls return and what its
+attributes are).
+
 **Another tree-sitter language:** `treeSitterPlugin({ name, version,
 grammar, owns(file), extract(tree, file, text), link(facts, root) })`.
 `extract` sees one file's syntax and returns its facts (kept per file
