@@ -614,12 +614,11 @@ workflow; the graph supplies candidates; Jev judges them:
 
 1. **Route.** A Choice judgment picks the kind of question (how X works,
    what breaks, where X is handled, what calls X, …).
-2. **Start.** Lode finds candidate symbols (name search, entry points,
-   changed symbols); Jev scores each one's relevance to the question.
-3. **Follow.** From the best starts, lode walks the graph in the routed
-   direction (callees, callers, or downstream of changes); Jev judges
-   whether each next symbol belongs, within a step budget (about 5-15
-   cards).
+2. **Start.** Lode crawls the project from its top and the best word
+   matches, opening what Jev judges most promising, round by round.
+3. **Follow.** The crawl goes into what functions call (or their callers);
+   a last pass scores how central each find is and picks the start
+   (about 5-15 cards).
 4. **Breakage.** Lode collects everything downstream of the changed
    symbols; Jev scores how likely each is to break given the diff.
 5. **Render.** A flow plan (cards, arrows, path, notes built from facts
@@ -661,17 +660,19 @@ the line that connects it, not whole files); it can't count or do maths
 shift with option order (Nouls per candidate where scores must be
 comparable); it doesn't generate (notes are built by code).
 
-**The pipeline, in 2-4 requests:**
+**The pipeline as first planned, in 2-4 requests** (for "how", "where"
+and "what calls" questions, a crawl replaced its first two steps: see
+"As built" below):
 
-1. **Route + start** (one request). Code builds a shortlist of up to ~200
-   candidate symbols cheaply: lexical match of the question's words
-   against names, file paths and first doc-comment lines; entry points;
-   for change questions, the changed symbols. Each is tagged `S017|
+1. **Route + start** (one request). Code builds a shortlist of 40
+   candidate symbols cheaply: a BM25 text search of the question's words
+   over every symbol's name, path, comment and code; for change
+   questions, the changed symbols. Each is tagged `S017|
    addTab (function) hosts/app/main.ts:96 — addTab(request, at)`. State:
    `{ question, candidates }`. Questions: a Choice routing the question
    (how X works / what breaks / where X is handled / what calls X / what
    changed / other); a Choice over the candidate ids for the best place
-   to start; a Noul per top-30 candidate for "is this about the
+   to start; a Noul per candidate for "is this about the
    question?" (the re-ranking pattern), and a Noul for "does anything here
    answer it?" so an unanswerable question says so instead of guessing.
 2. **Follow** (one request per hop, two or three hops). From the chosen
@@ -691,12 +692,66 @@ comparable); it doesn't generate (notes are built by code).
    `ViewRequest` · likely breaks"), and opens it in a new flow tab.
 
 **As built** (`src/ask`): `askFlow(question, queries, judge)` returns a
-`FlowPlan` (route, cards with a note and a step: 0 for where to start,
-then each hop), typically in 2-3 requests and 0.3-0.6s. Candidates are
-top-level declarations and methods, matched on name and path words
-(words that exactly name a symbol count most); utilities (12+ callers, or
-one- or two-letter names) need a 0.9 noul to get in, others 0.6; 12 cards
-and 2 hops at most ("where" follows 1). The service's `ask` method uses
+`FlowPlan` (route, cards with a note, a step along the calls from the
+start, and an importance: core or supporting), in 5-10 requests and about
+1-2.5s. It's a crawl that code runs and Jev judges:
+
+1. **Where to look.** The top of the project (its folders and top-level
+   files) plus the best 40 word matches (`lexicalCandidates`: BM25 over
+   each symbol's name, counted most, its path, the comment above it and
+   its code; Porter-stemmed; English function words ignored, nothing
+   else; a symbol the question names exactly first). Jev judges them all
+   in one request, with the route.
+2. **Crawl.** Each round opens the most promising few (a beam of 6): a
+   folder's entries, a file's or class's members, what a function calls
+   (what calls it, for "what calls X"), and Jev judges everything new in
+   one request. Containers are asked "is the answer likely inside?",
+   functions "does this do part of it?". Ranked, not cut off: the best
+   few are opened even when every score is modest, which is what lets it
+   reach `Journal` for "how the ledger works" in a codebase that never
+   says ledger. A member that scores well (≥0.7) also opens its class or
+   file, so its siblings get judged: word matches are often members
+   reached without their parent. Up to 8 rounds, none started after 3s.
+3. **What matters.** The best 25 found are scored for how central they
+   are (incidental, supporting, core) and Jev picks where to start;
+   supporting cards open shorter on the canvas.
+4. **What triggers it.** One hop of what calls the start (a route, a
+   controller action, a job's `perform`, an IPC handler), judged in one
+   request; up to two go first in the flow, noted "triggers it". The
+   crawl only follows calls down from the start, so without this the
+   flow begins mid-feature (download counts: `FastlyLogProcessor.perform`
+   → `download_counts` → `GemDownload`, rather than starting at
+   `download_counts`). Skipped for "what calls X", which went up already.
+
+Items are described by what's in them, not their names alone: a folder by
+the classes declared under it, a class by its first lines and members, a
+function by its comment and first lines (thin descriptions made Jev's
+scores bunch around 0.5). Folders with one entry and files with one class
+are skipped through. Measured on keepr and rubygems.org (8 questions
+worded in the domain's terms, not the code's): the start was right for
+"how the ledger works" (`Journal`), balance sheets, the tax accountant's
+export, name squatting, download counts (`FastlyLogProcessor`) and
+two-factor login; "publishing a gem" lands in the post-push jobs rather
+than `Pusher`; tests and migrations sometimes rank as core. The earlier
+pipeline (word search, one judging request, two hops) was 3x faster but
+couldn't bridge vocabulary: "ledger" found only a test's `Ledger`.
+
+Later on this branch: symbols the question names (`contextFor`,
+`Pusher#process`) anchor the answer, and "what calls X" is answered from
+the graph (X and its callers, ranked); the start is chosen in the first
+request, directly over the named symbols and word matches, and the crawl
+only adds what's around it; the word search forgives typos (a word the
+code never uses matches code words within an edit or two).
+
+**Measured** (`eval/`, 34 questions over glance, lode, keepr, sinatra and
+rubygems.org, each run twice): the crawl scored 26.8/34 at 1.1s and 5.5
+requests a question; one judging pass over the word matches (with typo
+matching) scored 27.7 at 0.4s and 2.2. The crawl only gained on true
+synonyms (about half a question) and lost more elsewhere, mostly by
+picking worse starts and crowding the flow with topical but off-path
+cards. So main uses the one-pass version; this crawl is kept here for
+when synonyms ("explain the ledger", "voice typing") get another try.
+The service's `ask` method uses
 `options.judge`, or Jev when `TYPESAFE_API_KEY` is set (the CLI loads
 lode's own settings from the `.env` in lode's folder only, never the
 working directory, since `OPENAI_BASE_URL` decides where keys are sent;
@@ -745,7 +800,10 @@ the user does: `add_cards` (at most 12 a message), `build_flow` (Jev's
 `select`, `focus`, `fit`, `show_changes`, and `open_tab`. The LLM drives
 and Jev is one of its tools: Jev is fast and good at "where does this
 start and what follows", the LLM at deciding what the user wants done.
-Canvas tools don't touch anything on the server: each is checked (real
+What `open_fold` reveals (and what `expand` shows) also goes back to the
+model as the tool's result: the canvas changes, but the model's context
+was built when the message arrived, so without it the model would open a
+fold and still not have read it. Canvas tools don't touch anything on the server: each is checked (real
 symbols; cards that are on the canvas, by name or id; folds that exist in
 that card's lines) and becomes a `CanvasAction` event; the view runs them
 in order as they arrive. The first action that changes cards takes an

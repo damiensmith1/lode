@@ -337,7 +337,8 @@ graph and the cards it was sent (`ExplainRequest.cards`: every card's
 key), which the view carries out in order as they arrive, as one undo
 step per message. New tabs only when the user's message asks for one
 (enforced, not just prompted); a tab action calls the host's
-`openView({ kind: "flow", newTab: true, ask })`. No editing. The answer
+`openView({ kind: "flow", newTab: true, ask })`. No editing. `open_fold`
+and `expand` return the code they reveal to the model. The answer
 streams as `explain` events (`{ stream, event: text | tool | action }`)
 through `LodeConnection.onEvent` (WebSocket and message channels both
 forward them); without `onEvent`, it arrives whole, with `actions`.

@@ -93,6 +93,8 @@ describe("explaining", () => {
     expect(r.actions.find((a) => a.kind === "focus")).toEqual({ kind: "focus", cards: ["src/main.ts#registerIpc", "src/main.ts#saveNote"] });
     if (fold) expect(r.actions.find((a) => a.kind === "fold")).toEqual({ kind: "fold", card: "src/main.ts#saveNote", start: fold.start, end: fold.end, open: true });
     const results = (model.seen[1].messages as { content: { content?: string }[] }[]).at(-1)!.content.map((b) => b.content);
+    expect(results[0]).toContain("### saveNote"); // expand: what's now shown goes back to the model
+    if (fold) expect(results[4]).toMatch(new RegExp(`^\\s*${fold.start}  `, "m")); // open_fold: the lines it revealed
     expect(results[1]).toMatch(/No card notOnTheCanvas/);
     expect(results[5]).toMatch(/no fold starting on line 9999/);
     expect(results[8]).toMatch(/didn't ask for a new tab/); // open_tab, unasked
@@ -100,6 +102,14 @@ describe("explaining", () => {
     expect(results[10]).toMatch(/isn't available here/); // no judge
     // The model is told which cards it can act on.
     expect(model.seen[0].system[1]).toContain("- saveNote: src/main.ts#saveNote");
+  });
+
+  it("shows the model what opening a fold revealed", async () => {
+    const model = scripted([{ content: [{ type: "tool_use", id: "t", name: "open_fold", input: { card: "src/main.ts", line: 12 } }], stop: "tool_use" }]);
+    await explain({ messages: [{ role: "user", text: "What does notify do?" }], canvas: { cards: [{ id: "src/main.ts" }] } }, queries, model);
+    const result = (model.seen[1].messages as { content: { content?: string }[] }[]).at(-1)!.content[0].content!;
+    expect(result).toMatch(/^Done: opened lines 12–14/);
+    expect(result).toContain("  12  function notify(win: WebContents");
   });
 
   it("opens a new tab only when the user asks for one", async () => {

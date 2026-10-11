@@ -30,7 +30,7 @@ describe("context for LLMs", () => {
     const a = await contextFor({ question: "how is a note saved", hops: 2 }, queries);
     const b = await contextFor({ question: "how is a note saved", hops: 2 }, queries);
     expect(a.markdown).toBe(b.markdown);
-    expect(a.items[0].name).toMatch(/[Nn]ote/);
+    expect(a.items.slice(0, 3).map((i) => i.name)).toContain("saveNote"); // with onSave, the button that starts it
   });
 
   it("fits the budget by giving less detail, then leaving things out", async () => {

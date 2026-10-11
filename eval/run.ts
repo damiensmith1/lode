@@ -13,7 +13,7 @@
 //     "questions": [{
 //       "id": "keepr-ledger",
 //       "repo": "<name>",
-//       "type": "overview" | "process" | "where" | "callers" | "none",
+//       "type": "overview" | "process" | "where" | "callers" | "vocab" | "none",
 //       "question": "explain the ledger",
 //       "start": ["Keepr::Journal$", …],        // the start card should match one (regexes over card ids)
 //       "include": ["Keepr::Account$", …],     // each should match some card
@@ -21,7 +21,8 @@
 //     }] }
 //
 // A path is relative to the suite file. A git repo is fetched once at that
-// commit into lode's cache (~/.cache/lode/eval). "none" questions should
+// commit into lode's cache (~/.cache/lode/eval). "vocab" questions are
+// worded unlike the code (a synonym, a typo). "none" questions should
 // come back with no flow. Scores: start (the start card is right),
 // coverage (share of `include` found), noise (cards matching `exclude`).
 
@@ -42,7 +43,7 @@ type Repo = string | { git: string; commit: string };
 interface Question {
   id: string;
   repo: string;
-  type: "overview" | "process" | "where" | "callers" | "none";
+  type: "overview" | "process" | "where" | "callers" | "vocab" | "none";
   question: string;
   start?: string[];
   include?: string[];
