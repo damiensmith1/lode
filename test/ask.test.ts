@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { askFlow } from "../src/ask/index.js";
+import { askFlow, lexicalCandidates } from "../src/ask/index.js";
 import type { Judge, JudgeAnswer, JudgeQuestion } from "../src/ask/judge.js";
 import { loadEnv } from "../src/ask/env.js";
 import { GraphStore } from "../src/graph/store.js";
@@ -24,8 +24,8 @@ function fakeJudge(route: string, topic: RegExp): Judge & { calls: number } {
     calls: 0,
     async ask(state: unknown, questions: Record<string, JudgeQuestion>) {
       judge.calls++;
-      const s = state as { candidates?: string[]; next?: string[]; dependents?: string[] };
-      const items = s.candidates ?? s.next ?? s.dependents ?? [];
+      const s = state as { candidates?: string[]; items?: string[]; callers?: string[]; dependents?: string[] };
+      const items = s.candidates ?? s.items ?? s.callers ?? s.dependents ?? [];
       const answers: Record<string, JudgeAnswer> = {};
       for (const [key, q] of Object.entries(questions)) {
         const index = Number(/\[(\d+)\]/.exec(JSON.stringify(q.instructions))?.[1] ?? -1);
@@ -43,14 +43,37 @@ function fakeJudge(route: string, topic: RegExp): Judge & { calls: number } {
   return judge;
 }
 
+describe("finding candidates", () => {
+  const ids = (question: string) => lexicalCandidates(question, queries, 5).map((n) => n.id);
+
+  it("searches everything about a symbol, not just its name", () => {
+    // "cleared" is only in the handlers' code (notes:cleared, onCleared).
+    expect(ids("what happens when the notes are cleared").slice(0, 3)).toEqual(expect.arrayContaining(["src/preload.ts#exposeInMainWorld:notes.onCleared", "src/renderer.js#onCleared@L13"]));
+  });
+
+  it("puts a symbol the question names first, and matches word forms", () => {
+    expect(ids("where is saveNote")[0]).toBe("src/main.ts#saveNote");
+    expect(ids("how do we save notes")).toEqual(ids("how are notes saved")); // save / saved, notes
+  });
+
+  it("forgives typos: a word the code never uses matches the code's words it's a slip of", () => {
+    expect(ids("how are notes svaed")).toContain("src/main.ts#saveNote");
+    expect(ids("where is saveNote")).toEqual(ids("where is saveNote")); // real words are left alone
+  });
+});
+
 describe("asking for a flow", () => {
   it("starts where the judge says and follows what belongs, step by step", async () => {
     const judge = fakeJudge("how", /saveNote|writeNote|Note/);
     const plan = await askFlow("how is a note saved", queries, judge);
     expect(plan.route).toBe("how");
     expect(plan.answered).toBe(true);
-    expect(plan.cards[0]).toMatchObject({ id: "src/main.ts#saveNote", step: 0 });
-    expect(plan.cards[0].note).toMatch(/^start here/);
+    // What triggers it first (the IPC handler that calls it), then the start.
+    expect(plan.cards[0]).toMatchObject({ step: 0 });
+    expect(plan.cards[0].note).toMatch(/^triggers it: calls saveNote/);
+    expect(plan.cards[1]).toMatchObject({ id: "src/main.ts#saveNote", step: 1 });
+    expect(plan.cards[1].note).toMatch(/^start here/);
+    expect(plan.cards.every((c) => c.importance === "core" || c.importance === "supporting")).toBe(true);
     expect(plan.cards.every((c, i) => i === 0 || (c.step ?? 0) >= (plan.cards[i - 1].step ?? 0))).toBe(true);
     expect(plan.requests).toBe(judge.calls);
   });

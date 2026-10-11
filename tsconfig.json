@@ -8,6 +8,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "plugins", "test", "views", "hosts", "scripts"],
+  "include": ["src", "plugins", "test", "views", "hosts", "scripts", "eval"],
   "exclude": ["test/fixtures"]
 }

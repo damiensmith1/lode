@@ -8,3 +8,6 @@ dist
 
 # a local MCP client for trying lode mcp (see mcp-playground/README.md)
 /mcp-playground/
+
+# your own eval suites (private repos, local paths): see eval/run.ts
+/eval/local/

@@ -1,0 +1,46 @@
+{
+  "repos": {
+    "ipc": "../test/fixtures/ipc",
+    "rails": "../test/fixtures/rails"
+  },
+  "questions": [
+    {
+      "id": "ipc-save",
+      "repo": "ipc",
+      "type": "process",
+      "question": "how is a note saved",
+      "start": ["#saveNote$", "#onSave$"],
+      "include": ["#saveNote$"]
+    },
+    {
+      "id": "ipc-callers",
+      "repo": "ipc",
+      "type": "callers",
+      "question": "what calls saveNote",
+      "include": ["#registerIpc$"]
+    },
+    {
+      "id": "ipc-none",
+      "repo": "ipc",
+      "type": "none",
+      "question": "how does the payment refund queue retry"
+    },
+    {
+      "id": "rails-publish",
+      "repo": "rails",
+      "type": "process",
+      "question": "what happens when a post gets published",
+      "start": ["PostsController\\.publish$", "Publishable\\.publish!$"],
+      "include": ["Publishable\\.publish!$", "NotifyJob\\.perform$"]
+    },
+    {
+      "id": "rails-activation",
+      "repo": "rails",
+      "type": "where",
+      "question": "where are users activated",
+      "start": ["User\\.activate!$"],
+      "include": ["User\\.activate!$"],
+      "exclude": ["(^|/)config/"]
+    }
+  ]
+}
