@@ -1,9 +1,9 @@
 // lode's core, for a host running Node (an editor extension, an Electron
 // main process, a CLI): read a folder into a graph, query it, and answer
-// views. The views live in "lode/views"; the WebSocket server in
-// "lode/server".
+// views. The views live in "lode-graph/views"; the WebSocket server in
+// "lode-graph/server".
 //
-//   import { GraphStore, pluginFor, createService, serveMessages } from "lode";
+//   import { GraphStore, pluginFor, createService, serveMessages } from "lode-graph";
 //   const store = GraphStore.open(await pluginFor(folder), folder);   // any folder
 //   const service = createService(store);
 //   serveMessages(service, { send, listen });           // e.g. a webview

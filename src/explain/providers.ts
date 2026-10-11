@@ -38,7 +38,7 @@ export function parseModelList(text: string | undefined): { id: string; label: s
 //   openrouter  OPENROUTER_API_KEY; LODE_OPENROUTER_MODELS
 // OpenAI-compatible providers need their models listed (lode can't guess
 // ids); one without a list is left out, with a note saying what to set.
-export function providersFromEnv(env: NodeJS.ProcessEnv = process.env): { providers: ExplainProviders; notes: string[] } {
+export function providersFromEnv(env: Record<string, string | undefined> = process.env): { providers: ExplainProviders; notes: string[] } {
   const providers: ExplainProviders = {};
   const notes: string[] = [];
   if (env.ANTHROPIC_API_KEY) {

@@ -14,9 +14,10 @@ Vue, Svelte, Angular, Express, Nest…), Python (Django, FastAPI, Flask,
 Celery, pytest…) and Ruby (Rails, Sinatra, RSpec…). Point it at a folder;
 it works out what's there.
 
-It's a library first: a code graph and query core, embeddable views, and a
-small host contract, so any editor or app can show it. It also ships a
-standalone app that runs on any folder.
+It's a library first, published on npm as **`lode-graph`**: a code graph
+and query core, an embeddable canvas, an MCP server for agents, and a small
+host contract, so any editor or app can show it (Clance does). This repo
+also has a standalone app that runs on any folder.
 
 ![Asking "/how do we create the tabs": a flow of the code that does it, built in 0.6s](docs/images/ask.png)
 
@@ -205,8 +206,7 @@ the connections spelled out, sized to a token budget.
   `rank: "judge"` lets Jev choose what's relevant.
 
 ```sh
-npm run build
-claude mcp add lode -- node /path/to/lode/dist/lib/src/cli.js mcp /path/to/project
+claude mcp add lode -- npx -y lode-graph mcp /path/to/project
 ```
 
 ### Keyboard
@@ -228,6 +228,20 @@ renderer…), with a line on how the runtimes talk
 
 ## Quick start
 
+**Use it in your own tool** (the library, the canvas, the server, MCP):
+
+```sh
+npm install lode-graph
+npx lode-graph index path/to/project           # build the graph, print a summary
+npx lode-graph serve path/to/project           # the server, for a host to connect to
+npx lode-graph mcp path/to/project             # MCP on stdio, for agents
+```
+
+See [Embed it anywhere](#embed-it-anywhere) and
+[`docs/embedding.md`](docs/embedding.md).
+
+**Run the standalone app** (from a clone; it isn't in the package):
+
 ```sh
 git clone https://github.com/damiensmith1/lode.git && cd lode
 npm install
@@ -243,10 +257,13 @@ dependencies. The graph is cached in
 `~/.cache/lode/` (`--cache <dir>` to change it); nothing is written into
 the project unless you save an edit.
 
-For **/** questions and the explain panel, copy `.env.example` to `.env`
-(every setting is explained there) and add keys. In short, a `.env` in lode's
-folder (it's git-ignored; lode reads only its own settings from it, and
-only from its own folder, never a project's):
+**Keys.** **/** questions need a Jev key, and explaining needs an LLM
+provider's. Inside a host, the host passes them (`createService(store, {
+judge, providers })`); lode reads no files of its own there. The `lode`
+command reads them from the environment, and in a clone also from a
+`.env` in lode's folder: copy `.env.example` to `.env` (every setting is
+explained there; it's git-ignored, and lode reads only its own settings,
+never a project's):
 
 ```sh
 TYPESAFE_API_KEY=your-key                 # / questions (Jev)
@@ -259,13 +276,15 @@ OPENROUTER_API_KEY=your-key               # OpenRouter
 LODE_OPENROUTER_MODELS=vendor/model=Label,…
 ```
 
-Other commands:
+The `lode` command (`npx lode-graph …` installed, `npm run lode -- …` in a
+clone):
 
 ```sh
-npm run lode -- serve <project> [--port n] [--origin url]   # just the server, for another host
-npm run lode -- index <project> [--json out.json]            # build the graph, print a summary
-npm run lode -- node <project> 'src/main.ts#run'             # one node, its edges each way
-node dist/lib/src/cli.js mcp <project>                       # MCP server on stdio, for agents (after npm run build)
+lode serve <project> [--port n] [--origin url]   # just the server, for another host
+lode index <project> [--json out.json]            # build the graph, print a summary
+lode node <project> 'src/main.ts#run'             # one node, its edges each way
+lode mcp <project>                                # MCP server on stdio, for agents
+lode open <project>                               # the standalone app (from a clone only)
 ```
 
 ## How it fits together
@@ -313,15 +332,19 @@ where their state lives, how they look, which keys do what, and what
 "open this file" means. Everything below is in
 [`docs/embedding.md`](docs/embedding.md).
 
-**Packages:** `lode` (core, queries, service, ask, context), `lode/server`, `lode/mcp`,
-`lode/views`, a self-contained bundle in
-`dist/views` for pages without a bundler, and the `lode` command
-(`npm run build` makes them).
+```sh
+npm install lode-graph
+```
+
+**Packages:** `lode-graph` (core, queries, service, ask, context),
+`lode-graph/server`, `lode-graph/mcp`, `lode-graph/views`,
+`lode-graph/views/bundle` (a self-contained bundle for pages without a
+bundler), and the `lode` command (`lode serve`, `lode mcp`, `lode index`).
 
 **Run the core** in Node, on any folder, and keep it current:
 
 ```ts
-import { GraphStore, pluginFor, createService } from "lode";
+import { GraphStore, pluginFor, createService } from "lode-graph";
 
 const service = createService(GraphStore.open(await pluginFor(folder), folder)); // TS/JS, Python, Ruby: whatever's there
 service.watch(); // re-index as files change; views update
@@ -364,7 +387,7 @@ What a host can plug in or take over:
 | **Your own UI** | `lodeApi(connection)`: files, `buildFileTree`, search, entries, changes, symbol at cursor, ask |
 | **Asking** | `flow.ask(question)`, `flow.loadPlan(plan)`, or your own model behind the `Judge` interface |
 | **Explaining** | the service's `explain` (streams `explain` events on the connection) with the flow's `scope()` / `apply()` / `highlight()` for your own UI; `explain()` in Node; your own model behind `ChatModel` |
-| **LLM context** | `contextFor(request)` in Node, `lode/mcp` (`serveMcp`) for agents, `flow.context()` to send a canvas to your own agent |
+| **LLM context** | `contextFor(request)` in Node, `lode-graph/mcp` (`serveMcp`) for agents, `flow.context()` to send a canvas to your own agent |
 | **Languages** | a `LanguagePlugin` reads a project into nodes, edges, channels and fold regions; the core does the rest |
 
 `hosts/minimal/index.html` (in the repo) is a complete host in one page,

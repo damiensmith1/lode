@@ -1,9 +1,32 @@
 {
-  "name": "lode",
+  "name": "lode-graph",
   "version": "0.1.0",
   "description": "Read a codebase as a flow of real code: a code graph, embeddable views any editor or app can host, git changes, and questions answered as flows.",
+  "keywords": [
+    "code-graph",
+    "code-reading",
+    "code-navigation",
+    "call-graph",
+    "static-analysis",
+    "typescript",
+    "ruby",
+    "rails",
+    "python",
+    "mcp",
+    "llm-context",
+    "web-components",
+    "tree-sitter"
+  ],
+  "homepage": "https://github.com/damiensmith1/lode#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/damiensmith1/lode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/damiensmith1/lode/issues"
+  },
+  "author": "Damien Smith",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -45,7 +68,8 @@
     "typecheck": "tsc --noEmit",
     "lode": "tsx src/cli.ts",
     "build:web": "tsx hosts/app/build.ts",
-    "build": "tsx scripts/build.ts"
+    "build": "tsx scripts/build.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@vscode/tree-sitter-wasm": "0.3.1",

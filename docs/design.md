@@ -453,8 +453,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   server, MCP, CLI, plugins, views) and `dist/views` (a self-contained
   bundle for pages without a bundler). The standalone app and the minimal
   host stay in the repo; `lode open` builds and serves the app from a
-  clone, and says so when installed. Exports: `lode`, `lode/server`, `lode/views`,
-  `lode/views/bundle`. Checked by installing the
+  clone, and says so when installed. Published as `lode-graph`. Exports: `lode-graph`,
+  `lode-graph/server`, `lode-graph/mcp`, `lode-graph/views`,
+  `lode-graph/views/bundle`. Checked by installing the
   packed tarball into an empty project and running a host from it.
 - **No separate code pane.** It was dropped: the flow reads code better, and
   the one thing the pane did that the flow didn't, reading a file's

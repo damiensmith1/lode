@@ -10,11 +10,11 @@ lode is three layers, and a host picks how to join them:
                                                                            theme, editor
 ```
 
-- **Core** (`lode`): reads a folder into a graph with a language plugin
+- **Core** (`lode-graph`): reads a folder into a graph with a language plugin
   (`pluginFor(folder)` picks them: `tsPlugin` for TypeScript and
   JavaScript, `rubyPlugin` with `railsPack` for Ruby, both combined in a
   mixed repo), caches it, and answers queries. Runs in Node.
-- **Views** (`lode/views`): the flow, a framework-free web component that
+- **Views** (`lode-graph/views`): the flow, a framework-free web component that
   renders the graph as cards, arrows, folds and callers, and does the
   reading mechanics (drag, zoom, fold, page, select, undo, keys). It's
   only the canvas: no toolbar, tabs, lists or explain UI. Everything it
@@ -27,7 +27,7 @@ lode is three layers, and a host picks how to join them:
 ## 1. Run the core
 
 ```ts
-import { GraphStore, pluginFor, createService } from "lode";
+import { GraphStore, pluginFor, createService } from "lode-graph";
 
 const store = GraphStore.open(await pluginFor(folder), folder);   // cache: ~/.cache/lode/<hash>, or { cacheDir }
 const service = createService(store);              // the methods views call
@@ -43,14 +43,14 @@ Pick a connection; views only need `{ call, onChanged }` (`LodeConnection`).
 
 ```ts
 // Node side (extension host / Electron main)
-import { serveMessages } from "lode";
+import { serveMessages } from "lode-graph";
 serveMessages(service, {
   send: (m) => panel.webview.postMessage(m),
   listen: (h) => panel.webview.onDidReceiveMessage(h).dispose,
 });
 
 // Page side (webview)
-import { MessageConnection } from "lode/views";
+import { MessageConnection } from "lode-graph/views";
 const vscode = acquireVsCodeApi();
 const connection = new MessageConnection({
   send: (m) => vscode.postMessage(m),
@@ -68,7 +68,7 @@ host's own.
 **WebSocket** (any browser page): run the server, connect with the token.
 
 ```ts
-import { startServer } from "lode/server";
+import { startServer } from "lode-graph/server";
 const server = await startServer({ store, service, allowedOrigins: ["vscode-webview://…"] });
 // page: new LodeClient(server.rpcUrl)
 ```
@@ -80,7 +80,7 @@ and a localhost Host header.
 ## 3. Mount views
 
 ```ts
-import { createView } from "lode/views";
+import { createView } from "lode-graph/views";
 
 const view = createView({ kind: "flow", id: "src/main.ts#run", state: "tab-3" }, connection, host);
 container.append(view);
@@ -101,7 +101,7 @@ view.addEventListener("lode-change", () => (tab.label = view.asked?.question ?? 
   again to bring the tab back as it was. Default `"flow"`.
 
 Without a bundler (a webview, a plain page), import the self-contained
-bundle: `lode/dist/views/lode-views.js`. See
+bundle: `lode-graph/views/bundle` (`dist/views/lode-views.js`). See
 `hosts/minimal/index.html` in lode's repo for a whole host in one page.
 
 ## 4. Your own UI around the views
@@ -110,7 +110,7 @@ bundle: `lode/dist/views/lode-views.js`. See
 box, a status line or "show the symbol under the cursor":
 
 ```ts
-import { lodeApi, buildFileTree } from "lode/views";
+import { lodeApi, buildFileTree } from "lode-graph/views";
 const api = lodeApi(connection);
 renderTree(buildFileTree(await api.files()));       // folders → files, with runtimes
 renderResults(await api.search(query));             // symbols; open with flow.show(node.id)

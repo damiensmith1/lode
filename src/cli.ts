@@ -12,7 +12,7 @@
 //   Run the server with the standalone app, and open it in the browser.
 // lode mcp <project> [--cache <dir>]
 //   Serve lode's tools to an agent over MCP (stdio), e.g. in Claude Code:
-//   claude mcp add lode -- npx lode mcp /path/to/project
+//   claude mcp add lode -- npx lode-graph mcp /path/to/project
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
