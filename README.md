@@ -134,8 +134,9 @@ pure synonyms the code never uses ("ledger" for code that says journal)
 are the known limit. `eval/` measures it against real repos.
 
 ### Explain with an LLM, and let it work the canvas
-Every flow has an **explain** panel (press **i**, or the toolbar's
-"explain"): a conversation with an LLM about what's on the canvas. Ask it
+lode explains a canvas with an LLM; the UI is the host's. The standalone
+app has an **explain** panel (press **i**, or "explain" in the header): a
+conversation with an LLM about what's on the canvas. Ask it
 to explain the whole flow or the cards you've selected, what could break,
 or anything ("why does closeTab call select?"). The answer streams in,
 grounded in the exact code on the canvas (the cards, how they connect, the
@@ -151,12 +152,16 @@ tabs get saved", "expand that", "build the flow for checkout"):
 
 Each action shows as a chip in the answer (click it to see those cards),
 one ⌘Z undoes everything it did in a message, it opens new tabs only when
-you ask for one, and it never edits code. Flows built with **/** get an
-"explain this flow" button; conversations are saved with the tab.
+you ask for one, and it never edits code. Conversations are kept per tab.
+
+A host builds its own explain UI (a side panel, an overlay, notes in
+cards) from the flow's `scope()`, `apply()` and `highlight()` and the
+service's `explain`; the app's panel (`hosts/app/explain.ts`) is the
+example.
 
 Explaining works with Claude (Anthropic API) and anything OpenAI-compatible
 (OpenAI, OpenRouter, Groq, Together, Ollama, LM Studio, vLLM), all at once:
-every provider you have a key for appears in the panel's model picker,
+every provider you have a key for appears in the app's model picker,
 grouped by provider, and you pick per question. It sits behind a small `ChatModel`
 interface any model can implement, and a host can offer its own list of
 models or limit which are allowed.
@@ -357,7 +362,7 @@ What a host can plug in or take over:
 | **Editing** | read-only, per card, or yours: `host.saveEdits` lets the editor apply saves with its own undo |
 | **Your own UI** | `lodeApi(connection)`: files, `buildFileTree`, search, entries, changes, symbol at cursor, ask |
 | **Asking** | `flow.ask(question)`, `flow.loadPlan(plan)`, or your own model behind the `Judge` interface |
-| **Explaining** | the flow's explain panel, `flow.sendExplain(text)`, `explain()` in Node, or your own model behind `ChatModel`; answers stream as `explain` events on the connection |
+| **Explaining** | the service's `explain` (streams `explain` events on the connection) with the flow's `scope()` / `apply()` / `highlight()` for your own UI; `explain()` in Node; your own model behind `ChatModel` |
 | **LLM context** | `contextFor(request)` in Node, `lode/mcp` (`serveMcp`) for agents, `flow.context()` and the cancelable `lode-context` event to send a canvas to your own agent |
 | **Languages** | a `LanguagePlugin` reads a project into nodes, edges, channels and fold regions; the core does the rest |
 

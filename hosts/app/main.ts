@@ -5,7 +5,8 @@
 // ../../views through LodeHost.
 import { highlightJs } from "../../views/highlight.js";
 import type { ChangesResult } from "../../src/query/types.js";
-import { ACTION_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
+import { ExplainPanel } from "./explain.js";
+import { ACTION_EVENT, CHANGE_EVENT, SELECT_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) => {
@@ -44,9 +45,16 @@ const host: LodeHost = {
   ...highlightJs,
 };
 
+// The explain panel talks about the flow tab last shown (see explain.ts:
+// a host feature, built on the flow's scope/apply/highlight).
+const explain = new ExplainPanel($("explain"), client, storage);
+
 function select(tab: Tab) {
   current = tab;
-  if (isFlow(tab)) lastFlow = tab;
+  if (isFlow(tab)) {
+    lastFlow = tab;
+    void explain.attach(tab.view as LodeFlow, tab.request.kind === "flow" ? (tab.request.state ?? "flow") : "flow");
+  }
   for (const t of tabs) t.button.setAttribute("aria-selected", String(t === tab));
   $("view").replaceChildren(tab.view);
   saveTabs();
@@ -416,6 +424,16 @@ async function start() {
   setupSearch();
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
   $("open-entries").addEventListener("click", () => openView({ kind: "entries" }));
+  // Explain: the header button, or "i" over a flow (not while typing).
+  $("open-explain").addEventListener("click", () => explain.toggle());
+  document.addEventListener("keydown", (e) => {
+    const typing = e.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
+    if (e.key === "i" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && current && isFlow(current)) {
+      e.preventDefault();
+      explain.toggle();
+    }
+  });
+  for (const name of [SELECT_EVENT, CHANGE_EVENT]) $("view").addEventListener(name, () => explain.refresh());
   // A flow's "/" (search) is ours: the search box.
   document.addEventListener(ACTION_EVENT, (e) => {
     if ((e as CustomEvent).detail?.action !== "search") return;

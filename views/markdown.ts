@@ -1,14 +1,17 @@
 import { escape } from "./theme.js";
 
+// Helpers for a host's explain UI (lode doesn't show answers itself).
+//
 // An answer's Markdown, safely: escaped first, then code blocks, lists,
 // paragraphs, **bold** and `code`. A code name that `link` knows (a real
-// symbol: name → id) becomes a link to its card; anything else is just code.
+// symbol: name → id) becomes <code class="sym" data-id="…">, for the host
+// to open (flow.show) or point at (flow.highlight); anything else is code.
 export function renderMarkdown(text: string, link: (name: string) => string | undefined = () => undefined): string {
   const inline = (t: string) =>
     escape(t)
       .replace(/`([^`]+)`/g, (_, code: string) => {
         const id = link(unescapeHtml(code));
-        return id ? `<code class="sym" data-action="explain-open" data-id="${escape(id)}" data-name="${code}">${code}</code>` : `<code>${code}</code>`;
+        return id ? `<code class="sym" data-id="${escape(id)}" data-name="${code}">${code}</code>` : `<code>${code}</code>`;
       })
       .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
   const out: string[] = [];
@@ -40,7 +43,7 @@ function unescapeHtml(s: string): string {
 }
 
 // The code names in an answer (what's in backticks and looks like a name),
-// to resolve.
+// to resolve to symbols (the service's `resolve`).
 export function codeNames(text: string): string[] {
   return [...new Set([...text.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]).filter((c) => /^(this\.)?[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*(\(\))?$/.test(c)))];
 }

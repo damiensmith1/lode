@@ -190,7 +190,7 @@ describe("linking names in answers", () => {
 describe("answer rendering", () => {
   it("escapes, and links only names it's told are symbols", () => {
     const html = renderMarkdown("Calls `addTab` and `base` and `x < y`.\n\n- one **two**\n\n```\n<b>raw</b>\n```", (name) => (name === "addTab" ? "src/a.ts#addTab" : undefined));
-    expect(html).toContain('<code class="sym" data-action="explain-open" data-id="src/a.ts#addTab" data-name="addTab">addTab</code>');
+    expect(html).toContain('<code class="sym" data-id="src/a.ts#addTab" data-name="addTab">addTab</code>');
     expect(html).toContain("<code>base</code>");
     expect(html).toContain("<code>x &lt; y</code>");
     expect(html).toContain("<ul><li>one <b>two</b></li></ul>");

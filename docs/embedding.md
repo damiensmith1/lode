@@ -319,11 +319,28 @@ instead of the clipboard.
 
 ## 11. Explaining
 
-A flow's explain panel (toolbar "explain", key **i**) holds a conversation
-about the canvas: suggestions (explain the selection or the flow, what
-could break, show more, go deeper) or anything typed; a stop button
-cancels an answer (`explainCancel`). Parts: `explain`, `explain-log`,
-`explain-composer`, `explain-input`. The service's `explain` method (`explain(request, queries, model,
+Explaining is lode's; how it's shown is the host's: a side panel, an
+overlay, notes inside cards. The flow view has no explain UI of its own,
+just the pieces to build one:
+
+- `flow.scope(selection?)` → `{ label, focus, request }`: what a question
+  is about (the selection, or every card) and the explain request's
+  fields for it (`canvas`, `cards`, `changes`, `focus`, `question`); add
+  `messages` (and `model`) and call the service's `explain`.
+- `flow.apply(actions, { undoGroup })`: do the model's `CanvasAction`s in
+  order (from `action` events as they stream, or the result's `actions`).
+  Actions sharing an `undoGroup` undo as one step; added cards glow.
+- `flow.highlight(id | null)`: light up a card (a name hovered in an answer).
+- `renderMarkdown(text, link)` and `codeNames(text)` (in `lode/views`): an
+  answer's Markdown, safely, with code names that `link` knows (resolve
+  them with the service's `resolve`) as `<code class="sym" data-id>`.
+
+The standalone app's panel (`hosts/app/explain.ts`) is one such UI, built
+only on these: suggestions, streaming, a stop button (`explainCancel`), a
+model picker (`explainModels`), the conversation kept per flow in the
+host's storage. Copy it or build your own.
+
+The service's `explain` method (`explain(request, queries, model,
 onEvent)` in Node) builds the context from the cards (or the selection)
 with `contextFor`, sends it with the conversation to a `ChatModel`, and
 gives the model tools to read the graph (`search`, `read`) and to work the
@@ -334,8 +351,8 @@ pass `explain(…, { judge })`; the service uses `TYPESAFE_API_KEY`),
 server: each becomes a `CanvasAction` (`add`, `plan`, `expand`, `fold`,
 `close`, `select`, `focus`, `fit`, `changes`, `tab`), checked against the
 graph and the cards it was sent (`ExplainRequest.cards`: every card's
-key), which the view carries out in order as they arrive, as one undo
-step per message. New tabs only when the user's message asks for one
+key), which the host hands to `flow.apply` as they arrive (one undo
+group per message). New tabs only when the user's message asks for one
 (enforced, not just prompted); a tab action calls the host's
 `openView({ kind: "flow", newTab: true, ask })`. No editing. `open_fold`
 and `expand` return the code they reveal to the model. The answer
@@ -365,15 +382,11 @@ their models are listed (`id=Label,…`). `defaultModel` (or
 (streaming, function calls) for OpenAI, OpenRouter, Groq, Together,
 Ollama, LM Studio, vLLM. The service's `explainModels` gives views `{
 providers: [{ id, label, models: [{ id: "provider:model", label }] }],
-default, notes }` (no secrets); the panel's picker groups by provider
-unless the host passes `explainModels`.
+default, notes }` (no secrets), for a host's model picker.
 
 **Per question:** `ExplainRequest.model` (`"provider:model"`, or a bare id
 any provider offers) picks the provider and model for one question; the
-provider's `ChatModel.chat` gets the model id as `model`. The picker
-remembers the choice per browser and labels each answer with its model
-(and provider, when there are several). `renderMarkdown` (in `lode/views`) is the
-panel's safe Markdown, with code names as links.
+provider's `ChatModel.chat` gets the model id as `model`.
 
 ## 12. Look
 

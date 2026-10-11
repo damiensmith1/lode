@@ -13,6 +13,7 @@
   <span class="brand"><span class="diamond" aria-hidden="true">◇</span> lode</span>
   <button id="toggle-tree" class="faint" type="button">files</button>
   <button id="open-entries" class="faint" type="button" title="Where to start reading">entry points</button>
+  <button id="open-explain" class="faint" type="button" title="Ask about the flow's cards, or to show more (i)">explain</button>
   <span id="project" class="faint"></span>
   <div class="search">
     <label for="search" class="faint">find</label>
@@ -46,7 +47,10 @@
   <div id="side-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" title="Drag to resize"></div>
   <section class="views" aria-label="lode views">
     <div id="tabs" role="tablist"></div>
-    <div id="view"></div>
+    <div class="stage">
+      <div id="view"></div>
+      <aside id="explain" aria-label="Explain" hidden></aside>
+    </div>
   </section>
 </main>
 <footer id="status" class="faint"></footer>

@@ -763,8 +763,14 @@ in-process.
 
 ## Explaining
 
-The explain panel is a conversation about the canvas, run on the server
-(`src/explain`): the context is `contextFor` over the cards (or the
+Explaining is a conversation about the canvas, run on the server
+(`src/explain`); showing it is the host's (lode core vs host: lode gives
+the pieces, a host builds the feature, so a host can show answers in a
+side panel, an overlay or inside cards). The flow view exposes
+`scope(selection)` (what a question is about, as the request's fields),
+`apply(actions, { undoGroup })` (do the model's canvas actions, one undo
+step per group) and `highlight(id)`; `renderMarkdown` and `codeNames` are
+helpers. The server side: the context is `contextFor` over the cards (or the
 selection, which also becomes what "these" means), plus the question the
 flow was built for and the diff when shown. The model (`ChatModel`;
 Claude over the Anthropic API by default, streaming SSE, the context
@@ -778,20 +784,21 @@ and Jev is one of its tools: Jev is fast and good at "where does this
 start and what follows", the LLM at deciding what the user wants done.
 Canvas tools don't touch anything on the server: each is checked (real
 symbols; cards that are on the canvas, by name or id; folds that exist in
-that card's lines) and becomes a `CanvasAction` event; the view runs them
-in order as they arrive. The first action that changes cards takes an
-undo snapshot and the rest hold undo, so ⌘Z takes back a whole message
-(moving the view and showing changes aren't undone). At most 16 actions a
+that card's lines) and becomes a `CanvasAction` event; the host passes
+them to `flow.apply` in order as they arrive, with one undo group per
+message, so ⌘Z takes back a whole message (moving the view and showing
+changes aren't undone). At most 16 actions a
 message. New tabs only when the user's last message asks for one: the
 tools refuse otherwise, not just the prompt. No editing yet. Names
 resolve to a symbol in a file already on the canvas first. Up to 8 model
 turns per message. The system prompt asks
 for grounded, concise answers with names in backticks (rendered as links
 to their cards) and to read folded code before describing it. Answers
-stream as service events, forwarded by both transports; conversations
-are saved with the flow's state.
+stream as service events, forwarded by both transports.
 
-The panel: a header saying what the next question is about (all cards,
+The standalone app's panel (`hosts/app/explain.ts`, a host feature built
+only on the flow's public API; its conversations are kept per flow in the
+host's storage): a header saying what the next question is about (all cards,
 or the selection); each exchange as the question (with its scope), the
 model's steps as compact chips (searched, read, "+ added …" and "↳
 expanded …", which frame the cards they touched), then the answer, kept short (a lead sentence or two, then a
@@ -823,9 +830,10 @@ provider the environment has a key for (OpenAI-compatible ones once their
 models are listed: lode can't guess ids). The service's `explainModels`
 gives the picker its groups. A model that doesn't stream still works: its
 text comes with the turn.
-`LODE_EXPLAIN_MODEL` sets the server's default model; the panel picks one
-per question (`ExplainRequest.model`, passed to `ChatModel.chat`; a
-host's `models` option limits it, `explainModels` sets the picker).
+`LODE_EXPLAIN_MODEL` sets the server's default model; a host picks one
+per question (`ExplainRequest.model`, passed to `ChatModel.chat`; the
+service's `models` option limits it, and its `explainModels` method lists
+them for a picker).
 
 ## Languages
 
