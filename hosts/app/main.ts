@@ -1,12 +1,15 @@
 // The standalone host: entry points to pick where to start, flows to read
 // from there (as many tabs as you like, each with its own canvas), and a
 // file tree (a file opens in the flow too). Nothing moves on its own, only
-// on clicks. It's one host among many; everything lode-specific comes from
-// ../../views through LodeHost.
+// on clicks. It's one host among many, built only on lode's API: lodeApi
+// for data, the flow (createView) and its methods and events. The tabs,
+// tree, changes list, entry points, the flow's toolbar and question line,
+// the keys help and the explain panel are all the app's own.
 import { highlightJs } from "../../views/highlight.js";
 import type { ChangesResult } from "../../src/query/types.js";
 import { ExplainPanel } from "./explain.js";
-import { ACTION_EVENT, CHANGE_EVENT, SELECT_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
+import { entriesView } from "./entries.js";
+import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, COMMAND_HELP, DEFAULT_KEYS, DIRTY_EVENT, SELECT_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type FlowCommand, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) => {
@@ -26,16 +29,21 @@ const SIDE_KEY = "app-sidebar"; // files or changes, and the changes' base
 
 // --- Tabs of lode views ---------------------------------------------------
 
+// A tab: a flow (lode's), or the app's entry points.
+type AppRequest = ViewRequest | { kind: "entries" };
+
 interface Tab {
-  request: ViewRequest;
+  request: AppRequest;
   button: HTMLButtonElement;
   view: HTMLElement;
+  reload?: () => Promise<void>; // entry points: after re-indexing
 }
 const tabs: Tab[] = [];
 let current: Tab | undefined;
 let lastFlow: Tab | undefined; // where entries, search and the tree read
 
 const isFlow = (t: Tab) => t.request.kind === "flow";
+const flowOf = (t: Tab | undefined) => (t && isFlow(t) ? (t.view as LodeFlow) : null);
 
 const host: LodeHost = {
   // No openSource: there's no separate editor, so the flow opens the file
@@ -57,6 +65,8 @@ function select(tab: Tab) {
   }
   for (const t of tabs) t.button.setAttribute("aria-selected", String(t === tab));
   $("view").replaceChildren(tab.view);
+  $("flowbar").hidden = !isFlow(tab);
+  renderFlowbar();
   saveTabs();
 }
 
@@ -71,7 +81,7 @@ function saveTabs() {
 // A flow request reads in the last flow tab (or the first one, if none is
 // open), turning on its git changes if asked; `newTab` adds a flow tab
 // instead. Entries and changes have one tab each.
-function openView(request: ViewRequest, newTab = false): Tab {
+function openView(request: AppRequest, newTab = false): Tab {
   if (request.kind === "flow" && !newTab && !request.newTab) {
     const flow = lastFlow && tabs.includes(lastFlow) ? lastFlow : tabs.find(isFlow);
     if (flow) {
@@ -91,7 +101,7 @@ function openView(request: ViewRequest, newTab = false): Tab {
   return addTab(request.kind === "flow" ? { ...request, newTab: undefined } : request);
 }
 
-function addTab(request: ViewRequest, at = tabs.length): Tab {
+function addTab(request: AppRequest, at = tabs.length): Tab {
   if (request.kind === "flow" && !request.state) {
     // The first flow keeps the key flows always used, so its canvas survives.
     const used = new Set(tabs.map((t) => (t.request.kind === "flow" ? t.request.state : "")));
@@ -101,8 +111,15 @@ function addTab(request: ViewRequest, at = tabs.length): Tab {
   const close = el("span", { className: "close", title: "Close", role: "button" }, "×");
   const icon = el("span", { className: "diamond", ariaHidden: "true" }, "◇");
   const button = el("button", { className: "tab", role: "tab" }, icon, label, close);
-  const tab: Tab = { request, button, view: createView(request, client, host) };
-  tab.view.addEventListener(TITLE_EVENT, (e) => (label.textContent = String((e as CustomEvent).detail)));
+  let tab: Tab;
+  if (request.kind === "flow") {
+    tab = { request, button, view: createView(request, client, host) };
+    tab.view.addEventListener(TITLE_EVENT, (e) => (label.textContent = String((e as CustomEvent).detail)));
+  } else {
+    const entries = entriesView(api, readInFlow);
+    tab = { request, button, view: entries.el, reload: entries.reload };
+    label.textContent = "entry points";
+  }
   button.addEventListener("click", (e) => (e.target === close ? closeTab(tab) : select(tab)));
   tabs.splice(at, 0, tab);
   $("tabs").insertBefore(button, $("new-flow"));
@@ -407,6 +424,90 @@ function setupSearch() {
   });
 }
 
+// --- The flow's toolbar and question line ------------------------------------
+//
+// lode's flow is only the canvas; these are the app's, drawn from its
+// methods (run, canRun, zoom, diff, unsaved, asked, context) and redrawn on
+// its events.
+
+function setupFlowbar() {
+  const bar = $("flowbar");
+  const flow = () => flowOf(current);
+  bar.addEventListener("click", async (e) => {
+    const b = (e.target as Element).closest<HTMLElement>("[data-do]");
+    const f = flow();
+    if (!b || !f) return;
+    const what = b.dataset.do!;
+    if (what === "explain") return explain.toggle();
+    if (what === "diff") return void f.setDiff(f.diff === null ? "HEAD" : null).then(renderFlowbar);
+    if (what === "context") return void copyContext(f);
+    f.run(what as FlowCommand);
+    renderFlowbar();
+  });
+  for (const name of [CHANGE_EVENT, SELECT_EVENT, DIRTY_EVENT, ASK_EVENT]) $("view").addEventListener(name, () => renderFlowbar());
+}
+
+let flowbarNote = ""; // a moment's message in place of the count ("copied …")
+
+function renderFlowbar() {
+  const f = flowOf(current);
+  if (!f) return;
+  const can = (c: FlowCommand) => f.canRun(c);
+  const set = (what: string, enabled: boolean) => ($("flowbar").querySelector<HTMLButtonElement>(`[data-do="${what}"]`)!.disabled = !enabled);
+  set("undo", can("undo"));
+  set("fit", can("fit"));
+  set("focus", can("focus"));
+  set("clear", can("clear"));
+  $("flowbar").querySelector('[data-do="zoomReset"]')!.textContent = `${Math.round(f.zoom * 100)}%`;
+  $("flowbar").querySelector('[data-do="diff"]')!.classList.toggle("on", f.diff !== null);
+  const n = f.cards().length;
+  const unsaved = f.unsaved().length;
+  $("flowbar-count").textContent = flowbarNote || [n ? `${n} card${n === 1 ? "" : "s"}` : "", unsaved ? `${unsaved} unsaved` : ""].filter(Boolean).join(" · ");
+  // The question this flow answers, and how asking went.
+  const asked = f.asked;
+  const line = $("asked");
+  line.hidden = !asked;
+  if (asked) line.textContent = `/ ${asked.question} · ${asked.status === "asking" ? "asking…" : (asked.detail ?? asked.status)}`;
+}
+
+// The cards (or the selection) as context for an LLM, to the clipboard.
+async function copyContext(f: LodeFlow) {
+  const say = (text: string) => {
+    flowbarNote = text;
+    renderFlowbar();
+    setTimeout(() => ((flowbarNote = ""), renderFlowbar()), 2500);
+  };
+  try {
+    const result = await f.context();
+    if (!result) return;
+    await navigator.clipboard.writeText(result.markdown);
+    say(`copied ${result.items.length} pieces · ${result.tokens.toLocaleString()} tokens`);
+  } catch (error) {
+    say(`couldn't copy: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// "?": the flow's keys (lode's defaults; a host that remaps them lists its own).
+function toggleHelp() {
+  const open = document.querySelector(".keys-help");
+  if (open) return open.remove();
+  const label = (k: string) => k.replace("Mod+", "⌘").replace("Shift+", "⇧").replace("Arrow", "").replace("Up", "↑").replace("Down", "↓").replace("Left", "←").replace("Right", "→");
+  const help = el("div", { className: "keys-help" }, el("div", { className: "title" }, "Keys ", el("span", { className: "faint" }, "(Esc or ? closes)")));
+  for (const c of Object.keys(COMMAND_HELP) as FlowCommand[]) {
+    const keys = DEFAULT_KEYS[c];
+    if (!keys?.length) continue;
+    help.append(el("div", { className: "row" }, el("span", { className: "keys" }, ...keys.map((k) => el("kbd", {}, label(k)))), el("span", {}, COMMAND_HELP[c])));
+  }
+  help.append(el("div", { className: "faint note" }, "In code, keys type; Esc comes back here. i opens explain."));
+  help.addEventListener("click", () => help.remove());
+  document.addEventListener("keydown", function close(e) {
+    if (e.key !== "Escape") return;
+    help.remove();
+    document.removeEventListener("keydown", close);
+  });
+  $("view").parentElement!.append(help);
+}
+
 // --- Start ------------------------------------------------------------------
 
 async function start() {
@@ -425,7 +526,7 @@ async function start() {
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));
   $("open-entries").addEventListener("click", () => openView({ kind: "entries" }));
   // Explain: the header button, or "i" over a flow (not while typing).
-  $("open-explain").addEventListener("click", () => explain.toggle());
+  setupFlowbar();
   document.addEventListener("keydown", (e) => {
     const typing = e.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
     if (e.key === "i" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && current && isFlow(current)) {
@@ -434,6 +535,12 @@ async function start() {
     }
   });
   for (const name of [SELECT_EVENT, CHANGE_EVENT]) $("view").addEventListener(name, () => explain.refresh());
+  // A flow's "?" (help) is ours: the keys, listed.
+  document.addEventListener(ACTION_EVENT, (e) => {
+    if ((e as CustomEvent).detail?.action !== "help") return;
+    e.preventDefault();
+    toggleHelp();
+  });
   // A flow's "/" (search) is ours: the search box.
   document.addEventListener(ACTION_EVENT, (e) => {
     if ((e as CustomEvent).detail?.action !== "search") return;
@@ -454,8 +561,10 @@ async function start() {
   const newFlow = el("button", { id: "new-flow", className: "tab new", title: "New flow tab", ariaLabel: "New flow tab" }, "+");
   newFlow.addEventListener("click", () => openView({ kind: "flow" }, true));
   $("tabs").append(newFlow);
-  const saved = (await storage.load(TABS_KEY)) as { tabs: ViewRequest[]; selected: number } | null;
-  const restored: ViewRequest[] = saved?.tabs?.length ? saved.tabs : [{ kind: "entries" }, { kind: "flow", state: "flow" }];
+  const saved = (await storage.load(TABS_KEY)) as { tabs: AppRequest[]; selected: number } | null;
+  // (Older saves may hold a "changes" tab: the sidebar has those now.)
+  const kept = (saved?.tabs ?? []).filter((t) => t.kind === "flow" || t.kind === "entries");
+  const restored: AppRequest[] = kept.length ? kept : [{ kind: "entries" }, { kind: "flow", state: "flow" }];
   // A startup link reads in the selected flow tab (or the first): it goes in
   // that view's request, so a card already on its canvas is just selected
   // and the saved view stays where it was.
@@ -467,6 +576,7 @@ async function start() {
   else select(tabs[start ? reader : selected]);
 
   client.onChanged(async (files) => {
+    for (const t of tabs) void t.reload?.();
     Object.assign(info, await api.info());
     renderTree(buildFileTree(await api.files()));
     void loadChanges();

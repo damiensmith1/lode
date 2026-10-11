@@ -198,8 +198,9 @@ the connections spelled out, sized to a token budget.
   question or symbols), `lode_impact` (what your changes touch),
   `lode_search`, `lode_changes`, `lode_entries`. `skills/lode/SKILL.md`
   teaches agents when to use which.
-- **Copy context** on any flow copies its cards (or the selected ones) as
-  Markdown for a chat, with the diff if changes are shown.
+- **Copy context** (the app's flow toolbar; `flow.context()` for any
+  host) copies a flow's cards (or the selected ones) as Markdown for a
+  chat, with the diff if changes are shown.
 - Deterministic by default (same commit and request, same context);
   `rank: "judge"` lets Jev choose what's relevant.
 
@@ -274,9 +275,9 @@ node dist/lib/src/cli.js mcp <project>                       # MCP server on std
                 TS/JS, Python,      nodes, edges,    block,      the       └─▶ any message channel ─▶ views in a webview, Electron, …
                 Ruby + frameworks
                                     channels,        entries,    methods,
-                                    regions          search,     no transport        views: <lode-flow>, <lode-entries>, <lode-changes>
-                                                     changes,                        host: your editor or app (opens files,
-                                                     ask (Jev)                         stores state, themes, keys, markup)
+                                    regions          search,     no transport        view: <lode-flow> (the canvas), lodeApi
+                                                     changes,                        host: your editor or app (tabs, lists,
+                                                     ask (Jev)                         toolbars, explain UI, storage, theme)
 ```
 
 - **Core** (`src/schema`, `src/ingest`, `src/derive`, `src/graph`): a
@@ -363,7 +364,7 @@ What a host can plug in or take over:
 | **Your own UI** | `lodeApi(connection)`: files, `buildFileTree`, search, entries, changes, symbol at cursor, ask |
 | **Asking** | `flow.ask(question)`, `flow.loadPlan(plan)`, or your own model behind the `Judge` interface |
 | **Explaining** | the service's `explain` (streams `explain` events on the connection) with the flow's `scope()` / `apply()` / `highlight()` for your own UI; `explain()` in Node; your own model behind `ChatModel` |
-| **LLM context** | `contextFor(request)` in Node, `lode/mcp` (`serveMcp`) for agents, `flow.context()` and the cancelable `lode-context` event to send a canvas to your own agent |
+| **LLM context** | `contextFor(request)` in Node, `lode/mcp` (`serveMcp`) for agents, `flow.context()` to send a canvas to your own agent |
 | **Languages** | a `LanguagePlugin` reads a project into nodes, edges, channels and fold regions; the core does the rest |
 
 `hosts/minimal/index.html` is a complete host in one page, from the

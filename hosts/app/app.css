@@ -163,3 +163,39 @@ body.no-tree #side { display: none; }
 #explain .send { flex: none; width: 28px; height: 28px; border-radius: 7px; background: #2f5fa8; color: #fff; font-size: 14px; font-weight: 700; text-align: center; }
 #explain .send.stop { background: var(--fg); font-size: 10px; }
 #explain .composer-hint { margin-top: 6px; font-size: 11px; color: var(--faint); }
+
+/* The flow's toolbar and question line (the app's; lode's flow is just the canvas). */
+.flowbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 14px; border-bottom: 1px solid var(--border); font-size: 12px; background: var(--bg); }
+.flowbar button { padding: 2px 5px; border-radius: 4px; color: var(--muted); }
+.flowbar button:hover:not(:disabled) { background: var(--side); color: var(--fg); }
+.flowbar button:disabled { opacity: .4; cursor: default; }
+.flowbar button.on { color: #2e7d4f; font-weight: 550; }
+.flowbar [data-do="zoomReset"] { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.flowbar .spacer { margin-left: auto; }
+.flowbar .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.asked { padding: 7px 14px; border-bottom: 1px solid var(--border); font: 12.5px var(--mono); background: rgba(47,95,168,.06); }
+.asked[hidden], .flowbar[hidden] { display: none; }
+.views > .stage { position: relative; }
+.keys-help { position: absolute; right: 16px; top: 16px; z-index: 20; max-width: 460px; padding: 12px 14px; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--border), 0 12px 32px rgba(23,22,20,.16); font-size: 12px; }
+.keys-help .title { font-weight: 600; margin-bottom: 8px; }
+.keys-help .row { display: flex; gap: 12px; padding: 2px 0; }
+.keys-help .keys { flex: none; width: 150px; }
+.keys-help kbd { display: inline-block; min-width: 18px; padding: 0 5px; margin-right: 2px; border-radius: 4px; background: var(--side); box-shadow: inset 0 -1px 0 var(--border); font: 11px var(--mono); text-align: center; }
+.keys-help .note { margin-top: 8px; }
+
+/* Entry points (entries.ts). */
+.entries { height: 100%; overflow: auto; max-width: 880px; padding: 24px 32px 64px; }
+.entries .lede { margin: 0 0 6px; font-size: 14px; }
+.entries .summary { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 20px; font: 12px var(--mono); color: var(--muted); }
+.entries .filter { display: flex; align-items: center; gap: 8px; margin: 0 0 24px; }
+.entries .filter input { flex: 1; max-width: 360px; font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.entries h2 { margin: 28px 0 8px; font-size: 15px; font-weight: 600; }
+.entries h3 { margin: 14px 0 4px; font-size: 12px; font-weight: 550; color: var(--faint); letter-spacing: .3px; }
+.entries h3 .n { font-weight: 400; }
+.entries .entry { display: flex; align-items: baseline; gap: 12px; width: 100%; padding: 4px 8px; border-radius: 5px; }
+.entries .entry:hover { background: var(--side); }
+.entries .entry .label { font: 12.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.entries .entry .where { margin-left: auto; font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+.entries .more { margin: 2px 0 0 8px; font-size: 12px; color: var(--muted); }
+.entries .more:hover { color: var(--fg); text-decoration: underline; }
+.entries .empty { padding: 32px; color: var(--muted); }

@@ -1,7 +1,7 @@
 import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, FlowPlan, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
-import { ACTION_EVENT, CHANGE_EVENT, CLOSE_EVENT, COMMAND_HELP, CONTEXT_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
+import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, CLOSE_EVENT, CURSOR_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type AskState, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
 import type { ContextResult } from "../src/context/index.js";
@@ -58,7 +58,8 @@ interface Snapshot {
 interface SavedLayout {
   v: 1;
   cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; note?: string; x: number; y: number }[];
-  banner?: string; // the question this flow answers, and how
+  ask?: AskState; // the question this flow answers, and how it went
+  banner?: string; // (older saves) the same, as one line: "/ question · how"
   arrows: Arrow[];
   selected: string | null;
   camera?: Camera; // x, y: where the canvas origin (0, 0) sits on screen
@@ -76,7 +77,6 @@ const CSS = `
 .canvas.panning, .canvas.moving { user-select: none; -webkit-user-select: none; }
 .card header { user-select: none; -webkit-user-select: none; }
 .board { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.zoom { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
 .card { position: absolute; z-index: 1; width: max-content; min-width: 480px; max-width: 760px; background: var(--lode-surface); border: 1px solid var(--lode-border); border-radius: 10px; box-shadow: 0 1px 2px color-mix(in srgb, var(--lode-shadow) 4%, transparent); }
 .card.selected { border-color: var(--lode-local); box-shadow: 0 0 0 1px var(--lode-local), 0 4px 14px color-mix(in srgb, var(--lode-shadow) 6%, transparent); z-index: 3; }
 .card.dragging { box-shadow: 0 0 0 1px var(--lode-local), 0 12px 32px color-mix(in srgb, var(--lode-shadow) 16%, transparent); z-index: 4; }
@@ -107,19 +107,11 @@ const CSS = `
 .ln-removed .src { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; min-width: 0; opacity: .8; }
 .fold.changed, .more-lines.changed { box-shadow: inset 0 0 0 1px var(--lode-added); }
 .fold.changed::after, .more-lines.changed::after { content: " ●"; color: var(--lode-added); }
-.diff-toggle.on { color: var(--lode-added); font-weight: 550; }
 .card.editing { box-shadow: 0 0 0 2px color-mix(in srgb, var(--lode-local) 45%, transparent), 0 4px 14px color-mix(in srgb, var(--lode-shadow) 6%, transparent); }
 .card.editing .code { cursor: text; }
 .card.editing header .meta::after { content: " · editing (Esc to stop)"; color: var(--lode-local); }
 .ln.cursor { outline: 1.5px solid color-mix(in srgb, var(--lode-local) 70%, transparent); outline-offset: -1.5px; border-radius: 3px; }
 .chip.kbd, .fold.kbd { outline: 2px solid var(--lode-local); outline-offset: 1px; }
-.help { position: absolute; right: 16px; top: 16px; z-index: 20; max-width: 460px; padding: 12px 14px; border-radius: 10px; background: var(--lode-surface); box-shadow: 0 0 0 1px var(--lode-border), 0 12px 32px color-mix(in srgb, var(--lode-shadow) 16%, transparent); font-size: 12px; cursor: default; }
-.help-title { font-weight: 600; margin-bottom: 8px; }
-.help-row { display: flex; gap: 12px; padding: 2px 0; }
-.help-keys { flex: none; width: 150px; }
-.help kbd { display: inline-block; min-width: 18px; padding: 0 5px; margin-right: 2px; border-radius: 4px; background: var(--lode-sunken); box-shadow: inset 0 -1px 0 var(--lode-border); font: 11px var(--lode-mono); text-align: center; }
-.help-note { margin-top: 8px; }
-.banner { padding: 7px 14px; border-bottom: 1px solid var(--lode-border); font: 12.5px var(--lode-mono); color: var(--lode-fg); background: color-mix(in srgb, var(--lode-local) 6%, var(--lode-bg)); }
 .note { align-self: flex-start; margin-top: 2px; padding: 2px 8px; border-radius: 4px; font-size: 11.5px; color: var(--lode-local); background: color-mix(in srgb, var(--lode-local) 8%, transparent); }
 .card-actions { display: flex; gap: 6px; align-self: flex-start; }
 .card-actions:empty { display: none; }
@@ -185,7 +177,7 @@ export class LodeFlow extends HTMLElement {
   private dirty = new Set<string>();
   // Git changes shown on cards (null: not shown), by file.
   private diffBase: string | null = null;
-  private diff = new Map<string, DiffHunk[]>();
+  private hunks = new Map<string, DiffHunk[]>();
   private changedIds = new Set<string>(); // symbols with changes: chips to them are marked
   private held = new Set<string>(); // just saved, caret still in: shown as edited, not redrawn
   private editingKey: string | null = null; // the card in editing (Enter), if any
@@ -212,19 +204,6 @@ export class LodeFlow extends HTMLElement {
     }
     this.built = true;
     this.root.innerHTML = `<style>${viewCss(CSS, this.host)}</style>
-      <div class="toolbar" part="toolbar">
-        <button class="crumb" data-action="undo" aria-label="Undo" title="Undo">←</button>
-        <span class="count faint"></span>
-        <span class="spacer"></span>
-        <span class="faint" part="toolbar-hint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header · ? for keys</span>
-        <button class="crumb zoom" data-action="zoom-reset" title="Back to 100%">100%</button>
-        <button class="crumb" data-action="fit" title="Show every card">fit</button>
-        <button class="crumb" data-action="focus" title="Zoom to the selected card">focus</button>
-        <button class="crumb" data-action="copy-context" title="Copy these cards (or the selected ones) as context for an LLM">copy context</button>
-        <button class="crumb diff-toggle" data-action="diff" title="Show what changed since the last commit (git)">changes</button>
-        <button class="crumb" data-action="clear">clear</button>
-      </div>
-      <div class="banner" part="banner" hidden></div>
       <div class="stage">
         <div class="canvas" part="canvas"><div class="board" part="board"></div></div>
       </div>`;
@@ -278,7 +257,6 @@ export class LodeFlow extends HTMLElement {
     if (!this.isConnected || !this.offsetParent || this.host?.keys === false) return;
     const typing = e.composedPath().some((t) => t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)));
     if (typing) return;
-    if (e.key === "Escape" && this.root.querySelector(".help")) return void this.root.querySelector(".help")!.remove();
     const keys = { ...DEFAULT_KEYS, ...(this.host?.keys || {}) };
     const command = (Object.keys(keys) as FlowCommand[]).find((c) => keys[c]?.some((k) => keyMatches(k, e)));
     if (!command || !this.canRun(command)) return;
@@ -312,12 +290,14 @@ export class LodeFlow extends HTMLElement {
     else if (command === "openFold") this.foldAtCursor(true);
     else if (command === "collapseFold") this.foldAtCursor(false);
     else if (command === "edit") this.editAtCursor();
-    else if (command === "help") this.toggleHelp();
-    // "search" is the host's (its search box): lode-action tells it.
+    // "search" and "help" are the host's (its search box, its key list):
+    // lode-action tells it.
     return true;
   }
 
-  private canRun(command: FlowCommand): boolean {
+  // Whether a command has anything to do now (a host greys its buttons by it).
+  canRun(command: FlowCommand): boolean {
+    if (command === "zoomReset") return this.camera.k !== 1;
     if (command === "close" || command === "focus" || command === "deselect") return this.group.size > 0;
     if (command === "undo") return this.undo.length > 0;
     if (command === "fit" || command === "clear") return this.cardMap.size > 0;
@@ -325,6 +305,50 @@ export class LodeFlow extends HTMLElement {
     if (["lineDown", "lineUp", "follow", "back", "nextCard", "prevCard"].includes(command)) return this.cardMap.size > 0;
     if (command === "nextChange" || command === "prevChange") return this.diffBase !== null && this.cardMap.size > 0;
     return true;
+  }
+
+  // --- navigating, for hosts ------------------------------------------------------
+  //
+  // Everything keys and the mouse do, a host can do: run(command) for the
+  // commands (undo, fit, follow, nextChange…), apply(CanvasAction) to open,
+  // expand, fold, close, select or frame cards, and these for the rest.
+  // lode-change (cards, layout, camera), lode-select and lode-cursor say
+  // when to read them again; a host draws its own toolbar from them.
+
+  // The zoom (1 is 100%), and setting it (about the view's centre).
+  get zoom(): number {
+    return this.camera.k;
+  }
+
+  setZoom(k: number) {
+    this.zoomTo(k, this.viewCentre());
+  }
+
+  // The line cursor (keyboard navigation), and putting it on a card's line
+  // (default: its first). Selects the card and keeps the line in view.
+  get cursorAt(): { key: string; line: number } | null {
+    return this.cursor && this.cardMap.has(this.cursor.key) ? { key: this.cursor.key, line: this.cursor.line } : null;
+  }
+
+  moveCursor(key: string, line?: number) {
+    if (this.cardMap.has(key)) this.setCursor(key, line);
+  }
+
+  // Select a card and pan to it if it's off screen.
+  goTo(key: string) {
+    if (!this.cardMap.has(key)) return;
+    this.select(key);
+    this.reveal(key);
+  }
+
+  // The git ref changes are shown against (null: not shown); setDiff sets it.
+  get diff(): string | null {
+    return this.diffBase;
+  }
+
+  // Cards with unsaved edits (lode-dirty says when this changes).
+  unsaved(): string[] {
+    return [...this.dirty];
   }
 
   // --- moving around with keys ----------------------------------------------------
@@ -367,7 +391,14 @@ export class LodeFlow extends HTMLElement {
     return [...row.querySelectorAll<HTMLElement>(".chips .chip"), ...(fold && fold.title !== "Fold these lines again" ? [fold] : [])];
   }
 
+  private lastCursor = "null";
+
   private paintCursor() {
+    const at = JSON.stringify(this.cursorAt);
+    if (at !== this.lastCursor) {
+      this.lastCursor = at;
+      this.emit(CURSOR_EVENT, this.cursorAt);
+    }
     this.root.querySelectorAll(".ln.cursor").forEach((r) => r.classList.remove("cursor"));
     this.root.querySelectorAll(".kbd").forEach((c) => c.classList.remove("kbd"));
     if (this.cursor && !this.cardMap.has(this.cursor.key)) this.cursor = null;
@@ -469,7 +500,7 @@ export class LodeFlow extends HTMLElement {
 
   // Cards in reading order: each tree (top to bottom), depth first along
   // its arrows in line order.
-  private readingOrder(): string[] {
+  readingOrder(): string[] {
     const incoming = new Set(this.arrows.map((a) => a.to));
     const byPlace = [...this.cardMap.values()].sort((a, b) => a.y - b.y || a.x - b.x).map((c) => c.key);
     const order: string[] = [];
@@ -592,23 +623,6 @@ export class LodeFlow extends HTMLElement {
     this.paintCursor();
   }
 
-  private toggleHelp() {
-    const open = this.root.querySelector(".help");
-    if (open) return open.remove();
-    const keys = { ...DEFAULT_KEYS, ...(this.host?.keys || {}) } as Record<FlowCommand, string[]>;
-    const label = (k: string) => k.replace("Mod+", "⌘").replace("Shift+", "⇧").replace("Arrow", "").replace("Up", "↑").replace("Down", "↓").replace("Left", "←").replace("Right", "→");
-    const rows = (Object.keys(COMMAND_HELP) as FlowCommand[])
-      .filter((c) => keys[c]?.length)
-      .map((c) => `<div class="help-row"><span class="help-keys">${keys[c].map((k) => `<kbd>${escape(label(k))}</kbd>`).join(" ")}</span><span>${escape(COMMAND_HELP[c])}</span></div>`)
-      .join("");
-    const help = document.createElement("div");
-    help.className = "help";
-    help.setAttribute("part", "help");
-    help.innerHTML = `<div class="help-title">Keys <span class="faint">(Esc or ? closes)</span></div>${rows}<div class="help-note faint">In code, keys type; Esc comes back here.</div>`;
-    help.addEventListener("click", () => help.remove());
-    this.canvas().append(help);
-  }
-
   // Every card on the canvas.
   cards(): CardInfo[] {
     return [...this.cardMap.keys()].map((k) => this.info(k)!);
@@ -677,27 +691,6 @@ export class LodeFlow extends HTMLElement {
     });
   }
 
-  // "copy context": the host hears it first (lode-context, cancelable: a
-  // host can send it to its own agent); otherwise it goes to the clipboard.
-  private async copyContext() {
-    const count = this.root.querySelector(".count");
-    const say = (text: string) => {
-      if (!count) return;
-      count.textContent = text;
-      setTimeout(() => this.updateToolbar(), 2500);
-    };
-    try {
-      const result = await this.context();
-      if (!result) return;
-      const go = this.dispatchEvent(new CustomEvent(CONTEXT_EVENT, { detail: result, bubbles: true, composed: true, cancelable: true }));
-      if (!go) return say(`context sent · ${result.tokens.toLocaleString()} tokens`);
-      await navigator.clipboard.writeText(result.markdown);
-      say(`copied ${result.items.length} pieces · ${result.tokens.toLocaleString()} tokens`);
-    } catch (error) {
-      say(`couldn't copy: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
   // --- building on the canvas ------------------------------------------------------
   //
   // Explaining is the service's (src/explain: an answer, and CanvasActions
@@ -733,7 +726,7 @@ export class LodeFlow extends HTMLElement {
         cards: [...this.cardMap.keys()],
         ...(this.diffBase !== null && { changes: this.diffBase }),
         ...(picked.length && { focus: picked }),
-        ...(this.banner.startsWith("/ ") && { question: this.banner.slice(2).split(" · ")[0] }),
+        ...(this.asked && { question: this.asked.question }),
       },
     };
   }
@@ -804,17 +797,19 @@ export class LodeFlow extends HTMLElement {
 
   // --- asking ------------------------------------------------------------------
 
-  private banner = "";
+  private askState: AskState | null = null;
   // A question to ask once connected (ViewRequest.ask).
   pendingAsk = "";
 
-  // A line above the canvas: the question this flow answers (or "").
-  setBanner(text: string) {
-    this.banner = text;
-    const el = this.root.querySelector<HTMLElement>(".banner");
-    if (!el) return;
-    el.hidden = !text;
-    el.textContent = text;
+  // The question this flow answers, and how that went (null: none). A host
+  // shows it as it likes; lode-ask says when it changes.
+  get asked(): AskState | null {
+    return this.askState;
+  }
+
+  private setAsked(state: AskState | null) {
+    this.askState = state;
+    this.emit(ASK_EVENT, state);
   }
 
   // Ask a question and lay out the flow that answers it here (the server
@@ -822,13 +817,13 @@ export class LodeFlow extends HTMLElement {
   async ask(question: string) {
     await this.ready;
     if (!this.client) return;
-    this.setBanner(`/ ${question} · asking…`);
+    this.setAsked({ question, status: "asking" });
     this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `/ ${question}`, bubbles: true, composed: true }));
     let plan: FlowPlan;
     try {
       plan = await this.client.call<FlowPlan>("ask", { question });
     } catch (error) {
-      this.setBanner(`/ ${question} · ${error instanceof Error ? error.message : String(error)}`);
+      this.setAsked({ question, status: "error", detail: error instanceof Error ? error.message : String(error) });
       return this.changed();
     }
     this.loadPlan(plan);
@@ -839,7 +834,7 @@ export class LodeFlow extends HTMLElement {
   async loadPlan(plan: FlowPlan) {
     const ids = plan.cards.map((c) => c.id);
     const how = `${plan.route} · ${plan.cards.length} card${plan.cards.length === 1 ? "" : "s"} · ${(plan.ms / 1000).toFixed(1)}s`;
-    this.setBanner(plan.answered ? `/ ${plan.question} · ${how}` : `/ ${plan.question} · ${plan.message ?? "nothing found"}`);
+    this.setAsked(plan.answered ? { question: plan.question, status: "answered", detail: how } : { question: plan.question, status: "empty", detail: plan.message ?? "nothing found" });
     if (!ids.length) return this.changed();
     await this.showAll(ids);
     for (const c of plan.cards) {
@@ -1051,13 +1046,6 @@ export class LodeFlow extends HTMLElement {
     const detail = { action, via: "click" as const, data, ...(here && { card: this.info(key) }), ...(id && { target: id }), ...(line && { line: Number(line) }) };
     if (!this.emit(ACTION_EVENT, detail, true) || action.startsWith("host:")) return;
 
-    if (action === "undo") return this.run("undo");
-    if (action === "fit") return this.run("fit");
-    if (action === "focus") return this.run("focus");
-    if (action === "zoom-reset") return this.run("zoomReset");
-    if (action === "diff") return void this.setDiff(this.diffBase === null ? "HEAD" : null);
-    if (action === "copy-context") return void this.copyContext();
-    if (action === "clear") return this.run("clear");
     if (!here) return;
     if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);
     if (action === "fold") return this.fold(here, Number(start), Number(end));
@@ -1131,7 +1119,6 @@ export class LodeFlow extends HTMLElement {
     if (el) el.querySelector(".edit-note")!.textContent = "";
     if (was !== now) {
       this.emit(DIRTY_EVENT, { card: this.info(key)!, dirty: now });
-      this.updateToolbar();
     }
   }
 
@@ -1194,7 +1181,6 @@ export class LodeFlow extends HTMLElement {
     el.classList.remove("dirty");
     el.querySelector(".edit-note")!.textContent = "";
     this.emit(DIRTY_EVENT, { card: this.info(key)!, dirty: false });
-    this.updateToolbar();
     this.drawArrows();
   }
 
@@ -1265,13 +1251,6 @@ export class LodeFlow extends HTMLElement {
       if (note) note.textContent = " · save or discard first";
     }
     return blocked.length > 0;
-  }
-
-  private updateToolbar() {
-    const count = this.root.querySelector(".count");
-    if (!count) return;
-    const cards = this.cardMap.size ? `${this.cardMap.size} card${this.cardMap.size === 1 ? "" : "s"}` : "";
-    count.textContent = cards + (this.dirty.size ? ` · ${this.dirty.size} unsaved` : "");
   }
 
   private clearAll() {
@@ -1464,18 +1443,11 @@ export class LodeFlow extends HTMLElement {
 
   private showSelection() {
     this.announceSelection();
-    this.root.querySelector<HTMLButtonElement>('[data-action="fit"]')!.disabled = !this.cardMap.size;
-    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
     this.root.querySelectorAll<HTMLElement>(".card").forEach((c) => c.classList.toggle("selected", this.group.has(c.dataset.key!)));
     const c = this.selected ? this.cardMap.get(this.selected) : undefined;
     const n = c?.block.node;
     if (!c || !n?.file) return void this.host?.highlight?.(null);
     this.host?.highlight?.({ node: n.id, file: n.file, range: c.range, marks: [...new Set(c.block.links.map((l) => l.line))] });
-  }
-
-  private goTo(key: string) {
-    this.select(key);
-    this.reveal(key);
   }
 
   // --- camera ------------------------------------------------------------------
@@ -1487,8 +1459,6 @@ export class LodeFlow extends HTMLElement {
   private applyCamera() {
     const { x, y, k } = this.camera;
     this.board().style.transform = `translate(${x}px, ${y}px) scale(${k})`;
-    const label = this.root.querySelector(".zoom");
-    if (label) label.textContent = `${Math.round(k * 100)}%`;
   }
 
   private viewCentre() {
@@ -1598,7 +1568,7 @@ export class LodeFlow extends HTMLElement {
       arrows: this.arrows,
       selected: this.selected,
       diff: this.diffBase,
-      ...(this.banner && { banner: this.banner }),
+      ...(this.askState && { ask: this.askState }),
       // Saved in canvas coordinates, independent of the board's padding origin.
       camera: {
         x: Math.round(this.camera.x + this.offset.x * this.camera.k),
@@ -1645,7 +1615,11 @@ export class LodeFlow extends HTMLElement {
     this.selected = saved.selected && this.cardMap.has(saved.selected) ? saved.selected : null;
     this.group = new Set(this.selected ? [this.selected] : []);
     this.render();
-    if (saved.banner && !this.banner) this.setBanner(saved.banner);
+    if (!this.askState) {
+      const [question, detail] = saved.banner?.replace(/^\/ /, "").split(" · ") ?? [];
+      const ask = saved.ask ?? (question ? { question, status: "answered" as const, ...(detail && { detail }) } : null);
+      if (ask) this.setAsked(ask);
+    }
     if (saved.camera) {
       const { x, y, k } = saved.camera;
       this.camera = { k, x: x - this.offset.x * k, y: y - this.offset.y * k };
@@ -1685,13 +1659,12 @@ export class LodeFlow extends HTMLElement {
   }
 
   private async loadDiff() {
-    this.diff = new Map();
+    this.hunks = new Map();
     this.changedIds = new Set();
-    this.root.querySelector(".diff-toggle")?.classList.toggle("on", this.diffBase !== null);
     if (this.diffBase === null || !this.client) return;
     const result = await this.client.call<ChangesResult>("changes", { base: this.diffBase }).catch(() => null);
     for (const f of result?.files ?? []) {
-      this.diff.set(f.file, f.hunks);
+      this.hunks.set(f.file, f.hunks);
       for (const sym of f.symbols) this.changedIds.add(sym.node.id);
     }
   }
@@ -1789,7 +1762,7 @@ export class LodeFlow extends HTMLElement {
   // A card's changes by line: lines added or changed, and removed lines by
   // the line they were before (a removal at the very end: last line + 1).
   private diffFor(c: Card) {
-    const hunks = this.diffBase === null ? undefined : this.diff.get(c.block.node.file ?? "");
+    const hunks = this.diffBase === null ? undefined : this.hunks.get(c.block.node.file ?? "");
     const added = new Set<number>();
     const removed = new Map<number, string[]>();
     for (const h of hunks ?? []) {
@@ -2027,9 +2000,6 @@ export class LodeFlow extends HTMLElement {
   private render() {
     this.announceSelection();
     const board = this.board();
-    this.root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.disabled = !this.undo.length;
-    this.root.querySelector<HTMLButtonElement>('[data-action="focus"]')!.disabled = !this.group.size;
-    this.updateToolbar();
     if (!this.cardMap.size) {
       board.innerHTML = `<div class="hint" part="empty">Pick an entry point, a file or a symbol to start reading from it.</div>`;
       board.style.width = board.style.height = "";

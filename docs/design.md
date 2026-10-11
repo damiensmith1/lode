@@ -291,7 +291,7 @@ Mockups of the target UX, using real data from the glance index:
 ```
 GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC / WebSocket ══▶ views (views/) ─▶ host
                                        lode serve | lode open                          <lode-flow>       standalone app
-                                                                                       <lode-entries>    (hosts/app)
+                                                                                       lodeApi           (hosts/app)
 ```
 
 - **Queries** (`src/query`): deterministic, from the graph alone:
@@ -308,9 +308,20 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   and name a localhost Host (blocks DNS rebinding). The standalone app gets
   the token in the URL fragment, which never goes over HTTP. `source` checks
   real paths, so symlinks can't escape the project.
-- **Views** (`views/`): framework-free web components with shadow DOM,
-  themed by `--lode-*` CSS custom properties from the host:
-  `<lode-entries>` (where to start) and `<lode-flow>` (reading).
+- **Lode core vs host.** lode gives the pieces; a host builds the
+  features. The flow is only the canvas (cards, arrows, folds, editing,
+  undo, keys), with every action a method or command and every change an
+  event; everything around it is the host's, built on `lodeApi` and the
+  flow's API: tabs, the file tree, entry points, the changes list, the
+  flow's toolbar and question line, the keys help, copy context, the
+  explain UI, creating and renaming files. The standalone app builds all
+  of those as the example (`hosts/app`); a host can show the same things
+  differently (an explain overlay, notes in cards) without touching lode.
+  Features that were in the views by mistake (the explain panel, the
+  toolbar, the banner, the help overlay, `<lode-entries>` and
+  `<lode-changes>`) moved to the app.
+- **Views** (`views/`): `<lode-flow>`, a framework-free web component with
+  shadow DOM, themed by `--lode-*` CSS custom properties from the host.
   Wires are measured from the laid-out DOM, so layout stays plain CSS.
   Hosts may detach and reattach a view (switching tabs does), so a view
   builds its DOM and listeners once; reattaching only resubscribes.
@@ -319,7 +330,7 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   answered "what are the parts and how do they talk", but boxes with counts
   didn't say what anything does or where to start, and took clicks to reach
   readable code. Their one useful fact, how the runtimes talk, is the
-  entries view's summary line.
+  entry points' summary line.
 - **Focus** It showed one symbol's steps and links as names;
   flow shows the same links on the real code (callers in each block header,
   calls / IPC / state as chips on lines), so focus added nothing.
@@ -384,7 +395,7 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   deepest declaration that isn't nested in a function, a type's member or
   a class field (so methods, not their callbacks; interfaces, not their
   properties), else the file. Removed lines count toward what follows
-  them. A changes view lists files → symbols with +/− and opens them in a
+  them. The app's changes sidebar lists files → symbols with +/− and opens them in a
   flow with the diff shown; "open all" puts every changed symbol in a new
   flow, laid out as one: they link up where they call each other, each
   connected group in columns of call steps (callers left of what they
@@ -519,9 +530,10 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   (two fingers, or the wheel; shift for sideways) pans, a pinch or
   ⌘-scroll zooms around the pointer (20–200%), dragging empty space pans, dragging a card's header moves the card (scaled, so it tracks the
   pointer at any zoom). Going to a card pans only if it's off screen. The
-  toolbar shows the zoom (click for 100%), "fit" (every card in view, at
-  most 100%) and "focus" (brings the selected
-  card to the left of the view at up to 100%; off when nothing is selected).
+  app's toolbar shows the zoom (`flow.zoom`; click for 100%), "fit" (every
+  card in view, at most 100%) and "focus" (brings the selected card to
+  the left of the view at up to 100%; off when nothing is selected), from
+  `run` and `canRun`.
   ⌘-click adds a card to the selection (or takes it out); a plain click
   selects just that card. Focus, fit (with two or more selected), Delete
   and dragging a header act on the whole selection. Ctrl-click is kept free
@@ -541,8 +553,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
 - **Host syntax hook**: hosts may pass `syntax(text, file)` (escaped HTML per
   line) and `syntaxCss`; views put the CSS inside their shadow root. Views
   never bundle a highlighter.
-- **Entry points view** (`<lode-entries>`, the app's first tab): where to
-  start reading. The `entries` query lists what the outside world calls
+- **Entry points** (the app's first tab, `hosts/app/entries.ts`, from
+  `api.entries()`): where to start reading. The `entries` query lists what the outside world calls
   into, by runtime and kind: files that run code on load, IPC handlers,
   messages from main, the preload bridge API, other registered callbacks
   (app events, hotkeys, UI listeners; timers and tests left out), and,
@@ -732,8 +744,9 @@ and 2 hops at most ("where" follows 1). The service's `ask` method uses
 lode's own settings from the `.env` in lode's folder only, never the
 working directory, since `OPENAI_BASE_URL` decides where keys are sent;
 nothing else a `.env` holds is read). In the views,
-`flow.ask(question)` (or `ViewRequest.ask`) shows a banner, asks, and
-lays the plan out by step, left to right; notes show under each card's
+`flow.ask(question)` (or `ViewRequest.ask`) asks and lays the plan out by
+step, left to right (`flow.asked` / `lode-ask` give the question and how
+it went; the app shows them as a line above the canvas); notes show under each card's
 header and are saved with the tab. In the app, "/" in the top box asks in
 a new flow tab, and a flow's "/" key starts a question there.
 
@@ -756,8 +769,8 @@ and request give the same context (cacheable, testable).
 Delivered as: the `context` service method; **`lode mcp`**, a thin MCP
 server (stdio JSON-RPC, written directly: initialize, ping, tools/list,
 tools/call; stdout is the protocol, logs go to stderr) with six tools;
-**copy context** in flows (canvas or selection; a host can take it via
-the cancelable `lode-context` event); and `skills/lode/SKILL.md` for
+`flow.context()` for the canvas or selection (the app's "copy context"
+puts it on the clipboard); and `skills/lode/SKILL.md` for
 agents. Clance can run `lode mcp` for its agent or call `contextFor`
 in-process.
 

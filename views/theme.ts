@@ -99,12 +99,6 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--lode-local
 .mono { font-family: var(--lode-mono); }
 .muted { color: var(--lode-muted); }
 .faint { color: var(--lode-faint); }
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--lode-border); font-size: 12px; position: sticky; top: 0; background: var(--lode-bg); z-index: 2; }
-.toolbar .sep { color: var(--lode-outline); }
-.crumb { padding: 2px 4px; border-radius: 4px; color: var(--lode-muted); }
-.crumb:hover { background: var(--lode-sunken); color: var(--lode-fg); }
-.crumb.current { color: var(--lode-fg); font-weight: 550; }
-.spacer { margin-left: auto; }
 select { font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid var(--lode-border); border-radius: 6px; background: var(--lode-surface); color: var(--lode-fg); }
 .empty { padding: 32px; color: var(--lode-muted); }
 .wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }

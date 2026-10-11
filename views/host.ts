@@ -48,18 +48,15 @@ export interface SourceHighlight {
   hover?: number; // the line under the pointer, if in this file
 }
 
-// A view to show. `state` names where a flow keeps its canvas in the host's
-// storage: give each flow tab its own to keep them apart, and the same one
-// again to bring a tab back as it was. Defaults to "flow".
-// `ask` builds the flow for a question ("how do we create tabs?").
-// `diff` shows git changes on a flow's cards, against that ref ("HEAD":
-// uncommitted changes); `ids` opens several at once; `newTab` asks the
-// host for a fresh flow rather than the current one. A "changes" view
-// lists what changed since `base` (default HEAD).
-export type ViewRequest =
-  | { kind: "entries" }
-  | { kind: "changes"; base?: string }
-  | { kind: "flow"; id?: string; ids?: string[]; state?: string; diff?: string; newTab?: boolean; ask?: string };
+// A flow to show (createView), or one the flow asks the host for
+// (openView: a new tab the model asked for). `state` names where a flow
+// keeps its canvas in the host's storage: give each flow tab its own to
+// keep them apart, and the same one again to bring a tab back as it was.
+// Defaults to "flow". `ask` builds the flow for a question ("how do we
+// create tabs?"). `diff` shows git changes on a flow's cards, against that
+// ref ("HEAD": uncommitted changes); `ids` opens several at once; `newTab`
+// asks the host for a fresh flow rather than the current one.
+export type ViewRequest = { kind: "flow"; id?: string; ids?: string[]; state?: string; diff?: string; newTab?: boolean; ask?: string };
 
 // What a flow can be asked to do, by a key (LodeHost.keys) or by the host
 // calling flow.run(command).
@@ -99,7 +96,7 @@ export const DEFAULT_KEYS: Record<FlowCommand, string[]> = {
   help: ["?"],
 };
 
-// What each command does, for help screens (the flow's own, on "?").
+// What each command does, for a host's help screen (its "?").
 export const COMMAND_HELP: Record<FlowCommand, string> = {
   lineDown: "next line",
   lineUp: "previous line",
@@ -161,7 +158,17 @@ export const CLOSE_EVENT = "lode-close"; // cards were closed
 export const CHANGE_EVENT = "lode-change"; // the canvas changed (cards, arrows, layout, folds, camera)
 export const DIRTY_EVENT = "lode-dirty"; // a card got (or lost) unsaved edits
 export const SAVE_EVENT = "lode-save"; // a card's edits were saved, or refused
-export const CONTEXT_EVENT = "lode-context"; // "copy context" built LLM context; cancelable (the host takes it instead of the clipboard)
+export const CURSOR_EVENT = "lode-cursor"; // the line cursor moved (or left the canvas)
+export const ASK_EVENT = "lode-ask"; // the question the flow answers, or how asking it went, changed
+
+// The question a flow answers (flow.ask, or a plan loaded), and how it
+// went: still asking, answered (`detail`: "jev · 6 cards · 2.1s"), nothing
+// found, or an error (`detail`: why).
+export interface AskState {
+  question: string;
+  status: "asking" | "answered" | "empty" | "error";
+  detail?: string;
+}
 
 // A change to a file from a card: lines start..end (1-based, inclusive) as
 // the card showed them, and what they are now (any number of lines).
@@ -176,9 +183,10 @@ export type EditResult = { ok: true } | { ok: false; reason?: string; message: s
 
 export interface FlowEventMap {
   [TITLE_EVENT]: string;
-  // `action` is the button's or key's: open, fold, reroot (a caller), close,
-  // more, all, less, callers, source, undo, fit, focus, zoom-reset, clear,
-  // deselect, or host:<name>. preventDefault() stops lode handling it, so
+  // `action` is a card button's or a key's: open, fold, reroot (a caller),
+  // close, more, all, less, callers, source, save, discard, a FlowCommand
+  // (by key: "search" and "help" are only this, for the host), or
+  // host:<name>. preventDefault() stops lode handling it, so
   // a host can take any of them over (e.g. open chips in its editor).
   [ACTION_EVENT]: { action: string; card?: CardInfo; target?: string; line?: number; via: "click" | "key"; data: Record<string, string> };
   [SELECT_EVENT]: { selected: CardInfo | null; cards: CardInfo[] };
@@ -187,5 +195,6 @@ export interface FlowEventMap {
   [CHANGE_EVENT]: Record<string, never>;
   [DIRTY_EVENT]: { card: CardInfo; dirty: boolean };
   [SAVE_EVENT]: { card: CardInfo; file: string; ok: boolean; message?: string };
-  [CONTEXT_EVENT]: { title: string; markdown: string; tokens: number; items: unknown[]; edges: unknown[]; dropped: number };
+  [CURSOR_EVENT]: { key: string; line: number } | null;
+  [ASK_EVENT]: AskState | null;
 }

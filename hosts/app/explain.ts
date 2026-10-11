@@ -6,7 +6,7 @@
 //
 //   const panel = new ExplainPanel(element, client, storage);
 //   panel.attach(flow, "flow-1"); // the flow it talks about, and where its chat is kept
-import { codeNames, renderMarkdown, type CanvasAction, type LodeConnection, type LodeFlow, type LodeStorage } from "../../views/index.js";
+import { codeNames, lodeApi, renderMarkdown, type CanvasAction, type LodeConnection, type LodeFlow, type LodeStorage } from "../../views/index.js";
 
 type Model = { id: string; label: string; group?: string };
 
@@ -37,12 +37,14 @@ export class ExplainPanel {
   private readonly log: HTMLElement;
   private readonly input: HTMLTextAreaElement;
   private readonly select: HTMLSelectElement;
+  private readonly api: ReturnType<typeof lodeApi>;
 
   constructor(
     private readonly el: HTMLElement,
     private readonly client: LodeConnection,
     private readonly storage: LodeStorage,
   ) {
+    this.api = lodeApi(client);
     el.innerHTML = `
       <div class="explain-resize" title="Drag to resize"></div>
       <div class="explain-head"><span class="explain-title">Explain</span><span class="explain-about"></span><button class="icon" data-action="new" title="New conversation">new</button><button class="icon" data-action="close" title="Close (i)">×</button></div>
@@ -161,7 +163,7 @@ export class ExplainPanel {
       redraw();
     });
     try {
-      const result = await this.client.call<{ text: string; actions?: CanvasAction[] }>("explain", { request: request_, stream });
+      const result = await this.api.explain(request_, stream);
       if (!answer.stopped) answer.text = result.text || answer.text;
       // Without streaming, the actions arrive with the answer.
       if (!stopListening && !answer.stopped) {
@@ -208,7 +210,7 @@ export class ExplainPanel {
     if (!this.explaining || answer?.role !== "assistant") return;
     answer.stopped = true;
     this.shown.delete(answer);
-    void this.client.call("explainCancel", { stream: this.stream }).catch(() => {});
+    void this.api.explainCancel(this.stream).catch(() => {});
     this.explaining = false;
     this.render();
   }
@@ -236,7 +238,7 @@ export class ExplainPanel {
     const names = codeNames(answer.text);
     if (!names.length) return;
     const prefer = [...new Set(flow.cards().map((c) => c.node.file).filter(Boolean))];
-    answer.links = await this.client.call<Record<string, string>>("resolve", { names, prefer }).catch(() => ({}));
+    answer.links = await this.api.resolve(names, prefer as string[]).catch(() => ({}));
   }
 
   // While an answer streams (or for older ones without links): names of
@@ -253,9 +255,7 @@ export class ExplainPanel {
   // --- models: the server's providers, the one chosen remembered per browser ---
 
   private async loadModels() {
-    const info = await this.client
-      .call<{ providers: { id: string; label: string; models: { id: string; label: string }[] }[]; default?: string }>("explainModels")
-      .catch(() => null);
+    const info = await this.api.explainModels().catch(() => null);
     this.models = (info?.providers ?? []).flatMap((p) => p.models.map((m) => ({ ...m, group: p.label })));
     this.defaultModel = info?.default;
     const groups = [...new Set(this.models.map((m) => m.group ?? ""))];

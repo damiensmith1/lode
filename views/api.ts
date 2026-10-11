@@ -1,3 +1,5 @@
+import type { CanvasAction } from "../src/explain/index.js";
+import type { EditResult, LineEdit } from "./host.js";
 import type { ChangesResult, CodeBlock, FlowPlan, EntriesResult, FileEntry, FileView, NodeRef, ProjectInfo } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 
@@ -20,7 +22,14 @@ export function lodeApi(connection: LodeConnection) {
     context: (request: Record<string, unknown>) => connection.call<{ title: string; markdown: string; tokens: number; dropped: number }>("context", request),
     // Explain cards and answer follow-ups (see src/explain); pass `stream`
     // and listen to connection.onEvent for the answer as it's written.
-    explain: (request: Record<string, unknown>, stream?: string) => connection.call<{ text: string; added: string[]; tools: number; ms: number }>("explain", { request, ...(stream && { stream }) }),
+    explain: (request: Record<string, unknown>, stream?: string) => connection.call<{ text: string; added: string[]; actions: CanvasAction[]; tools: number; ms: number }>("explain", { request, ...(stream && { stream }) }),
+    // Stop an explanation still being written (its stream id).
+    explainCancel: (stream: string) => connection.call<boolean>("explainCancel", { stream }),
+    // The models explaining can use, by provider, for a picker (no secrets).
+    explainModels: () => connection.call<{ providers: { id: string; label: string; models: { id: string; label: string }[] }[]; default?: string; notes: string[] }>("explainModels"),
+    // Which code names (from an answer) are real symbols: name → id. Symbols
+    // in `prefer`'s files win a shared name.
+    resolve: (names: string[], prefer: string[] = []) => connection.call<Record<string, string>>("resolve", { names, prefer }),
     // A flow built for a question ("how do we create tabs?"); needs a judge
     // (Jev) on the server.
     ask: (question: string) => connection.call<FlowPlan>("ask", { question }),
@@ -30,6 +39,9 @@ export function lodeApi(connection: LodeConnection) {
     // The innermost symbol at a line, e.g. to open the editor's cursor in a flow.
     symbolAt: (file: string, line: number) => connection.call<NodeRef | null>("symbolAt", { file, line }),
     source: (file: string) => connection.call<FileView | null>("source", { file }),
+    // Write a card's line edits to its file, if the lines still read as
+    // `expected` (the flow saves this way unless the host saves itself).
+    editFile: (file: string, edits: LineEdit[]) => connection.call<EditResult>("editFile", { file, edits }),
   };
 }
 

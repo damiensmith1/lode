@@ -13,7 +13,6 @@
   <span class="brand"><span class="diamond" aria-hidden="true">◇</span> lode</span>
   <button id="toggle-tree" class="faint" type="button">files</button>
   <button id="open-entries" class="faint" type="button" title="Where to start reading">entry points</button>
-  <button id="open-explain" class="faint" type="button" title="Ask about the flow's cards, or to show more (i)">explain</button>
   <span id="project" class="faint"></span>
   <div class="search">
     <label for="search" class="faint">find</label>
@@ -47,6 +46,20 @@
   <div id="side-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" title="Drag to resize"></div>
   <section class="views" aria-label="lode views">
     <div id="tabs" role="tablist"></div>
+    <div id="flowbar" class="flowbar" hidden>
+      <button data-do="undo" aria-label="Undo" title="Undo (⌘Z)">←</button>
+      <span id="flowbar-count" class="faint"></span>
+      <span class="spacer"></span>
+      <span class="faint hint">scroll or drag to move around · pinch or ⌘-scroll to zoom · drag a card by its header · ? for keys</span>
+      <button data-do="zoomReset" title="Back to 100%">100%</button>
+      <button data-do="fit" title="Show every card (f)">fit</button>
+      <button data-do="focus" title="Zoom to the selected card (Space)">focus</button>
+      <button data-do="explain" title="Ask about the cards, or to show more (i)">explain</button>
+      <button data-do="context" title="Copy these cards (or the selected ones) as context for an LLM">copy context</button>
+      <button data-do="diff" title="Show what changed since the last commit (git)">changes</button>
+      <button data-do="clear" title="Clear the canvas">clear</button>
+    </div>
+    <div id="asked" class="asked" hidden></div>
     <div class="stage">
       <div id="view"></div>
       <aside id="explain" aria-label="Explain" hidden></aside>

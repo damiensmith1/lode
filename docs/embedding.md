@@ -4,19 +4,23 @@ lode is three layers, and a host picks how to join them:
 
 ```
  any folder ─▶ core (Node)                 views (browser)              host
-               GraphStore + plugins   ◀──▶ <lode-flow>, <lode-entries>  ◀──▶ your editor / app
-               Queries · createService     connection · LodeHost          tabs, storage, theme,
-                                                                           editor, syntax colours
+               GraphStore + plugins   ◀──▶ <lode-flow>                  ◀──▶ your editor / app
+               Queries · createService     lodeApi · connection           tabs, tree, toolbars,
+                                           LodeHost                       explain UI, storage,
+                                                                           theme, editor
 ```
 
 - **Core** (`lode`): reads a folder into a graph with a language plugin
   (`pluginFor(folder)` picks them: `tsPlugin` for TypeScript and
   JavaScript, `rubyPlugin` with `railsPack` for Ruby, both combined in a
   mixed repo), caches it, and answers queries. Runs in Node.
-- **Views** (`lode/views`): framework-free web components that render the
-  graph as cards, arrows, folds and callers, and do the reading mechanics
-  (drag, zoom, fold, page, select, undo). They touch nothing outside their
-  shadow root; everything else comes from the host.
+- **Views** (`lode/views`): the flow, a framework-free web component that
+  renders the graph as cards, arrows, folds and callers, and does the
+  reading mechanics (drag, zoom, fold, page, select, undo, keys). It's
+  only the canvas: no toolbar, tabs, lists or explain UI. Everything it
+  can do is a method or a command, and it reports what changed as events,
+  so a host builds its own controls around it. `lodeApi` is the typed API
+  for everything else a host shows.
 - **Host**: your editor or app. It decides how views reach the core, where
   their state is kept, how they look, and what "open this file" means.
 
@@ -85,9 +89,9 @@ view.addEventListener("lode-title", (e) => (tab.label = e.detail));
 (view as LodeFlow).show("src/other.ts#thing");
 ```
 
-- `kind: "flow"` is the reading canvas; `kind: "entries"` is where to start
-  (it asks the host to `openView` a flow when an entry is picked);
-  `kind: "changes"` lists what changed in git (below).
+- `createView` makes a flow (`kind: "flow"`), the only view lode has.
+  Entry points, a changes list, a file tree and the rest are the host's,
+  from `lodeApi` (the standalone app's are examples: `hosts/app`).
 - A flow request can also carry `ids` (open several), `diff` (show git
   changes against that ref, e.g. `"HEAD"`) and `newTab` (ask the host for
   a fresh flow).
@@ -113,7 +117,11 @@ const here = await api.symbolAt(file, cursorLine);  // then flow.show(here.id)
 connection.onChanged(async () => renderTree(buildFileTree(await api.files())));
 ```
 
-Also `info()`, `entries()`, `block(id)`, `source(file)`, `changes(base)`.
+Also `info()`, `entries()` (where to start reading), `block(id)`,
+`source(file)`, `changes(base)`, `ask(question)`, `context(request)`,
+`explain(request, stream)`, `explainCancel(stream)`, `explainModels()`,
+`resolve(names, prefer)` and `editFile(file, edits)`: every service method
+a host needs, typed.
 
 `files()` lists every project file: the code graph's (TS/JS, with their
 runtime) and the rest (README, JSON, CSS, …; whatever git doesn't ignore,
@@ -134,12 +142,26 @@ beside it with arrows. The new cards aren't expanded. (`action: "expand"`;
 part `expand`.)
 
 
-Methods on a `<lode-flow>`: `show(id)` (add a node or file, or go to its
-card), `run(command)`, `cards()`, `selection()`, `setSelection(keys)`.
-Commands: `close` (the selection), `undo`, `fit`, `focus`, `deselect`,
-`zoomReset`, `clear`, `expand`, `lineDown`, `lineUp`, `follow`, `back`,
-`nextChip`, `nextCard`, `prevCard`, `nextChange`, `prevChange`, `openFold`,
-`collapseFold`, `edit`, `search`, `help`.
+Methods on a `<lode-flow>`: everything a key, click or toolbar could do,
+so a host draws its own toolbar, menus and keybindings:
+
+- reading: `show(id)` (add a node or file, or go to its card),
+  `showAll(ids)`, `ask(question)`, `loadPlan(plan)`, `goTo(key)` (select
+  and pan to it)
+- commands: `run(command)` and `canRun(command)` (whether there's
+  anything to do: grey a button by it). Commands: `close` (the
+  selection), `undo`, `fit`, `focus`, `deselect`, `zoomReset`, `clear`,
+  `expand`, `lineDown`, `lineUp`, `follow`, `back`, `nextChip`,
+  `nextCard`, `prevCard`, `nextChange`, `prevChange`, `openFold`,
+  `collapseFold`, `edit`; `search` and `help` only send `lode-action`
+  (the host's search box, the host's key list).
+- the canvas: `apply(CanvasAction)` (add, expand, fold, close, select,
+  focus, fit, changes: what a model asks for, and a host can too),
+  `cards()`, `selection()`, `setSelection(keys)`, `readingOrder()`,
+  `highlight(key)`
+- the view: `zoom` and `setZoom(k)`, `cursorAt` and `moveCursor(key,
+  line)`, `diff` and `setDiff(base | null)`, `unsaved()`, `asked` (the
+  question it answers), `context(budget)`, `scope(selection)`
 
 Events (bubbling, composed; types in `FlowEventMap`):
 
@@ -153,6 +175,8 @@ Events (bubbling, composed; types in `FlowEventMap`):
 | `lode-dirty` | a card got, or lost, unsaved edits | `card`, `dirty` |
 | `lode-save` | a card's edits were saved, or refused | `card`, `file`, `ok`, `message` |
 | `lode-title` | the view's title changed | the title |
+| `lode-cursor` | the line cursor moved | `{ key, line }` or null |
+| `lode-ask` | the question it answers, or how asking went, changed | `AskState`: `question`, `status`, `detail` |
 
 `preventDefault()` on `lode-action` takes an action over, e.g. open chips
 in the editor instead of on the canvas:
@@ -165,7 +189,7 @@ flow.addEventListener("lode-action", (e) => {
 
 **Keys.** Outside code, a flow is driven from the keyboard: the selected
 card has a line cursor (outlined; clicks move it). Defaults (`DEFAULT_KEYS`,
-described in `COMMAND_HELP`; `?` shows them on the canvas):
+described in `COMMAND_HELP` for a host's help screen):
 ↓/j ↑/k lines (past the end shows 25 more) · →/l follow the line's chip
 or fold (Tab cycles chips, then the fold) · ←/h back along the arrow to the line it came
 from (a root card opens its first caller) · ] [ next/previous card in
@@ -175,7 +199,8 @@ o / c open the line's fold (never its chips) / fold back · Enter edit the card
 at the cursor (code is read-only until then; Esc, or the caret leaving,
 stops, keeping unsaved edits, with the cursor on that line) · Space focus · f fit ·
 Delete/Backspace/x close · Mod+z undo · / search (sent as `lode-action`
-for the host to handle: the app focuses its search box) · ? help. `host.keys` remaps (`{ undo: ["Mod+Shift+u"], fit:
+for the host to handle: the app focuses its search box) · ? help (also
+the host's: the app lists the keys). `host.keys` remaps (`{ undo: ["Mod+Shift+u"], fit:
 ["Shift+F"] }`; `[]` turns one off) or `false` turns them all off, for a
 host that routes its own keybindings to `flow.run()`. Keys never fire
 while typing in a field, or when the flow isn't showing.
@@ -236,8 +261,8 @@ Folded and paged-off lines can't be touched from the card (an edit never
 crosses them). Typing, Enter (keeps the indent), Backspace/Delete (joining
 lines only where both are visible together), Tab, paste, cut and copy (the
 code only) and ⌘Z / ⌘⇧Z (per card) work inside a card's code. ⌘S saves the
-card; a card with unsaved edits shows "● unsaved · save · discard", and the
-toolbar counts them. Undo goes back past a save: the card becomes unsaved
+card; a card with unsaved edits shows "● unsaved · save · discard"
+(`flow.unsaved()` lists them, for a host's count). Undo goes back past a save: the card becomes unsaved
 again, and saving writes the undo. Unsaved cards can't be closed, folded or paged until
 saved or discarded; other re-renders keep their edits and the caret.
 
@@ -257,21 +282,20 @@ the edits.
 
 ## 8. Git changes
 
-`<lode-changes>` (`{ kind: "changes", base? }`) lists what changed since a
-ref (default `HEAD`: uncommitted work, untracked files included), by file
-and by the symbol each change is in: a top-level function, class, method,
-type or variable, or "(top level)". Symbols carry `parent` (a method's
-class), so a host can show them as a hierarchy; a class whose methods
-changed is listed even if its own lines didn't. It refreshes as files change, so an
-agent's edits appear as they land. Picking one asks the host to
-`openView({ kind: "flow", id, diff: base })`; "open all in a flow" asks for
-`{ kind: "flow", ids, diff: base, newTab: true }`. A flow given several
-`ids` (or `flow.showAll(ids)`) lays them out as a flow: linked where they
-call each other, callers left of what they call, unconnected groups in
-rows.
+`lodeApi(connection).changes(base)` lists what changed since a ref
+(default `HEAD`: uncommitted work, untracked files included), by file and
+by the symbol each change is in: a top-level function, class, method, type
+or variable, or "(top level)". Symbols carry `parent` (a method's class),
+so a host can show them as a hierarchy; a class whose methods changed is
+listed even if its own lines didn't. Refetch on `onChanged` and an agent's
+edits appear as they land. A host opens them in a flow with the diff
+shown (`{ kind: "flow", ids, diff: base }`, or `flow.setDiff(base)` then
+`flow.showAll(ids)`); several ids are laid out as a flow: linked where
+they call each other, callers left of what they call, unconnected groups
+in rows. (The standalone app's sidebar is one such list.)
 
-A flow showing changes (`diff` in its request, `flow.setDiff(base | null)`,
-or its "changes" toolbar toggle; kept with its state) marks added or
+A flow showing changes (`diff` in its request, or `flow.setDiff(base |
+null)`; kept with its state) marks added or
 changed lines, shows removed lines struck through where they were
 (read-only, never part of an edit), and marks folds and "show more" that
 hide changes, and chips or callers leading to a changed symbol get a dot.
@@ -281,16 +305,15 @@ counting only those not open yet. A card that arrives while changes are
 shown (or is on the canvas when they're turned on) opens far enough to
 show its changes: comment/import folds holding them open in place, and it
 shows down to its last changed line. (`action: "open-changes"` in
-`lode-action`; part `open-changes`.) `lodeApi(connection).changes(base)` gives the same data to a
-host's own UI (`ChangesResult`: files → hunks and symbols).
+`lode-action`; part `open-changes`.)
 
 ## 9. Asking for a flow
 
 `flow.ask("how do we create the tabs?")` (or `{ kind: "flow", ask }`)
 builds the flow that answers a question on the server and lays it out:
 cards in steps from where to start, linked where they call each other,
-each with a note on why it's there; a banner above the canvas shows the
-question. The server needs a judge: Jev by default (`TYPESAFE_API_KEY` in
+each with a note on why it's there. `flow.asked` (and `lode-ask`) gives
+the question and how asking went, for the host to show. The server needs a judge: Jev by default (`TYPESAFE_API_KEY` in
 the environment or lode's `.env`), or pass `createService(store, { judge
 })` with anything implementing `Judge` (Choice, Noul and Score answers),
 e.g. an LLM. `lodeApi(connection).ask(question)` returns the `FlowPlan`
@@ -312,10 +335,9 @@ puts at risk.
 
 `serveMcp(service, { input, output })` (or `lode mcp <project>`) serves
 it to agents over MCP: `lode_search`, `lode_read`, `lode_context`,
-`lode_impact`, `lode_changes`, `lode_entries`. A flow's "copy context"
-button (or `flow.context(budget)`) builds it from the canvas; the
-cancelable `lode-context` event lets a host send it to its own agent
-instead of the clipboard.
+`lode_impact`, `lode_changes`, `lode_entries`. `flow.context(budget)`
+builds it from the canvas (or the selection) for a host to copy or send
+to its own agent.
 
 ## 11. Explaining
 
@@ -400,13 +422,12 @@ provider's `ChatModel.chat` gets the model id as `model`.
   removed, font, mono,
   and syntax-{keyword, string, number, title, type, comment, attr, variable}.
 - **Parts.** Pieces carry `part` names for `::part()` from the host page:
-  flow: `toolbar`, `toolbar-hint`, `canvas`, `board`, `empty`, `card`,
+  flow: `canvas`, `board`, `empty`, `card`,
   `card-selected`, `card-header`, `card-title`, `card-meta`, `card-close`,
   `callers`, `caller`, `code`, `line`, `line-number`, `source`, `chips`,
   `chip`, `chip-calls`, `chip-channel`, `chip-state`, `chip-local`, `fold`,
   `paging`, `paging-button`, `arrows`, `line-removed`, and `host-header`, `host-footer`,
-  `host-line` around render hooks' markup; entries: `page`, `lede`, `summary`,
-  `filter`, `list`, `runtime`, `category`, `entry`, `more`.
+  `host-line` around render hooks' markup.
 - **`host.css`** goes last inside every view's shadow root, for anything
   tokens and parts don't reach.
 
