@@ -22,7 +22,6 @@ export {
   SAVE_EVENT,
   OPEN_EVENT,
   SELECT_EVENT,
-  TITLE_EVENT,
   type AskState,
   type CardInfo,
   type CardRender,

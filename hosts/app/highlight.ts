@@ -1,7 +1,7 @@
-// An optional syntax highlighter for views (highlight.js: TS/JS and common
-// project files: JSON, Markdown, CSS, HTML, YAML, shell, TOML), for hosts
-// without their own. Kept out of the views index so hosts that bring their
-// own (an IDE's tokenizer, Shiki) don't pull highlight.js in.
+// The app's syntax colours (highlight.js: TS/JS, Ruby, Python and common
+// project files: JSON, Markdown, CSS, HTML, YAML, shell, TOML), given to
+// the flow as LodeHost.syntax. Colouring is the host's: an IDE passes its
+// own tokenizer, another host Shiki; lode only takes HTML per line.
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";

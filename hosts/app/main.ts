@@ -5,11 +5,11 @@
 // for data, the flow (createView) and its methods and events. The tabs,
 // tree, changes list, entry points, the flow's toolbar and question line,
 // the keys help and the explain panel are all the app's own.
-import { highlightJs } from "../../views/highlight.js";
+import { highlightJs } from "./highlight.js";
 import type { ChangesResult } from "../../src/query/types.js";
 import { ExplainPanel } from "./explain.js";
 import { entriesView } from "./entries.js";
-import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, COMMAND_HELP, DEFAULT_KEYS, DIRTY_EVENT, SELECT_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, TITLE_EVENT, type FileTreeNode, type FlowCommand, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
+import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, COMMAND_HELP, DEFAULT_KEYS, DIRTY_EVENT, SELECT_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, CLOSE_EVENT, OPEN_EVENT, type FileTreeNode, type FlowCommand, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) => {
@@ -50,6 +50,7 @@ const host: LodeHost = {
   // as a card next to the one it came from.
   openView: (r) => void openView(r),
   storage,
+  empty: "Pick an entry point, a file or a symbol to start reading from it.",
   ...highlightJs,
 };
 
@@ -114,7 +115,10 @@ function addTab(request: AppRequest, at = tabs.length): Tab {
   let tab: Tab;
   if (request.kind === "flow") {
     tab = { request, button, view: createView(request, client, host) };
-    tab.view.addEventListener(TITLE_EVENT, (e) => (label.textContent = String((e as CustomEvent).detail)));
+    // The tab's label: the question it answers, else its first card.
+    const flow = tab.view as LodeFlow;
+    const name = () => (label.textContent = flow.asked ? `/ ${flow.asked.question}` : flow.cards().length ? `flow · ${flow.cards()[0].node.name}` : "flow");
+    for (const event of [ASK_EVENT, OPEN_EVENT, CLOSE_EVENT, CHANGE_EVENT]) flow.addEventListener(event, name);
   } else {
     const entries = entriesView(api, readInFlow);
     tab = { request, button, view: entries.el, reload: entries.reload };

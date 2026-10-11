@@ -33,6 +33,9 @@ export interface LodeHost {
   // and what they became (`lines`); refuse with ok:false if they don't
   // match the file any more.
   saveEdits?(request: { file: string; edits: LineEdit[] }): Promise<EditResult>;
+  // Optional: text an empty canvas shows ("Pick a file to start reading").
+  // Default: nothing.
+  empty?: string;
   // Optional: extra markup in cards (see CardRender).
   render?: CardRender;
   // Optional: where views keep their state, per view (see ViewRequest's
@@ -150,7 +153,6 @@ export interface CardRender {
 
 // Events views dispatch (bubbling, composed, so a host can listen on any
 // ancestor). Details in FlowEventMap.
-export const TITLE_EVENT = "lode-title"; // the view's title changed: label the tab
 export const ACTION_EVENT = "lode-action"; // about to act on a click or key; cancelable
 export const SELECT_EVENT = "lode-select"; // the selection changed
 export const OPEN_EVENT = "lode-open"; // a card was opened, or gone to
@@ -182,7 +184,6 @@ export interface LineEdit {
 export type EditResult = { ok: true } | { ok: false; reason?: string; message: string };
 
 export interface FlowEventMap {
-  [TITLE_EVENT]: string;
   // `action` is a card button's or a key's: open, fold, reroot (a caller),
   // close, more, all, less, callers, source, save, discard, a FlowCommand
   // (by key: "search" and "help" are only this, for the host), or

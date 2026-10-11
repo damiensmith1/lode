@@ -339,7 +339,8 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   undo) and the host everything around them. A host passes a connection
   (`LodeConnection`: `call`, `onChanged`) and a `LodeHost` (`openView`,
   optional `openSource`, `highlight`, `syntax`/`syntaxCss`, `storage`,
-  `css`) and listens for `lode-title` to name tabs. That's all an adapter
+  `css`, `empty`) and names tabs itself (from `flow.asked` and
+  `flow.cards()`). That's all an adapter
   (VS Code, Clance) has to implement. Without `openSource` (the standalone
   app has no editor), a card's title opens its file as a card to its left,
   with an arrow from the line where the card's code starts. `highlight`
@@ -450,7 +451,7 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   views, the app), `dist/app` (the app prebuilt, which an installed
   `lode open` serves), `dist/views` (self-contained bundles for pages
   without a bundler). Exports: `lode`, `lode/server`, `lode/views`,
-  `lode/views/highlight`, `lode/views/bundle`. Checked by installing the
+  `lode/views/bundle`. Checked by installing the
   packed tarball into an empty project and running a host from it.
 - **No separate code pane.** It was dropped: the flow reads code better, and
   the one thing the pane did that the flow didn't, reading a file's
@@ -569,7 +570,9 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
 - **Standalone host** (`hosts/app`): entry points and flow tabs (the top
   bar's "entry points" brings that tab back once closed; "+" adds a flow), a file tree
   (a file opens in the flow), syntax colours
-  (highlight.js, Clance's palette; a host concern, so not in views) and ◇
+  (highlight.js, Clance's palette, `hosts/app/highlight.ts`; a host
+  concern, so not in lode: the flow takes `host.syntax`), tab names from
+  the flow's question or first card, the empty canvas's hint, and ◇
   annotations,
   lode views in tabs on the right, file tree, symbol search, deep links
   (`#flow=<id>` or `#file=<path>`). `lode open <project>` builds it

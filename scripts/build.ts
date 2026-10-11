@@ -12,13 +12,13 @@ import { buildApp } from "../hosts/app/build.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
-rmSync(path.join(dist, "lib"), { recursive: true, force: true });
+for (const out of ["lib", "views"]) rmSync(path.join(dist, out), { recursive: true, force: true });
 execFileSync(process.execPath, [path.join(root, "node_modules", "typescript", "bin", "tsc"), "-p", path.join(root, "tsconfig.build.json")], { stdio: "inherit" });
 for (const file of ["index.html", "app.css"]) copyFileSync(path.join(root, "hosts", "app", file), path.join(dist, "lib", "hosts", "app", file));
 chmodSync(path.join(dist, "lib", "src", "cli.js"), 0o755);
 await buildApp(path.join(dist, "app"));
 await build({
-  entryPoints: { "lode-views": path.join(root, "views", "index.ts"), "lode-highlight": path.join(root, "views", "highlight.ts") },
+  entryPoints: { "lode-views": path.join(root, "views", "index.ts") },
   outdir: path.join(dist, "views"),
   bundle: true,
   format: "esm",

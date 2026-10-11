@@ -20,7 +20,6 @@
 <body>
 <script type="module">
   import { createView, DARK_THEME, LodeClient, memoryStorage, themeCss } from "./node_modules/lode/dist/views/lode-views.js";
-  import { highlightJs } from "./node_modules/lode/dist/views/lode-highlight.js";
 
   const rpc = new URLSearchParams(location.hash.slice(1)).get("rpc");
   const connection = new LodeClient(rpc);
@@ -28,7 +27,7 @@
   const host = {
     openView: (request) => request.kind === "flow" && request.id && flow.show(request.id),
     storage: memoryStorage(),
-    ...highlightJs,
+    // Code is plain without syntax colours: pass syntax(text, file) → HTML per line (and syntaxCss).
   };
   const flow = createView({ kind: "flow", state: "minimal" }, connection, host);
   document.body.append(flow);

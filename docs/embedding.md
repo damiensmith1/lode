@@ -84,7 +84,8 @@ import { createView } from "lode/views";
 
 const view = createView({ kind: "flow", id: "src/main.ts#run", state: "tab-3" }, connection, host);
 container.append(view);
-view.addEventListener("lode-title", (e) => (tab.label = e.detail));
+// name the tab from the flow: its question, or its first card
+view.addEventListener("lode-change", () => (tab.label = view.asked?.question ?? view.cards()[0]?.node.name ?? "flow"));
 // later, read something else in the same flow:
 (view as LodeFlow).show("src/other.ts#thing");
 ```
@@ -100,7 +101,7 @@ view.addEventListener("lode-title", (e) => (tab.label = e.detail));
   again to bring the tab back as it was. Default `"flow"`.
 
 Without a bundler (a webview, a plain page), import the self-contained
-bundles: `lode/dist/views/lode-views.js` and `lode-highlight.js`. See
+bundle: `lode/dist/views/lode-views.js`. See
 `hosts/minimal/index.html` for a whole host in one page.
 
 ## 4. Your own UI around the views
@@ -128,8 +129,8 @@ runtime) and the rest (README, JSON, CSS, …; whatever git doesn't ignore,
 or everything outside node_modules/.git/dist when it isn't a repository),
 marked `indexed: false`. Those open in a flow as text cards (Markdown
 headings fold into sections), take edits and show diffs like code; they
-just have no chips or callers. The bundled highlighter colours JSON,
-Markdown, CSS/SCSS, HTML/XML, YAML, shell, TOML and Python too.
+just have no chips or callers. (The app's highlighter colours JSON,
+Markdown, CSS/SCSS, HTML/XML, YAML, shell, TOML, Ruby and Python too.)
 
 ## 5. Driving a flow and listening to it
 
@@ -174,7 +175,6 @@ Events (bubbling, composed; types in `FlowEventMap`):
 | `lode-change` | anything on the canvas changed | |
 | `lode-dirty` | a card got, or lost, unsaved edits | `card`, `dirty` |
 | `lode-save` | a card's edits were saved, or refused | `card`, `file`, `ok`, `message` |
-| `lode-title` | the view's title changed | the title |
 | `lode-cursor` | the line cursor moved | `{ key, line }` or null |
 | `lode-ask` | the question it answers, or how asking went, changed | `AskState`: `question`, `status`, `detail` |
 
@@ -239,8 +239,13 @@ fires `lode-action` with that action, the card, and the element's `data-*`
 values. They're not drag handles, even in the header.
 ```
 
-**Syntax colours**: bring your editor's tokenizer, or use the bundled one:
-`import { highlightJs } from "lode/views/highlight"` then `{ ...highlightJs }`.
+**Syntax colours** are the host's: pass `syntax(text, file)` (HTML per
+line, source escaped) and `syntaxCss`, from your editor's tokenizer,
+Shiki, or highlight.js (`hosts/app/highlight.ts` is the app's; copy it).
+Without them, code is plain.
+
+**Empty canvas**: `empty` is the text a flow shows with no cards ("Pick
+a file to start reading"); default nothing.
 
 **Storage** (`LodeStorage`: `load(key)`, `save(key, value)`, null removes;
 sync or async):

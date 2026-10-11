@@ -1,7 +1,7 @@
 import type { BlockLink, BlockRegion, ChangesResult, CodeBlock, DiffHunk, FlowPlan, LinkKind } from "../src/query/types.js";
 import type { LodeConnection } from "./connection.js";
 import { serviceStorage, type LodeStorage } from "./storage.js";
-import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, CLOSE_EVENT, CURSOR_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, TITLE_EVENT, type AskState, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
+import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, CLOSE_EVENT, CURSOR_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, type AskState, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
 import type { ContextResult } from "../src/context/index.js";
@@ -818,7 +818,6 @@ export class LodeFlow extends HTMLElement {
     await this.ready;
     if (!this.client) return;
     this.setAsked({ question, status: "asking" });
-    this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `/ ${question}`, bubbles: true, composed: true }));
     let plan: FlowPlan;
     try {
       plan = await this.client.call<FlowPlan>("ask", { question });
@@ -862,7 +861,6 @@ export class LodeFlow extends HTMLElement {
       this.position();
     }
     this.fit(ids.filter((id) => this.cardMap.has(id)));
-    this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `/ ${plan.question}`, bubbles: true, composed: true }));
     this.changed();
   }
 
@@ -2001,10 +1999,10 @@ export class LodeFlow extends HTMLElement {
     this.announceSelection();
     const board = this.board();
     if (!this.cardMap.size) {
-      board.innerHTML = `<div class="hint" part="empty">Pick an entry point, a file or a symbol to start reading from it.</div>`;
+      // An empty canvas says what the host wants it to (host.empty).
+      board.innerHTML = this.host?.empty ? `<div class="hint" part="empty">${escape(this.host.empty)}</div>` : "";
       board.style.width = board.style.height = "";
       board.style.transform = "";
-      this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: "flow", bubbles: true, composed: true }));
       return;
     }
     // Cards with unsaved edits keep their own rows (and the caret, if it's
@@ -2025,8 +2023,6 @@ export class LodeFlow extends HTMLElement {
     }
     this.position();
     this.paintCursor();
-    const first = this.cardMap.values().next().value!;
-    this.dispatchEvent(new CustomEvent(TITLE_EVENT, { detail: `flow · ${first.block.node.name}`, bubbles: true, composed: true }));
   }
 
   private rerender() {

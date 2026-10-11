@@ -314,7 +314,7 @@ where their state lives, how they look, which keys do what, and what
 [`docs/embedding.md`](docs/embedding.md).
 
 **Packages:** `lode` (core, queries, service, ask, context), `lode/server`, `lode/mcp`,
-`lode/views`, `lode/views/highlight`, self-contained bundles in
+`lode/views`, a self-contained bundle in
 `dist/views` for pages without a bundler, and the `lode` command
 (`npm run build` makes them).
 
@@ -345,7 +345,7 @@ const flow = createView({ kind: "flow", id: "src/main.ts#run", state: "tab-1" },
   openView: (request) => { /* open or reuse a tab */ },
   openSource: (file, line) => editor.open(file, line), // optional: else files open as cards
   highlight: (lines) => editor.decorate(lines),         // optional: mark what the card covers
-  ...highlightJs,                                       // or your editor's own syntax colours
+  syntax: (text, file) => editor.tokenize(text, file),  // optional: your syntax colours (HTML per line)
   storage: workspaceStorage,                            // where each tab keeps its canvas
 });
 ```
