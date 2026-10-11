@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { GraphStore } from "./graph/store.js";
 import { pluginFor } from "../plugins/index.js";
 import type { Edge } from "./schema/index.js";
@@ -80,16 +80,18 @@ if (command === "mcp") {
   const { startServer } = await import("./server/index.js");
   let staticDir: string | undefined;
   if (command === "open") {
-    // An installed package ships the app prebuilt (dist/app, beside
-    // dist/lib); from source, bundle it now.
+    // The standalone app is a host in lode's repo, not in the package:
+    // from a clone it's built now; installed, there's none to open.
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const prebuilt = path.join(here, "..", "..", "app");
-    if (here.endsWith(path.join("dist", "lib", "src")) && existsSync(path.join(prebuilt, "index.html"))) staticDir = prebuilt;
-    else {
-      const { buildApp } = await import("../hosts/app/build.js");
-      staticDir = path.join(here, "..", "dist", "app");
-      await buildApp(staticDir);
+    const appBuild = path.join(here, "..", "hosts", "app", "build.ts");
+    if (!existsSync(appBuild)) {
+      console.error("lode open runs the standalone app from a clone of lode's repo (npm run lode -- open <project>). The package is for building on: lode serve, lode mcp, and the library.");
+      process.exit(1);
     }
+    // By path, so the package build doesn't compile the app in.
+    const { buildApp } = (await import(pathToFileURL(appBuild).href)) as { buildApp(outDir: string): Promise<void> };
+    staticDir = path.join(here, "..", "dist", "app");
+    await buildApp(staticDir);
   }
   const server = await startServer({ store, port, staticDir, watch: true, allowedOrigins: origins });
   console.log(`lode · ${graph.size.nodes} nodes, ${graph.size.edges} edges (${ms}ms) · ${store.root}`);

@@ -34,9 +34,7 @@
   },
   "files": [
     "dist/lib",
-    "dist/app",
     "dist/views",
-    "hosts/minimal",
     "README.md",
     "docs/embedding.md",
     "skills",

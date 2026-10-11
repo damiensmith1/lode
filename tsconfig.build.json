@@ -7,6 +7,6 @@
     "rootDir": ".",
     "outDir": "dist/lib"
   },
-  "include": ["src", "plugins", "views", "hosts/app"],
+  "include": ["src", "plugins", "views"],
   "exclude": ["test"]
 }

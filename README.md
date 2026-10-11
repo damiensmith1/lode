@@ -367,8 +367,12 @@ What a host can plug in or take over:
 | **LLM context** | `contextFor(request)` in Node, `lode/mcp` (`serveMcp`) for agents, `flow.context()` to send a canvas to your own agent |
 | **Languages** | a `LanguagePlugin` reads a project into nodes, edges, channels and fold regions; the core does the rest |
 
-`hosts/minimal/index.html` is a complete host in one page, from the
-prebuilt bundles.
+`hosts/minimal/index.html` (in the repo) is a complete host in one page,
+from the prebuilt bundle.
+
+The package is lode for building on: the library, the views, `lode serve`,
+`lode mcp`. The standalone app is a host in this repo (`hosts/app`), not
+in the package; run it from a clone with `npm run lode -- open`.
 
 ## Security
 
@@ -383,8 +387,8 @@ on the server. `.env` files are read for lode's own key only.
 ```sh
 npm test            # unit and integration tests, on fixtures
 npm run typecheck
-npm run build       # dist/lib, dist/app, dist/views
-npm run build:web   # just the app
+npm run build       # the package: dist/lib, dist/views
+npm run build:web   # the standalone app (dist/app; lode open builds it too)
 ```
 
 `eval/` measures **/** answers against questions with known answers:

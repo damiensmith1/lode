@@ -102,7 +102,7 @@ view.addEventListener("lode-change", () => (tab.label = view.asked?.question ?? 
 
 Without a bundler (a webview, a plain page), import the self-contained
 bundle: `lode/dist/views/lode-views.js`. See
-`hosts/minimal/index.html` for a whole host in one page.
+`hosts/minimal/index.html` in lode's repo for a whole host in one page.
 
 ## 4. Your own UI around the views
 

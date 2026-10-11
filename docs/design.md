@@ -448,10 +448,12 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   colours are tokens too. `LIGHT_THEME` / `DARK_THEME` / `themeCss` are
   exported; pieces carry `part` names for `::part()`; `host.css` goes last
   inside every view for the rest.
-- **Packaging.** `npm run build`: `dist/lib` (ESM + .d.ts for core, server,
-  views, the app), `dist/app` (the app prebuilt, which an installed
-  `lode open` serves), `dist/views` (self-contained bundles for pages
-  without a bundler). Exports: `lode`, `lode/server`, `lode/views`,
+- **Packaging.** The package is lode for building on, with no host in it.
+  `npm run build`: `dist/lib` (ESM + .d.ts for core, queries, service,
+  server, MCP, CLI, plugins, views) and `dist/views` (a self-contained
+  bundle for pages without a bundler). The standalone app and the minimal
+  host stay in the repo; `lode open` builds and serves the app from a
+  clone, and says so when installed. Exports: `lode`, `lode/server`, `lode/views`,
   `lode/views/bundle`. Checked by installing the
   packed tarball into an empty project and running a host from it.
 - **No separate code pane.** It was dropped: the flow reads code better, and
