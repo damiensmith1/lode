@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { askFlow } from "../src/ask/index.js";
+import { askFlow, lexicalCandidates } from "../src/ask/index.js";
 import type { Judge, JudgeAnswer, JudgeQuestion } from "../src/ask/judge.js";
 import { loadEnv } from "../src/ask/env.js";
 import { GraphStore } from "../src/graph/store.js";
@@ -42,6 +42,25 @@ function fakeJudge(route: string, topic: RegExp): Judge & { calls: number } {
   };
   return judge;
 }
+
+describe("finding candidates", () => {
+  const ids = (question: string) => lexicalCandidates(question, queries, 5).map((n) => n.id);
+
+  it("searches everything about a symbol, not just its name", () => {
+    // "cleared" is only in the handlers' code (notes:cleared, onCleared).
+    expect(ids("what happens when the notes are cleared").slice(0, 3)).toEqual(expect.arrayContaining(["src/preload.ts#exposeInMainWorld:notes.onCleared", "src/renderer.js#onCleared@L13"]));
+  });
+
+  it("puts a symbol the question names first, and matches word forms", () => {
+    expect(ids("where is saveNote")[0]).toBe("src/main.ts#saveNote");
+    expect(ids("how do we save notes")).toEqual(ids("how are notes saved")); // save / saved, notes
+  });
+
+  it("forgives typos: a word the code never uses matches the code's words it's a slip of", () => {
+    expect(ids("how are notes svaed")).toContain("src/main.ts#saveNote");
+    expect(ids("where is saveNote")).toEqual(ids("where is saveNote")); // real words are left alone
+  });
+});
 
 describe("asking for a flow", () => {
   it("starts where the judge says and follows what belongs, step by step", async () => {

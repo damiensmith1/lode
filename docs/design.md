@@ -614,8 +614,9 @@ workflow; the graph supplies candidates; Jev judges them:
 
 1. **Route.** A Choice judgment picks the kind of question (how X works,
    what breaks, where X is handled, what calls X, …).
-2. **Start.** Lode finds candidate symbols (name search, entry points,
-   changed symbols); Jev scores each one's relevance to the question.
+2. **Start.** Lode finds candidate symbols (a text search over all the
+   code, or the changed symbols); Jev scores each one's relevance to the
+   question.
 3. **Follow.** From the best starts, lode walks the graph in the routed
    direction (callees, callers, or downstream of changes); Jev judges
    whether each next symbol belongs, within a step budget (about 5-15
@@ -664,14 +665,14 @@ comparable); it doesn't generate (notes are built by code).
 **The pipeline, in 2-4 requests:**
 
 1. **Route + start** (one request). Code builds a shortlist of up to ~200
-   candidate symbols cheaply: lexical match of the question's words
-   against names, file paths and first doc-comment lines; entry points;
-   for change questions, the changed symbols. Each is tagged `S017|
+   candidate symbols cheaply: a text search (BM25) of the question's
+   words over every symbol's name, path, comment and code; for change
+   questions, the changed symbols. Each is tagged `S017|
    addTab (function) hosts/app/main.ts:96 — addTab(request, at)`. State:
    `{ question, candidates }`. Questions: a Choice routing the question
    (how X works / what breaks / where X is handled / what calls X / what
    changed / other); a Choice over the candidate ids for the best place
-   to start; a Noul per top-30 candidate for "is this about the
+   to start; a Noul per candidate for "is this about the
    question?" (the re-ranking pattern), and a Noul for "does anything here
    answer it?" so an unanswerable question says so instead of guessing.
 2. **Follow** (one request per hop, two or three hops). From the chosen
@@ -693,8 +694,29 @@ comparable); it doesn't generate (notes are built by code).
 **As built** (`src/ask`): `askFlow(question, queries, judge)` returns a
 `FlowPlan` (route, cards with a note and a step: 0 for where to start,
 then each hop), typically in 2-3 requests and 0.3-0.6s. Candidates are
-top-level declarations and methods, matched on name and path words
-(words that exactly name a symbol count most); utilities (12+ callers, or
+the top 40 top-level declarations and methods by a text search (BM25)
+over everything about each symbol: its name (counted most), path, the
+comment above it and its code, Porter-stemmed, English function words
+ignored, and a symbol the question names exactly first. A question word
+the code never uses is taken as a typo and matches the code's words
+within an edit (two for long words; a swapped pair is one edit), counting
+a little less. Jev judges all 40 in the first request, each shown with
+its comment and first lines rather than a name and one line (`def
+process` is too little to judge).
+
+Measured with `eval/` (questions over glance, lode, keepr, sinatra and
+rubygems.org, each run twice; scored on the start and on how much of the
+expected answer is there): on 25 questions worded like the code,
+name-only matching scored 18.2 and the text search 21.4 (starts right
+70% → 84%); adding 9 questions with typos and synonyms (34 in all), the
+text search scored 24.0 and with typo matching 27.7, all five typo
+questions right ("acount balence", "tempaltes renderd"), at the same
+0.4s and 2 requests. True synonyms are still missed ("explain the
+ledger" in code that says journal, posting and account; "voice typing"
+for dictation). A crawl of the project judged by Jev (branch
+`ask-crawl`) reached some of those but scored 26.8 overall at three
+times the cost, mostly by picking worse starts; it's kept there for the
+next attempt at synonyms. Utilities (12+ callers, or
 one- or two-letter names) need a 0.9 noul to get in, others 0.6; 12 cards
 and 2 hops at most ("where" follows 1). The service's `ask` method uses
 `options.judge`, or Jev when `TYPESAFE_API_KEY` is set (the CLI loads

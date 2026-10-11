@@ -1,3 +1,4 @@
+import { stemmer as porter } from "stemmer";
 import type { Node } from "../schema/index.js";
 import type { Queries } from "../query/index.js";
 import type { FlowPlan, FlowRoute, NodeRef } from "../query/types.js";
@@ -26,44 +27,117 @@ const ROUTES: Record<FlowRoute, string> = {
   other: "None of these: not a question about this code",
 };
 
-const STOP = new Set(
-  "show me how we our the a an of to in on for and or is are was be do does did what which who whom where when why with from this that these those it its into most likely can could would will should code work works working get gets made make makes use uses used about all any some there here i you".split(" "),
+// English function words: in a small project's comments "the" can be rare
+// enough to look meaningful. Only grammar: no words about code or intent.
+const FUNCTION_WORDS = new Set(
+  "the a an and or but of to in on at by for with from into onto as is are was were be been being am do does did doing has have had having it its this that these those there here what which who whom whose when where why how than then so if not no nor can could would should will shall may might must me my we our us you your he she they them their i".split(" "),
 );
 
-// Symbols a question names or is about, by words alone: names and file
-// paths matching the question's words (a word that is a symbol's exact
-// name counts most), top-level declarations and methods (not callbacks).
-// Deterministic; the first step of asking, and a question's seeds when no
-// model is used.
-export function lexicalCandidates(question: string, queries: Queries, limit = 120): NodeRef[] {
+// Symbols a question is about, by its words, over everything about each
+// symbol: its name, path, doc comment and code (BM25: a word counts more
+// the rarer it is in the project). A symbol the question names
+// exactly ("validate_postings", "showAll") comes first. Classes, functions,
+// methods and top-level values; not files, nor what's nested in a function.
+// Deterministic; the first step of asking (Jev judges these), and a
+// question's seeds when no model is used.
+export function lexicalCandidates(question: string, queries: Queries, limit = 40): NodeRef[] {
   const g = queries.graph();
-  const words = tokens(question).filter((w) => !STOP.has(w));
-  const aboutTests = /\btests?\b|\bspecs?\b/i.test(question);
-  // Words in the question that look like code ("showAll", "read_config")
-  // and so may be a symbol's exact name; plain words ("built") aren't.
-  const named = new Set((question.match(/[A-Za-z_$][\w$]*/g) ?? []).filter((w) => /[a-z][A-Z]|[_$\d]/.test(w)));
+  const index = indexOf(queries);
+  // Each word, or if the code never uses it (a typo: "balence",
+  // "tempaltes"), the code's words it's a slip of, counting a little less.
+  const words = [...new Set(tokens(question).filter((w) => !FUNCTION_WORDS.has(w)).map(stem))].flatMap((w) => (index.df.has(w) ? [{ w, weight: 1 }] : nearWords(w, index).map((n) => ({ w: n, weight: 0.8 }))));
+  const named = new Set((question.match(/[A-Za-z_$][\w$?!]*/g) ?? []).filter((w) => /[a-z][A-Z]|[_$\d]|[?!]$/.test(w)));
+  const scored: { node: Node; score: number }[] = [];
+  for (const doc of index.docs) {
+    let score = named.has(doc.node.name) && doc.node.name.length > 2 ? 1000 : 0;
+    for (const { w, weight } of words) {
+      const f = doc.tf.get(w);
+      if (!f) continue;
+      const df = index.df.get(w)!;
+      score += weight * Math.log(1 + (index.docs.length - df + 0.5) / (df + 0.5)) * ((f * 2.2) / (f + 1.2 * (0.25 + 0.75 * (doc.length / index.avg))));
+    }
+    if (score > 0) scored.push({ node: doc.node, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.node.id.length - b.node.id.length);
+  return scored.slice(0, limit).map((s) => queries.ref(s.node));
+}
+
+// The code's words within one edit of `word` (two for a long word; a
+// swapped pair of letters is one edit), at most a few, the commonest first.
+// Short words are left alone: "wrk" is too close to too much.
+function nearWords(word: string, index: WordIndex): string[] {
+  const max = word.length >= 8 ? 2 : word.length >= 4 ? 1 : 0;
+  if (!max) return [];
+  const near: string[] = [];
+  for (const term of index.df.keys()) if (Math.abs(term.length - word.length) <= max && term.length >= 3 && edits(word, term, max) <= max) near.push(term);
+  return near.sort((a, b) => index.df.get(b)! - index.df.get(a)!).slice(0, 3);
+}
+
+// Edit distance with transpositions (optimal string alignment), giving up
+// past `max`.
+function edits(a: string, b: string, max: number): number {
+  let prev2: number[] = [];
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let d = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d = Math.min(d, prev2[j - 2] + 1);
+      row.push(d);
+      best = Math.min(best, d);
+    }
+    if (best > max) return best;
+    prev2 = prev;
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+interface WordIndex {
+  docs: { node: Node; tf: Map<string, number>; length: number }[];
+  df: Map<string, number>;
+  avg: number;
+}
+
+// Built once per graph (a new graph after an update gets a new one).
+const indexes = new WeakMap<object, WordIndex>();
+
+function indexOf(queries: Queries): WordIndex {
+  const g = queries.graph();
+  const hit = indexes.get(g);
+  if (hit) return hit;
   const nested = (n: Node) => {
     for (let p = n.parent ? g.node(n.parent) : undefined; p; p = p.parent ? g.node(p.parent) : undefined) if (p.kind === "callable") return true;
     return false;
   };
-  const scored: { node: NodeRef; score: number }[] = [];
+  const docs: WordIndex["docs"] = [];
   for (const n of g.allNodes()) {
     if (n.external || !n.loc || n.kind === "block" || n.id === n.loc.file || nested(n)) continue;
     // A class's fields aren't where to start; its class or methods are.
     if (n.kind === "value" && n.parent && n.parent !== n.loc.file) continue;
-    // Nor is test code, unless the question is about tests.
-    if (!aboutTests && /(^|\/)(tests?|__tests__|specs?)\/|\.(test|spec)\.[a-z]+$/i.test(n.loc.file)) continue;
-    const name = tokens(n.name);
-    const file = tokens(n.loc.file);
-    let score = named.has(n.name) && n.name.length > 2 ? 12 : 0;
-    for (const w of words) {
-      if (name.some((t) => similar(t, w))) score += 3;
-      else if (file.some((t) => similar(t, w))) score += 1;
-    }
-    if (score > 0) scored.push({ node: queries.ref(n), score: score + (n.kind === "callable" ? 0.5 : 0) });
+    const tf = new Map<string, number>();
+    for (const w of tokens(symbolText(queries, n, n.kind === "callable" ? 80 : 20)).map(stem)) tf.set(w, (tf.get(w) ?? 0) + 1);
+    // The name counts most: it's what the symbol is (once in its code, three more times here).
+    for (const w of tokens(n.name).map(stem)) tf.set(w, (tf.get(w) ?? 0) + 3);
+    docs.push({ node: n, tf, length: [...tf.values()].reduce((a, b) => a + b, 0) });
   }
-  scored.sort((a, b) => b.score - a.score || a.node.id.length - b.node.id.length);
-  return scored.slice(0, limit).map((s) => s.node);
+  const df = new Map<string, number>();
+  for (const d of docs) for (const w of d.tf.keys()) df.set(w, (df.get(w) ?? 0) + 1);
+  const index = { docs, df, avg: docs.reduce((a, d) => a + d.length, 0) / Math.max(1, docs.length) };
+  indexes.set(g, index);
+  return index;
+}
+
+// A symbol as text: its path, the comment above it, and its first `lines`
+// lines of code.
+function symbolText(queries: Queries, n: Node, lines: number): string {
+  const source = queries.linesOf(n.loc!.file) ?? [];
+  let from = n.loc!.line - 1;
+  while (from > 0 && /^\s*(#|\/\/|\*|\/\*)/.test(source[from - 1] ?? "")) from--;
+  const to = Math.min(n.loc!.endLine ?? n.loc!.line, n.loc!.line - 1 + lines);
+  return [n.loc!.file, ...source.slice(from, to)].join("\n");
 }
 
 export async function askFlow(question: string, queries: Queries, judge: Judge, options: AskOptions = {}): Promise<FlowPlan> {
@@ -90,15 +164,17 @@ export async function askFlow(question: string, queries: Queries, judge: Judge, 
     ms: Date.now() - started,
   });
 
-  // 1. Candidates, cheaply (see lexicalCandidates).
-  const shortlist = lexicalCandidates(question, queries, 120);
+  const shortlist = lexicalCandidates(question, queries, 40);
   const ids = shortlist.map((_, i) => `S${i + 1}`);
-  const RELEVANCE = 30; // nouls for the best lexical matches
+  const candidate = (n: NodeRef) => {
+    const text = symbolText(queries, g.node(n.id)!, 8).split("\n").slice(1).map((l) => l.trim()).filter(Boolean).join(" ⏎ ");
+    return `${n.name} (${n.kind === "callable" ? "function" : n.kind}) ${n.id} — ${text.slice(0, 400)}`;
+  };
 
   // 2. Route + start, in one request (speculative: the start questions are
   // used only for routes that need them).
   const first = await ask(
-    { question, candidates: shortlist.map((n, i) => `${ids[i]}| ${describe(n)}`) },
+    { question, candidates: shortlist.map((n, i) => `${ids[i]}| ${candidate(n)}`) },
     {
       route: { type: "choice", instructions: "What kind of question is `question`, about this codebase?", criteria: ROUTES },
       ...(shortlist.length && {
@@ -110,7 +186,7 @@ export async function askFlow(question: string, queries: Queries, judge: Judge, 
         },
       }),
       ...Object.fromEntries(
-        shortlist.slice(0, RELEVANCE).map((_, i) => [
+        shortlist.map((_, i) => [
           `rel${i}`,
           {
             type: "noul",
@@ -127,7 +203,7 @@ export async function askFlow(question: string, queries: Queries, judge: Judge, 
   if (route === "other") return done(route, [], "That doesn't look like a question about this code.");
   if (!shortlist.length) return done(route, [], "Nothing in the code matches those words.");
 
-  const relevance = new Map(shortlist.slice(0, RELEVANCE).map((n, i) => [n.id, (first[`rel${i}`] as Extract<JudgeAnswer, { type: "noul" }>).noul]));
+  const relevance = new Map(shortlist.map((n, i) => [n.id, (first[`rel${i}`] as Extract<JudgeAnswer, { type: "noul" }>).noul]));
   const startChoice = first.start as Extract<JudgeAnswer, { type: "choice" }>;
   const answerable = (first.answerable as Extract<JudgeAnswer, { type: "noul" }>).noul;
   const best = [...relevance.entries()].sort((a, b) => b[1] - a[1]);
@@ -278,11 +354,5 @@ function tokens(text: string): string[] {
     .filter((w) => w.length >= 3);
 }
 
-// The same word, give or take an ending (tab / tabs, create / creating).
-function similar(a: string, b: string): boolean {
-  if (a === b) return true;
-  const stem = (w: string) => w.replace(/(ies|es|s|ing|ed|er)$/, "");
-  const sa = stem(a);
-  const sb = stem(b);
-  return sa.length >= 3 && (sa === sb || (sa.length >= 4 && sb.length >= 4 && (sa.startsWith(sb) || sb.startsWith(sa))));
-}
+// A word without its ending (Porter: save, saved, saving, saves → save).
+const stem = (w: string) => porter(w);
