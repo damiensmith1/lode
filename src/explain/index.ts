@@ -247,7 +247,10 @@ export async function explain(request: ExplainRequest, queries: Queries, model: 
       case "expand": {
         const k = cardOf(input.card);
         if (!k) return `No card ${String(input.card)} on the canvas.`;
-        return act({ kind: "expand", card: k }, `expanded ${nameOf(k)}`);
+        // What's now on the canvas goes back to the model too: the card's
+        // whole code, and what it leads to.
+        const done = act({ kind: "expand", card: k }, `expanded ${nameOf(k)}`);
+        return `${done}\n\n${(await contextFor({ seeds: [base(k)], hops: 1, budget: 3000 }, queries)).markdown}`;
       }
       case "open_fold":
       case "close_fold": {
@@ -256,7 +259,13 @@ export async function explain(request: ExplainRequest, queries: Queries, model: 
         const r = foldOf(k, Number(input.line));
         if (!r) return `${nameOf(k)} has no fold starting on line ${String(input.line)}.`;
         const open = block.name === "open_fold";
-        return act({ kind: "fold", card: k, start: r.start, end: r.end, open }, `${open ? "opened" : "closed"} lines ${r.start}–${r.end} of ${nameOf(k)}`);
+        const done = act({ kind: "fold", card: k, start: r.start, end: r.end, open }, `${open ? "opened" : "closed"} lines ${r.start}–${r.end} of ${nameOf(k)}`);
+        if (!open) return done;
+        // The lines it revealed, so the model can read what it opened.
+        const file = g.node(base(k))?.loc?.file;
+        const source = file ? (queries.linesOf(file) ?? []) : [];
+        const shown = source.slice(r.start - 1, Math.min(r.end, r.start + 149)).map((l, i) => `${String(r.start + i).padStart(4)}  ${l}`);
+        return `${done}\n\n\`\`\`\n${shown.join("\n")}${r.end > r.start + 149 ? `\n… (${r.end - r.start - 149} more lines: read the symbol for them)` : ""}\n\`\`\``;
       }
       case "close_cards": {
         const { found, missing } = cardsOf(input.cards);
