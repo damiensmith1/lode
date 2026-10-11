@@ -76,6 +76,7 @@ export interface RubyFacts {
   calls: RubyCall[];
   assigns: RubyAssign[];
   requires: string[];
+  requireLines?: { path: string; line: number }[]; // each require, where it is
   regions: Region[];
 }
 
@@ -108,6 +109,7 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
   const calls: RubyCall[] = [];
   const assigns: RubyAssign[] = [];
   const requires: string[] = [];
+  const requireLines: { path: string; line: number }[] = [];
   const fileDecl: RubyDecl = { id: file, name: file.split("/").pop()!, kind: "file", path: "", parent: null, line: 1, endLine: lines.length };
   decls.push(fileDecl);
   ids.add(file);
@@ -257,7 +259,11 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
       call.args = argsNode ? argsNode.namedChildren.filter((a): a is SyntaxNode => !!a).map(argOf) : [];
       if (name === "require" || name === "require_relative") {
         const target = call.args[0];
-        if (target?.t === "str") requires.push(name === "require_relative" ? relative(file, target.v) : target.v);
+        if (target?.t === "str") {
+          const path = name === "require_relative" ? relative(file, target.v) : target.v;
+          requires.push(path);
+          requireLines.push({ path, line: call.line });
+        }
       }
     }
     if (blockNode) {
@@ -335,7 +341,7 @@ export function extractRuby(tree: Tree, file: string, text: string): RubyFacts {
 
   visitChildren(tree.rootNode, { decl: file, owner: "", nesting: [], singleton: false, locals: new Set() });
 
-  return { file, decls, calls, assigns, requires, regions: regionsOf(tree.rootNode, file, lines) };
+  return { file, decls, calls, assigns, requires, requireLines, regions: regionsOf(tree.rootNode, file, lines) };
 }
 
 // `User.new(…)`, `User.find(…)`, `Admin::User` → { const, method }.

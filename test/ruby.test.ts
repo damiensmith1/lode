@@ -140,7 +140,7 @@ describe("ruby tools and sinatra", () => {
 describe("choosing plugins", () => {
   it("a TS project gets the TS plugin as before; a Ruby one, Ruby with Rails", async () => {
     expect(await pluginFor("test/fixtures/ipc")).toBe(tsPlugin);
-    expect((await pluginFor(fixture)).name).toBe("ruby+rails+sinatra+ruby-tools");
+    expect((await pluginFor(fixture)).name).toBe("ruby+rails+sinatra+ruby-tools+web"); // its stylesheets: the web plugin
   });
 
   it("re-indexes only what changed", async () => {
@@ -151,5 +151,12 @@ describe("choosing plugins", () => {
     appendFileSync(path.join(copy, "app/models/user.rb"), "\nclass User\n  def welcome\n    activate!\n  end\nend\n");
     expect(s.refresh()).toEqual(["app/models/user.rb"]);
     expect(arrows(s).some((a) => /User\.welcome(~\d+)? → User\.activate! \(exact\)/.test(a))).toBe(true);
+  });
+
+  it("imports: require_relative links file to file; a gem's require doesn't", () => {
+    const runner = queries.block("lib/runner.rb")!;
+    expect(runner.links.filter((l) => l.kind === "imports").map((l) => `${l.line} ${l.target.id}`)).toEqual(["1 lib/greeter.rb"]);
+    expect(queries.block("lib/greeter.rb")!.callers).toContainEqual(expect.objectContaining({ kind: "imports", node: expect.objectContaining({ id: "lib/runner.rb" }) }));
+    expect(queries.block("app.rb")!.links.filter((l) => l.kind === "imports")).toEqual([]); // require "sinatra": a gem
   });
 });

@@ -61,6 +61,7 @@ export interface TsFacts {
   refs: RefFact[];
   channels: ChannelEndpoint[];
   imports: Record<string, string[]>; // file -> project files it imports
+  importLines: { from: string; to: string; line: number }[]; // each import, where it is
   regions: Region[];
 }
 
@@ -79,6 +80,7 @@ export interface FileFacts {
   selectors?: { selector: string; id: string }[];
   templateTags?: { from: string; tag: string; line: number }[];
   imports: string[]; // project files this one imports (relative paths)
+  importLines?: { to: string; line: number }[]; // each import statement, and its line
   decls: DeclFact[];
   calls: CallFact[];
   channelFacts: ChannelFact[];

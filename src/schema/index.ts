@@ -10,7 +10,10 @@ export type NodeKind =
   | "value" // module-level variables, properties
   | "block"; // steps inside a callable (not produced yet)
 
-export type EdgeKind = "calls" | "references" | "flows";
+// imports: a file depending on another (import, require, a stylesheet
+// link…), file to file, at the line that does it. Kept apart from calls and
+// flows: it says what a file needs, not what runs.
+export type EdgeKind = "calls" | "references" | "flows" | "imports";
 
 // How an edge was established. Compiler facts are exact; derived matches
 // may be patterns; model guesses (later) are inferred.

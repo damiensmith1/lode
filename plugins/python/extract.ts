@@ -51,6 +51,8 @@ export interface PyImport {
   local: string; // the name it binds here
   module: string; // as written: "pkg.sub", ".models", "..core"
   name?: string; // from x import name; absent for import x
+  path?: string; // import a.b.c: the whole module (local is just "a")
+  line?: number; // where the import is
 }
 
 export type PyReceiver =
@@ -122,8 +124,9 @@ export function extractPython(tree: Tree, file: string, text: string): PyFacts {
       case "import_statement": {
         for (const n of node.namedChildren) {
           if (!n) continue;
-          if (n.type === "dotted_name") imports.push({ local: n.text.split(".")[0], module: n.text.split(".")[0] });
-          else if (n.type === "aliased_import") imports.push({ local: n.childForFieldName("alias")!.text, module: n.childForFieldName("name")!.text });
+          const line = lineOf(node);
+          if (n.type === "dotted_name") imports.push({ local: n.text.split(".")[0], module: n.text.split(".")[0], path: n.text, line });
+          else if (n.type === "aliased_import") imports.push({ local: n.childForFieldName("alias")!.text, module: n.childForFieldName("name")!.text, line });
         }
         return;
       }
@@ -131,10 +134,10 @@ export function extractPython(tree: Tree, file: string, text: string): PyFacts {
         const module = node.childForFieldName("module_name")?.text ?? "";
         for (const n of node.childrenForFieldName("name")) {
           if (!n) continue;
-          if (n.type === "dotted_name") imports.push({ local: n.text, module, name: n.text });
-          else if (n.type === "aliased_import") imports.push({ local: n.childForFieldName("alias")!.text, module, name: n.childForFieldName("name")!.text });
+          if (n.type === "dotted_name") imports.push({ local: n.text, module, name: n.text, line: lineOf(node) });
+          else if (n.type === "aliased_import") imports.push({ local: n.childForFieldName("alias")!.text, module, name: n.childForFieldName("name")!.text, line: lineOf(node) });
         }
-        if (node.namedChildren.some((c) => c?.type === "wildcard_import")) imports.push({ local: "*", module, name: "*" });
+        if (node.namedChildren.some((c) => c?.type === "wildcard_import")) imports.push({ local: "*", module, name: "*", line: lineOf(node) });
         return;
       }
       case "assignment": {

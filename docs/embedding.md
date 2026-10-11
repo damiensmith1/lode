@@ -431,7 +431,7 @@ provider's `ChatModel.chat` gets the model id as `model`.
   flow: `canvas`, `board`, `empty`, `card`,
   `card-selected`, `card-header`, `card-title`, `card-meta`, `card-close`,
   `callers`, `caller`, `code`, `line`, `line-number`, `source`, `chips`,
-  `chip`, `chip-calls`, `chip-channel`, `chip-state`, `chip-local`, `fold`,
+  `chip`, `chip-calls`, `chip-channel`, `chip-state`, `chip-local`, `chip-imports`, `fold`,
   `paging`, `paging-button`, `arrows`, `line-removed`, and `host-header`, `host-footer`,
   `host-line` around render hooks' markup.
 - **`host.css`** goes last inside every view's shadow root, for anything

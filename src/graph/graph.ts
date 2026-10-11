@@ -26,6 +26,9 @@ export class Graph {
       push(graph.children, node.parent, node.id);
     }
     for (const edge of data.edges) {
+      // An import of a file no plugin read (a stylesheet in a project
+      // without the web plugin, say) is dropped, not an error.
+      if (edge.kind === "imports" && (!graph.nodes.has(edge.from) || !graph.nodes.has(edge.to))) continue;
       for (const end of [edge.from, edge.to, edge.within, edge.through]) {
         if (end === undefined) continue;
         if (!graph.nodes.has(end)) throw new Error(`${edge.kind} edge references unknown node ${end}`);

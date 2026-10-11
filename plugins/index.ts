@@ -7,7 +7,8 @@ import { railsPack } from "./rails/index.js";
 import { isRubyFile, rubyPlugin } from "./ruby/index.js";
 import { rubyToolsPack } from "./ruby-tools/index.js";
 import { sinatraPack } from "./sinatra/index.js";
-import { isPythonFile, pythonPlugin } from "./python/index.js";
+import { isPythonFile, isPythonTemplate, pythonPlugin } from "./python/index.js";
+import { isWebFile, webPlugin } from "./web/index.js";
 import { pythonWebPack } from "./python-web/index.js";
 import { pythonToolsPack } from "./python-tools/index.js";
 
@@ -18,13 +19,16 @@ export { sinatraPack } from "./sinatra/index.js";
 export { pythonPlugin, isPythonFile } from "./python/index.js";
 export { pythonWebPack } from "./python-web/index.js";
 export { pythonToolsPack } from "./python-tools/index.js";
+export { webPlugin, isWebFile } from "./web/index.js";
 export type { PyPack, PythonProject } from "./python/index.js";
 export type { RubyPack, RubyProject } from "./ruby/index.js";
 export { treeSitterPlugin, loadParser, type TreeSitterLanguage } from "./treesitter/index.js";
 
 // The plugin for a project, from what's in it: TypeScript/JavaScript (a
 // tsconfig/jsconfig, or .ts/.js files), Ruby (with Rails where Rails is),
-// Python (with its web frameworks where they are), or several at once. A TS-only project gets tsPlugin exactly as before.
+// Python (with its web frameworks where they are), web files (HTML and
+// stylesheets, for what they import), or several at once. A TS-only
+// project gets tsPlugin exactly as before.
 export async function pluginFor(projectPath: string): Promise<LanguagePlugin> {
   const absolute = path.resolve(projectPath);
   const root = statSync(absolute).isDirectory() ? absolute : path.dirname(absolute);
@@ -42,6 +46,9 @@ export async function pluginFor(projectPath: string): Promise<LanguagePlugin> {
   if (hasTs || (!hasRuby && !hasPython)) plugins.push(tsPlugin);
   if (hasRuby) plugins.push(await rubyPlugin({ packs: [railsPack, sinatraPack, rubyToolsPack] }));
   if (hasPython) plugins.push(await pythonPlugin({ packs: [pythonWebPack, pythonToolsPack] }));
+  // Django's templates are Python's (they link to views and each other).
+  const skip = hasPython ? isPythonTemplate : undefined;
+  if (files.some((f) => isWebFile(f) && !skip?.(f))) plugins.push(webPlugin({ skip }));
   return plugins.length === 1 ? plugins[0] : combinePlugins(plugins);
 }
 

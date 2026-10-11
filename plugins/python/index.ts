@@ -15,17 +15,17 @@ const SKIP = /(^|\/)(\.venv|venv|env|\.tox|\.nox|site-packages|node_modules|buil
 
 export const isPythonFile = (file: string) => file.endsWith(".py") && !SKIP.test(file);
 // Django / Jinja templates (in a templates/ folder) belong to the Python project too.
-const isTemplate = (file: string) => /(^|\/)templates\/.+\.(html|txt|xml|jinja2?|j2)$/.test(file) && !SKIP.test(file);
+export const isPythonTemplate = (file: string) => /(^|\/)templates\/.+\.(html|txt|xml|jinja2?|j2)$/.test(file) && !SKIP.test(file);
 
 export async function pythonPlugin(options: { packs?: PyPack[] } = {}): Promise<LanguagePlugin> {
   const packs = options.packs ?? [];
   return treeSitterPlugin<PyFacts>({
     name: packs.length ? `python+${packs.map((p) => p.name).join("+")}` : "python",
-    version: 5,
+    version: 6,
     grammar: "python",
-    owns: (file) => isPythonFile(file) || isTemplate(file),
-    source: (file, text) => (isTemplate(file) ? "" : text), // a template isn't parsed as Python
-    extract: (tree, file, text, raw) => (isTemplate(file) ? extractTemplate(file, raw) : extractPython(tree, file, text)),
+    owns: (file) => isPythonFile(file) || isPythonTemplate(file),
+    source: (file, text) => (isPythonTemplate(file) ? "" : text), // a template isn't parsed as Python
+    extract: (tree, file, text, raw) => (isPythonTemplate(file) ? extractTemplate(file, raw) : extractPython(tree, file, text)),
     link: (facts, root) => linkPython(facts, root, packs),
   });
 }

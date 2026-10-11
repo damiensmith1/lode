@@ -242,7 +242,8 @@ export async function askFlow(question: string, queries: Queries, judge: Judge, 
         }
       } else {
         for (const c of block.callers) {
-          if (c.node.external || kept.has(c.node.id) || next.has(c.node.id)) continue;
+          // Who imports a file isn't a step in what runs.
+          if (c.kind === "imports" || c.node.external || kept.has(c.node.id) || next.has(c.node.id)) continue;
           next.set(c.node.id, { node: c.node, via: from, line: lineAt(c.node.file, c.line) });
         }
       }
@@ -291,7 +292,7 @@ export async function askFlow(question: string, queries: Queries, judge: Judge, 
     for (const { s } of changed) {
       const block = queries.block(s.node.id);
       if (!block) continue;
-      const users = [...block.callers.map((c) => ({ node: c.node, line: c.line })), ...block.links.filter((l) => l.label === "read by").map((l) => ({ node: l.target, line: 0 }))];
+      const users = [...block.callers.filter((c) => c.kind !== "imports").map((c) => ({ node: c.node, line: c.line })), ...block.links.filter((l) => l.label === "read by").map((l) => ({ node: l.target, line: 0 }))];
       const inside = (id: string) => {
         for (let n = g.node(id); n; n = n.parent ? g.node(n.parent) : undefined) if (n.id === s.node.id) return true;
         return false;

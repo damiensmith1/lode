@@ -70,4 +70,14 @@ describe("typescript web frameworks", () => {
     // A router mounted in a router mounted at /api, across files: the full path.
     expect(entries()).toContain("routes: GET /api/articles/:slug");
   });
+
+  it("imports: a file links to the files it imports, and lists who imports it", () => {
+    const page = queries.block("next/app/page.tsx")!;
+    const imported = page.links.filter((l) => l.kind === "imports").map((l) => `${l.line} ${l.target.id}`);
+    expect(imported).toEqual(expect.arrayContaining(["3 next/components/card.tsx", "4 next/lib/paths.ts"])); // through the @/ alias
+    const card = queries.block("next/components/card.tsx")!;
+    expect(card.callers).toContainEqual(expect.objectContaining({ kind: "imports", line: 3, node: expect.objectContaining({ id: "next/app/page.tsx" }) }));
+    // Not calls: imports stay out of call flows.
+    expect(links("calls").some((l) => l.startsWith("next/app/page.tsx →"))).toBe(false);
+  });
 });

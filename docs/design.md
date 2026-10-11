@@ -18,7 +18,7 @@ else (query layer, views, MCP, exports) is a consumer of the graph.
                                     ▲
 2. NORMALIZE     schema: nodes {container, callable, type, value, block}
                          containment: node.parent (a tree)
-                         edges {calls, references, flows}
+                         edges {calls, references, flows, imports}
                          every edge: data type?, confidence, location
                                     ▲  raw facts
 1. INGEST        per-language plugin (bought + thin adapter)
@@ -858,6 +858,33 @@ service's `models` option limits it, and its `explainModels` method lists
 them for a picker).
 
 ## Languages
+
+**File dependencies (`imports` edges).** A file depending on another, file
+to file, at the line that does it: TS/JS imports, re-exports, `require` and
+dynamic `import()` (resolved by the checker, so path aliases and each file's
+nearest tsconfig count; a stylesheet by path), Python `import` / `from …
+import` (a submodule when the name is one, else the package), Ruby
+`require_relative` and `require` of the project's own lib/ (never a gem),
+and the web plugin's files (below). Rails views' `stylesheet_link_tag` /
+`javascript_include_tag` resolve to app/assets/stylesheets, app/javascript
+or the builds. An import of a file no plugin read (an image) is dropped by
+the graph rather than an error, so plugins can point at each other's files.
+Kept apart from calls and flows on purpose: a file card shows them ("imported
+by", a chip on each import line, LinkKind `imports`), and LLM context words
+them as imports, but **/** answers, expand, impact and graph overviews
+don't follow them; they say what a file needs, not what runs. (Django's
+`{% extends %}` / `{% include %}` and Rails' `render` of partials stay
+calls: a template rendering another.)
+
+**Web files** (`webPlugin`, `plugins/web`): HTML, CSS, SCSS, Sass and Less
+files become file nodes, with no parser: their tags and at-rules are all a
+file's dependencies need. HTML: `<script src>`, `<link href>`, `<iframe
+src>` and `<a href>` to another page; CSS: `@import` (and `url()` in it);
+SCSS/Sass: `@use` and `@forward`, with Sass's partials (`_x.scss`,
+`x/_index.scss`). Targets are project files, relative or from the root
+(also tried under public/ and static/); URLs, `sass:` modules and template
+placeholders are left out. `pluginFor` adds it when a project has such
+files; Django's templates stay the Python plugin's.
 
 A language is a plugin; everything above the graph (queries, views, ask,
 context, explain, MCP) is language-agnostic. `pluginFor(folder)` picks

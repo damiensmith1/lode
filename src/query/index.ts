@@ -378,6 +378,7 @@ export class Queries {
     // writers of a value, users of a type.
     const leadsHere = (e: Edge): { kind: LinkKind; label?: string } | null => {
       if (e.kind === "calls") return { kind: "calls" };
+      if (e.kind === "imports") return { kind: "imports" }; // a file: who imports it
       if (e.kind === "flows" && e.via) return e.reply ? null : { kind: "channel", label: e.via.key };
       if (e.kind !== "references") return null;
       if (e.access === "read" && node.kind === "callable") return { kind: "calls", label: "passes it" };
@@ -416,6 +417,7 @@ export class Queries {
         const to = g.node(e.to);
         if (!to || to.external || !e.loc || e.loc.file !== file || to.id === id) continue;
         if (e.kind === "calls") add({ line: e.loc.line, kind: "calls", target: this.ref(to) });
+        else if (e.kind === "imports") add({ line: e.loc.line, kind: "imports", target: this.ref(to) });
         else if (e.kind === "flows" && e.via && !e.reply) add({ line: e.loc.line, kind: "channel", target: this.ref(to), label: e.via.key });
         else if (e.kind === "references" && e.access === "write" && to.kind === "value") add({ line: e.loc.line, kind: "state", target: this.ref(to), label: "writes" });
         else if (e.kind === "references" && e.access === "read" && to.kind === "callable") add({ line: e.loc.line, kind: "calls", target: this.ref(to), label: "passes" });

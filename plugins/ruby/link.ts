@@ -497,6 +497,15 @@ export function linkRuby(cached: RubyFacts[], root: string, packs: RubyPack[] = 
       if (hit) project.addEdge(call.from, hit.to, f.file, call.line, hit.confidence);
     }
   }
+  // Requires, file to file: require_relative by path; require "x" from
+  // the project's lib/ (or as written), never a gem's.
+  for (const f of facts) {
+    for (const r of f.requireLines ?? []) {
+      const rb = r.path.endsWith(".rb") ? r.path : `${r.path}.rb`;
+      const to = [rb, `lib/${rb}`].find((c) => project.files.has(c));
+      if (to && to !== f.file) project.edges.push({ kind: "imports", from: f.file, to, confidence: "exact", loc: { file: f.file, line: r.line } });
+    }
+  }
   for (const p of active) p.link?.(project);
 
   const nodes: Node[] = [];
@@ -525,7 +534,9 @@ export function linkRuby(cached: RubyFacts[], root: string, packs: RubyPack[] = 
   const seen = new Set<string>();
   const edges = project.edges.filter((e) => {
     const key = `${e.kind}|${e.from}|${e.to}|${e.loc?.line}`;
-    if (seen.has(key) || !project.decls.has(e.from) || !project.decls.has(e.to)) return false;
+    // (An import may point at another plugin's file, a stylesheet: the
+    // graph keeps it if that file is there.)
+    if (seen.has(key) || !project.decls.has(e.from) || (e.kind !== "imports" && !project.decls.has(e.to))) return false;
     seen.add(key);
     return true;
   });

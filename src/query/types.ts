@@ -15,7 +15,7 @@ export interface NodeRef {
 }
 
 // How two nodes are connected, as views draw it.
-export type LinkKind = "calls" | "channel" | "state" | "local";
+export type LinkKind = "calls" | "channel" | "state" | "local" | "imports";
 
 export interface MapGroup {
   node: NodeRef;

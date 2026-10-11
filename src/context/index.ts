@@ -126,7 +126,7 @@ export async function contextFor(request: ContextRequest, queries: Queries, judg
       if (!block) continue;
       if (direction !== "up") {
         for (const l of block.links) {
-          if (l.target.external || l.label === "read by" || found.has(l.target.id) || !g.node(l.target.id) || l.target.id === l.target.file) continue;
+          if (l.kind === "imports" || l.target.external || l.label === "read by" || found.has(l.target.id) || !g.node(l.target.id) || l.target.id === l.target.file) continue;
           // State it writes: module-level state, not some class's fields.
           if (l.kind === "state" && g.node(l.target.id)!.parent !== l.target.file) continue;
           found.set(l.target.id, { distance: hop, via: `called from ${block.node.name}: \`${lineAt(block.node.file, l.line)}\`` });
@@ -135,7 +135,7 @@ export async function contextFor(request: ContextRequest, queries: Queries, judg
         }
       }
       if (direction !== "down") {
-        const users = [...block.callers.map((c) => ({ node: c.node, line: c.line, kind: c.kind as string })), ...block.links.filter((l) => l.label === "read by").map((l) => ({ node: l.target, line: l.target.line ?? 0, kind: "state" }))];
+        const users = [...block.callers.filter((c) => c.kind !== "imports").map((c) => ({ node: c.node, line: c.line, kind: c.kind as string })), ...block.links.filter((l) => l.label === "read by").map((l) => ({ node: l.target, line: l.target.line ?? 0, kind: "state" }))];
         for (const u of users) {
           if (u.node.external || found.has(u.node.id) || inside(u.node.id, block.node.id)) continue;
           found.set(u.node.id, { distance: hop, via: `uses ${block.node.name}: \`${lineAt(u.node.file, u.line)}\`` });
@@ -279,7 +279,7 @@ function baseId(id: string): string {
 
 function header(title: string, count: number, edges: ContextResult["edges"], g: ReturnType<Queries["graph"]>, changed: boolean): string {
   const name = (id: string) => g.node(baseId(id))?.name ?? baseId(id);
-  const verb = (k: string) => (k === "channel" ? "sends to" : k === "state" ? "shares state with" : "calls");
+  const verb = (k: string) => (k === "channel" ? "sends to" : k === "state" ? "shares state with" : k === "imports" ? "imports" : "calls");
   return [
     `# Context: ${title}`,
     "",

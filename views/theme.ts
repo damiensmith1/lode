@@ -106,11 +106,13 @@ select { font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid var
 .k-local { --k: var(--lode-local); }
 .k-channel { --k: var(--lode-channel); }
 .k-state { --k: var(--lode-state); }
+.k-imports { --k: var(--lode-faint); }
 .tag { font-size: 11px; font-family: var(--lode-mono); }
 .tag.k-channel { color: var(--lode-channel-text); }
 .tag.k-state { color: var(--lode-state); }
 .tag.k-local { color: var(--lode-local); }
 .tag.k-calls { color: var(--lode-faint); }
+.tag.k-imports { color: var(--lode-faint); }
 `;
 
 export const escape = (s: unknown) =>
@@ -125,7 +127,7 @@ export function wire(d: string, kind: string, title = ""): string {
   } marker-end="url(#head-${kind})"><title>${escape(title)}</title></path>`;
 }
 
-export const ARROW_DEFS = `<defs>${["calls", "local", "channel", "state"]
+export const ARROW_DEFS = `<defs>${["calls", "local", "channel", "state", "imports"]
   .map(
     (k) =>
       `<marker id="head-${k}" class="k-${k}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="var(--k)"/></marker>`,

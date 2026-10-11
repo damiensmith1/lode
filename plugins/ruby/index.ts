@@ -22,7 +22,7 @@ export async function rubyPlugin(options: { packs?: RubyPack[] } = {}): Promise<
   const packs = options.packs ?? [];
   return treeSitterPlugin<RubyFacts>({
     name: packs.length ? `ruby+${packs.map((p) => p.name).join("+")}` : "ruby",
-    version: 4,
+    version: 5,
     grammar: "ruby",
     owns: isRubyFile,
     source: (file, text) => (file.endsWith(".erb") ? erbToRuby(text) : text), // an ERB template: its Ruby

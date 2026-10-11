@@ -47,6 +47,7 @@ export function mergeFacts(files: FileFacts[]): TsFacts {
     refs: files.flatMap((f) => f.refs),
     regions: files.flatMap((f) => f.regions),
     imports: Object.fromEntries(files.map((f) => [f.file, f.imports])),
+    importLines: files.flatMap((f) => (f.importLines ?? []).map((i) => ({ from: f.file, ...i }))),
     channels: [...resolveEndpoints(files.flatMap((f) => f.channelFacts), calls), ...files.flatMap((f) => f.endpoints ?? [])],
   };
 }
@@ -512,7 +513,7 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
     }
     return {
       file: rel(sf.fileName),
-      imports: importsOf(sf),
+      ...importsOf(sf),
       decls,
       calls,
       channelFacts,
@@ -528,25 +529,39 @@ export function createExtractor(program: ts.Program, project: Project): (sf: ts.
     };
   };
 
-  // Project files this one imports or re-exports from.
-  // Includes CommonJS `require("…")` and dynamic `import("…")`.
-  function importsOf(sf: ts.SourceFile): string[] {
+  // Project files this one imports or re-exports from, and where.
+  // Includes CommonJS `require("…")` and dynamic `import("…")`. Other files
+  // (a stylesheet, `import "./app.css"`) are by path: the graph keeps those
+  // whose file is in it (see the web plugin).
+  function importsOf(sf: ts.SourceFile): { imports: string[]; importLines: { to: string; line: number }[] } {
     const imports = new Set<string>();
-    const add = (spec: ts.Expression | undefined) => {
+    const importLines: { to: string; line: number }[] = [];
+    const add = (spec: ts.Expression | undefined, at: ts.Node) => {
       if (!spec || !ts.isStringLiteralLike(spec)) return;
-      const resolved = ts.resolveModuleName(spec.text, sf.fileName, program.getCompilerOptions(), ts.sys).resolvedModule;
-      if (resolved && projectFiles.has(path.resolve(resolved.resolvedFileName))) imports.add(rel(resolved.resolvedFileName));
+      // The checker's resolution first: it's the program's, each file
+      // against its nearest tsconfig (path aliases included).
+      const mod = checker.getSymbolAtLocation(spec);
+      const declared = mod?.valueDeclaration && ts.isSourceFile(mod.valueDeclaration) ? mod.valueDeclaration.fileName : null;
+      const resolvedName = declared ?? ts.resolveModuleName(spec.text, sf.fileName, program.getCompilerOptions(), ts.sys).resolvedModule?.resolvedFileName;
+      let to: string | null = null;
+      if (resolvedName && projectFiles.has(path.resolve(resolvedName))) {
+        to = rel(resolvedName);
+        imports.add(to);
+      } else if (spec.text.startsWith(".") && /\.(css|scss|sass|less|html?)$/i.test(spec.text)) {
+        to = rel(path.resolve(path.dirname(sf.fileName), spec.text));
+      }
+      if (to && to !== rel(sf.fileName)) importLines.push({ to, line: sf.getLineAndCharacterOfPosition(at.getStart(sf)).line + 1 });
     };
     const walk = (node: ts.Node) => {
-      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier, node);
       else if (ts.isCallExpression(node)) {
         const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
-        if (isRequire || node.expression.kind === ts.SyntaxKind.ImportKeyword) add(node.arguments[0]);
+        if (isRequire || node.expression.kind === ts.SyntaxKind.ImportKeyword) add(node.arguments[0], node);
       }
       ts.forEachChild(node, walk);
     };
     walk(sf);
-    return [...imports];
+    return { imports: [...imports], importLines };
   }
 
   // Arguments that are the caller's own parameters, so wrappers of wrappers

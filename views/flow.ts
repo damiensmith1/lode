@@ -144,6 +144,7 @@ const CSS = `
 .chip.k-calls { color: var(--lode-local); background: color-mix(in srgb, var(--lode-local) 7%, transparent); }
 .chip.k-channel { color: var(--lode-channel-text); background: color-mix(in srgb, var(--lode-channel) 9%, transparent); }
 .chip.k-state { color: var(--lode-state); background: color-mix(in srgb, var(--lode-state) 7%, transparent); }
+.chip.k-imports { color: var(--lode-muted); background: var(--lode-sunken); }
 .arrows { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 2; }
 .hint { padding: 32px; color: var(--lode-muted); }
 `;
@@ -1681,6 +1682,8 @@ export class LodeFlow extends HTMLElement {
     const found = new Map<string, { id: string; line: number; kind: LinkKind }>();
     for (const r of outer) found.set(r.node!.id, { id: r.node!.id, line: r.start, kind: "calls" });
     for (const l of c.block.links) {
+      // What a file imports is a chip to follow, not part of expanding it.
+      if (l.kind === "imports") continue;
       if (l.line < c.range[0] || l.line > c.range[1] || inNested(l.line) || found.has(l.target.id) || l.target.id === c.block.node.id) continue;
       found.set(l.target.id, { id: l.target.id, line: l.line, kind: l.kind });
     }
@@ -2174,12 +2177,15 @@ export class LodeFlow extends HTMLElement {
     }
     const shown = c.allCallers ? b.callers : b.callers.slice(0, MAX_CALLERS);
     const allCalls = b.callers.every((cl) => cl.kind === "calls" && !cl.label);
+    const allImports = b.callers.every((cl) => cl.kind === "imports");
     // Same name from different places (two preloads exposing one API): add the file.
     const nameCount = new Map<string, number>();
     for (const cl of b.callers) nameCount.set(cl.node.name, (nameCount.get(cl.node.name) ?? 0) + 1);
-    const nameOf = (cl: CodeBlock["callers"][number]) => (nameCount.get(cl.node.name)! > 1 ? `${cl.node.name} (${cl.node.file?.split("/").pop()})` : cl.node.name);
+    // Files with one name (two index.ts): their folder tells them apart.
+    const nameOf = (cl: CodeBlock["callers"][number]) =>
+      nameCount.get(cl.node.name)! <= 1 ? cl.node.name : cl.node.id === cl.node.file ? (cl.node.file ?? "").split("/").slice(-2).join("/") : `${cl.node.name} (${cl.node.file?.split("/").pop()})`;
     const open = (id: string) => this.arrows.some((a) => a.from === id && a.to === c.key);
-    return `<div class="callers${c.allCallers ? " all" : ""}" part="callers">${allCalls ? "called by" : "used by"} ${shown
+    return `<div class="callers${c.allCallers ? " all" : ""}" part="callers">${allImports ? "imported by" : allCalls ? "called by" : "used by"} ${shown
       .map(
         (cl) =>
           `<button part="caller" class="caller${this.changedIds.has(cl.node.id) ? " to-changed" : ""}${open(cl.node.id) ? " open" : ""}" data-action="reroot" data-kind="${cl.kind}" data-id="${escape(cl.node.id)}" data-line="${cl.line}" title="${escape(cl.node.id)}">${escape(nameOf(cl))}${

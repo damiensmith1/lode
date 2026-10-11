@@ -122,4 +122,14 @@ describe("python web frameworks", () => {
     expect(s.refresh()).toEqual(["app/repo.py"]);
     expect(arrows(s)).toContain("UserRepo.all → UserRepo.get (inferred)");
   });
+
+  it("imports: a module links to the modules it imports (absolute and relative), and lists who imports it", () => {
+    const services = queries.block("app/services.py")!;
+    expect(services.links.filter((l) => l.kind === "imports").map((l) => `${l.line} ${l.target.id}`)).toEqual(
+      expect.arrayContaining(["1 app/repo.py", "2 app/models.py", "3 app/utils/__init__.py", "4 app/tasks.py"]),
+    );
+    const models = queries.block("app/models.py")!;
+    const importers = models.callers.filter((c) => c.kind === "imports").map((c) => c.node.id);
+    expect(importers).toEqual(expect.arrayContaining(["app/services.py", "app/repo.py", "app/factory.py"])); // from .models import User
+  });
 });

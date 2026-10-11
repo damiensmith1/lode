@@ -448,6 +448,15 @@ export function linkPython(cached: PyFacts[], root: string, packs: PyPack[] = []
       if (hit && project.decls.get(hit.to)?.decorators?.some((d) => property.test(d.text))) project.addEdge(r.from, hit.to, f.file, r.line, hit.confidence);
     }
   }
+  // Imports, file to file: `from pkg import sub` is the submodule when
+  // there is one, else the package; `import a.b.c` is a/b/c.
+  for (const f of facts) {
+    for (const i of f.imports) {
+      if (!i.line) continue;
+      const to = (i.name && i.name !== "*" ? project.resolveModule(i.module.endsWith(".") ? `${i.module}${i.name}` : `${i.module}.${i.name}`, f.file) : null) ?? project.resolveModule(i.path ?? i.module, f.file);
+      if (to && to !== f.file) project.edges.push({ kind: "imports", from: f.file, to, confidence: "exact", loc: { file: f.file, line: i.line } });
+    }
+  }
   for (const p of active) p.link?.(project);
 
   const nodes: Node[] = [];

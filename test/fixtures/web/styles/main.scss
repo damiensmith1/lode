@@ -1,0 +1,5 @@
+@use "sass:math";
+@use "base" as b;
+@import url("theme.css");
+
+.page { padding: math.div(16px, 2); }

@@ -75,6 +75,17 @@ export function toGraph(facts: TsFacts): GraphData {
     edges.push({ kind: "references", from: ref.from, to: ref.to, confidence: "exact", loc: ref.loc, access: ref.access, type: ref.type });
   }
 
+  // A file importing another: file to file. One edge a line and target.
+  // (Files outside the TS graph, a stylesheet, are kept by id; the graph
+  // drops the edge if no plugin made a node for them.)
+  const seenImports = new Set<string>();
+  for (const i of facts.importLines ?? []) {
+    const key = `${i.from}|${i.to}|${i.line}`;
+    if (seenImports.has(key) || !nodes.has(i.from)) continue;
+    seenImports.add(key);
+    edges.push({ kind: "imports", from: i.from, to: i.to, confidence: "exact", loc: { file: i.from, line: i.line } });
+  }
+
   return { nodes: [...nodes.values()], edges, channels: facts.channels, regions: facts.regions };
 }
 

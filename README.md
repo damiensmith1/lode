@@ -35,6 +35,7 @@ its page) become arrows. Mixed repos get every language they have.
 | **TypeScript / JavaScript** | the TypeScript compiler: exact, type-checked links | React, Next.js, Remix / React Router, React Native (React Navigation, Expo Router), Vue, Nuxt, Svelte, SvelteKit, Angular, Express, Nest, Electron |
 | **Python** | tree-sitter (no Python install needed) | Django, FastAPI, Flask, Starlette, Celery, pytest, click / typer / argparse |
 | **Ruby** | tree-sitter (no Ruby install needed) | Rails (incl. ERB and jbuilder views), Sinatra, RSpec, FactoryBot, Thor, rake |
+| **HTML, CSS, SCSS, Sass, Less** | their tags and at-rules | what each file pulls in: scripts, stylesheets, pages, `@import` / `@use` / `@forward` (Sass partials) |
 
 <details>
 <summary>What each language and framework resolves</summary>
@@ -97,13 +98,21 @@ Go and Java are next, on the same tree-sitter base.
 - **Chips** on each line show what it leads to (calls, IPC channels, state
   it writes); click one to open it beside the card with an arrow from that
   line. Every card shows **who calls it** too.
+- **File dependencies:** a file card lists who imports it ("imported by"),
+  and each import line has a chip to the file it imports: TS/JS imports
+  and `require`s (path aliases included), Python modules (relative and
+  packages), Ruby `require` / `require_relative`, HTML's scripts,
+  stylesheets and page links, CSS / SCSS imports and partials, a Rails
+  layout's `stylesheet_link_tag`, and TS/JS importing a stylesheet.
+  Imports are kept apart from calls: they don't steer **/** answers or
+  **expand**.
 - **Expand** opens everything a card leads to, one level, in one click.
 - **Trees, tabs, layout:** open as many trees as you like, drag cards,
   scroll to pan, pinch to zoom, fit or focus, ⌘-click to select several
   and move, fit, focus or close them together. Undo everything. Each flow
   tab keeps its canvas across reloads.
-- **Any file:** README, docs, JSON, CSS and other project files open as
-  text cards too (Markdown headings fold into sections).
+- **Any file:** README, docs, JSON and other project files open as text
+  cards too (Markdown headings fold into sections).
 
 ### Ask for a flow (/)
 Type **/** in the top box (or press **/** on a flow) and ask in plain words:

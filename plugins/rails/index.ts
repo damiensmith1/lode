@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { RubyArg, RubyCall, RubyPack, RubyProject } from "../ruby/index.js";
 import { camelize } from "../ruby/link.js";
+import { listFiles } from "../../src/query/git.js";
 
 // Rails (and ActiveRecord on its own): what the framework connects by
 // convention, as arrows and entries.
@@ -147,6 +148,7 @@ export const railsPack: RubyPack = {
 
     routes(project);
     renders(project);
+    assets(project);
 
     for (const file of project.files) {
       if (/^app\/(controllers|helpers|views)\/|^config\/routes(\.rb|\/)/.test(file)) project.tag(file, "web");
@@ -189,6 +191,32 @@ function views(project: RubyProject) {
     }
     return null;
   });
+}
+
+// A view's stylesheets and scripts, as imports (the web plugin reads the
+// files): stylesheet_link_tag "application" → app/assets/stylesheets/
+// application.css (or .scss, .sass, or the bundler's app/assets/builds);
+// javascript_include_tag / javascript_import_module_tag "application" →
+// app/javascript/application.js (or app/assets/javascripts, the builds).
+function assets(project: RubyProject) {
+  const views = project.facts.filter((f) => f.file.startsWith("app/views/"));
+  if (!views.length) return;
+  const all = new Set(listFiles(project.root));
+  const pick = (dirs: string[], exts: string[], name: string) => dirs.flatMap((d) => exts.map((e) => `${d}/${name}.${e}`)).find((c) => all.has(c)) ?? null;
+  for (const f of views) {
+    for (const c of f.calls) {
+      const style = c.name === "stylesheet_link_tag";
+      if (c.recv.kind !== "none" || !(style || /^javascript_(include|import_module)_tag$/.test(c.name))) continue;
+      for (const a of c.args ?? []) {
+        if (a.t !== "str" && a.t !== "sym") continue;
+        const name = a.v.replace(/\.(css|js)$/, "");
+        const to = style
+          ? pick(["app/assets/stylesheets", "app/assets/builds", "public"], ["css", "scss", "sass"], name)
+          : pick(["app/javascript", "app/assets/javascripts", "app/assets/builds", "public"], ["js", "ts", "mjs"], name);
+        if (to) project.edges.push({ kind: "imports", from: f.file, to, confidence: "pattern", loc: { file: f.file, line: c.line } });
+      }
+    }
+  }
 }
 
 // An action renders its view (by name, or as `render :edit`, `render
