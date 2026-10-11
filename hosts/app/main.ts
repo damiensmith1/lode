@@ -141,11 +141,11 @@ function renderTree(tree: FileTreeNode[]) {
       if (n.kind === "dir") {
         const isOpen = openDirs.has(n.path);
         const toggle = () => (isOpen ? openDirs.delete(n.path) : openDirs.add(n.path), renderTree(tree));
-        rows.push(indent(el("button", { ariaExpanded: String(isOpen), onclick: toggle }, `${isOpen ? "▾" : "▸"} ${n.name}`), depth));
+        rows.push(indent(el("button", { className: "row", ariaExpanded: String(isOpen), onclick: toggle, title: n.path }, twist(true), icon(folderIcon(n.name, isOpen)), el("span", { className: "name" }, n.name)), depth));
         if (isOpen) walk(n.children ?? [], depth + 1);
       } else {
-        const dot = n.indexed === false ? "dot text" : `dot rt-${n.runtime ?? "none"}`;
-        const button = indent(el("button", { title: n.runtime ? `runtime: ${n.runtime}` : n.indexed === false ? "text file" : "", onclick: () => readInFlow(n.path) }, el("span", { className: dot }), n.name), depth);
+        const title = `${n.path}${n.runtime ? ` · runtime: ${n.runtime}` : n.indexed === false ? " · text (not in the code graph)" : ""}`;
+        const button = indent(el("button", { className: `row${n.indexed === false ? " text" : ""}`, title, onclick: () => readInFlow(n.path) }, twist(false), icon(fileIcon(n.name)), el("span", { className: "name" }, n.name)), depth);
         button.dataset.file = n.path;
         button.setAttribute("aria-current", String(n.path === currentFile));
         rows.push(button);
@@ -157,8 +157,74 @@ function renderTree(tree: FileTreeNode[]) {
 }
 
 function indent<T extends HTMLElement>(node: T, depth: number): T {
-  node.style.paddingLeft = `${8 + depth * 14}px`;
+  node.style.paddingLeft = `${6 + depth * 11}px`;
   return node;
+}
+
+// A folder's chevron (a file keeps the space, so names line up).
+function twist(dir: boolean): HTMLElement {
+  const span = el("span", { className: "twist" });
+  if (dir) span.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>';
+  return span;
+}
+
+// File and folder icons by name: Material Icon Theme's mapping (file-icons/,
+// the subset Clance ships). Without the map, the plain file and folder.
+type IconMap = { file: string; folder: string; folderExpanded: string; fileExtensions: Record<string, string>; fileNames: Record<string, string>; folderNames: Record<string, string>; folderNamesExpanded: Record<string, string> };
+let icons: IconMap = { file: "file", folder: "folder", folderExpanded: "folder-open", fileExtensions: {}, fileNames: {}, folderNames: {}, folderNamesExpanded: {} };
+
+function fileIcon(name: string): string {
+  const lower = name.toLowerCase();
+  if (icons.fileNames[lower]) return icons.fileNames[lower];
+  // "a.test.ts" tries "test.ts" before "ts".
+  const parts = lower.split(".");
+  for (let i = 1; i < parts.length; i++) {
+    const ext = parts.slice(i).join(".");
+    if (icons.fileExtensions[ext]) return icons.fileExtensions[ext];
+  }
+  return icons.file;
+}
+
+function folderIcon(name: string, open: boolean): string {
+  const lower = name.toLowerCase();
+  return open ? (icons.folderNamesExpanded[lower] ?? icons.folderExpanded) : (icons.folderNames[lower] ?? icons.folder);
+}
+
+function icon(name: string): HTMLElement {
+  return el("span", { className: "icon" }, el("img", { src: `file-icons/${name}.svg`, alt: "" }));
+}
+
+// The sidebar's width: dragged on its edge, kept between runs.
+const WIDTH_KEY = "lode-sidebar-width";
+function setupResize() {
+  const apply = (w: number) => document.body.style.setProperty("--side-width", `${Math.round(Math.min(Math.max(w, 180), window.innerWidth * 0.6))}px`);
+  try {
+    const saved = Number(localStorage.getItem(WIDTH_KEY));
+    if (saved) apply(saved);
+  } catch {
+    // No storage: the default width.
+  }
+  const handle = $("side-resize");
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const left = $("side").getBoundingClientRect().left;
+    const move = (m: PointerEvent) => apply(m.clientX - left);
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing");
+      try {
+        localStorage.setItem(WIDTH_KEY, String($("side").getBoundingClientRect().width));
+      } catch {
+        // Not kept; fine.
+      }
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  });
+  handle.addEventListener("dblclick", () => (apply(260), localStorage.removeItem(WIDTH_KEY)));
 }
 
 // --- Changes (the sidebar's other mode) -------------------------------------
@@ -203,7 +269,7 @@ function renderChanges() {
   const added = changes.files.reduce((n, f) => n + f.added, 0);
   const removed = changes.files.reduce((n, f) => n + f.removed, 0);
   totals.textContent = changes.files.length ? `${changes.files.length} file${changes.files.length === 1 ? "" : "s"} · +${added} −${removed}` : `no changes since ${changes.base}`;
-  const counts = (a: number, r: number) => el("span", { className: "n" }, ...(a ? [el("span", { className: "add" }, `+${a} `)] : []), ...(r ? [el("span", { className: "del" }, `−${r}`)] : []));
+  const counts = (a: number, r: number) => el("span", { className: "n" }, ...(a ? [el("span", { className: "add" }, `+${a}`)] : []), ...(r ? [el("span", { className: "del" }, `−${r}`)] : []));
   const read = (id: string) => openView({ kind: "flow", id, diff: changes!.base });
   const rows: HTMLElement[] = [];
   for (const f of changes.files) {
@@ -211,14 +277,15 @@ function renderChanges() {
     const status = { modified: "M", added: "A", deleted: "D", renamed: "R", untracked: "U" }[f.status];
     // Symbols under the file: the hierarchy, top-level ones first.
     const symbols = f.status === "added" || f.status === "untracked" ? [] : f.symbols.filter((s) => s.node.id !== f.file || s.added || s.removed);
-    const chev = el("span", { className: "chev" }, symbols.length ? (open ? "▾" : "▸") : "");
+    const chev = chevron(symbols.length > 0, open);
     const gone = f.status === "deleted";
     const row = el(
       "button",
       { className: `row file${gone ? " gone" : ""}`, title: f.from ? `${f.from} → ${f.file}` : f.file },
       chev,
       el("span", { className: `st ${status}` }, status),
-      el("span", { className: "name" }, f.file),
+      // The name carries the row; the folder recedes (and truncates first).
+      el("span", { className: "path" }, el("span", { className: "dir" }, f.file.includes("/") ? f.file.slice(0, f.file.lastIndexOf("/") + 1) : ""), el("span", { className: "base" }, f.file.slice(f.file.lastIndexOf("/") + 1))),
       counts(f.added, f.removed),
     );
     // The arrow drops down; the name reads the whole file.
@@ -237,10 +304,10 @@ function renderChanges() {
       for (const s of children.get(parent) ?? []) {
         const kids = children.get(s.node.id)?.length ?? 0;
         const folded = closedSymbols.has(s.node.id);
-        const sChev = el("span", { className: "chev" }, kids ? (folded ? "▸" : "▾") : "");
+        const sChev = chevron(kids > 0, !folded);
         const label = s.node.id === f.file ? "(top level)" : s.node.name;
         const sRow = el("button", { className: "row", title: s.node.id }, sChev, el("span", { className: "name" }, label, " ", el("span", { className: "kind" }, s.node.kind)), counts(s.added, s.removed));
-        sRow.style.paddingLeft = `${10 + depth * 14}px`;
+        sRow.style.paddingLeft = `${8 + depth * 14}px`;
         sRow.addEventListener("click", (e) => {
           if (e.target === sChev && kids) {
             folded ? closedSymbols.delete(s.node.id) : closedSymbols.add(s.node.id);
@@ -255,6 +322,15 @@ function renderChanges() {
     walk(undefined, 1);
   }
   list.replaceChildren(...rows);
+}
+
+// A drop-down's chevron (rotated when open); empty, but keeping its space,
+// when there's nothing under the row.
+function chevron(has: boolean, open: boolean): HTMLElement {
+  const span = twist(has);
+  span.classList.add("chev");
+  if (open) span.classList.add("open");
+  return span;
 }
 
 function setupChanges() {
@@ -333,6 +409,9 @@ async function start() {
     status.textContent = `◇ lode · ${info.files} files · ${info.nodes} nodes · ${info.edges} edges${extra}`;
   };
   setStatus();
+  $("side-name").textContent = info.root.split(/[\\/]/).filter(Boolean).pop() ?? info.root;
+  icons = await fetch("file-icons/map.json").then((r) => (r.ok ? r.json() : icons)).catch(() => icons);
+  setupResize();
   renderTree(buildFileTree(await api.files()));
   setupSearch();
   $("toggle-tree").addEventListener("click", () => document.body.classList.toggle("no-tree"));

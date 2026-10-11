@@ -22,10 +22,16 @@
 </header>
 <main class="body">
   <aside id="side">
-    <div class="side-tabs" role="tablist" aria-label="Sidebar">
-      <button id="side-files" role="tab" aria-selected="true">files</button>
-      <button id="side-changes" role="tab" aria-selected="false">changes <span id="changes-count"></span></button>
-    </div>
+    <header class="side-bar">
+      <button id="side-files" class="side-mode" aria-selected="true" title="Files">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span id="side-name"></span>
+      </button>
+      <button id="side-changes" class="side-mode" aria-selected="false" title="Changes since a git ref">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17" cy="9" r="2.2"/><path d="M7 8.2v7.6"/><path d="M17 11.2c0 3-2.4 4.6-5.6 5.1"/></svg>
+        <span id="changes-count"></span>
+      </button>
+    </header>
     <nav id="tree" aria-label="Files"></nav>
     <div id="changes" aria-label="Changes" hidden>
       <div class="changes-bar">
@@ -37,6 +43,7 @@
       <div id="changes-list"></div>
     </div>
   </aside>
+  <div id="side-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" title="Drag to resize"></div>
   <section class="views" aria-label="lode views">
     <div id="tabs" role="tablist"></div>
     <div id="view"></div>

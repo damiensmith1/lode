@@ -28,33 +28,67 @@ button:focus-visible, input:focus-visible { outline: 2px solid #2f5fa8; outline-
 #results .where { font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .body { flex: 1; min-height: 0; display: flex; }
-#side { flex: 0 0 260px; min-height: 0; display: flex; flex-direction: column; background: var(--side); border-right: 1px solid var(--border); font-size: 12.5px; }
-.side-tabs { display: flex; gap: 2px; padding: 8px 8px 4px; }
-.side-tabs button { flex: 1; padding: 4px 8px; border-radius: 5px; text-align: center; color: var(--faint); }
-.side-tabs button[aria-selected="true"] { background: rgba(23,22,20,.08); color: var(--fg); }
-#changes-count { font: 11px var(--mono); color: #2e7d4f; }
-#tree, #changes { flex: 1; min-height: 0; overflow: auto; padding: 6px 6px 10px; }
-#tree button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 8px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#tree button:hover { background: rgba(23,22,20,.05); }
-#tree button[aria-current="true"] { background: rgba(23,22,20,.09); }
-#tree .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-#tree .dot.text { background: none; box-shadow: inset 0 0 0 1px var(--faint); }
-.changes-bar { display: flex; align-items: center; gap: 6px; padding: 2px 4px 6px; }
-.changes-bar input { flex: 1; min-width: 0; font: 11.5px var(--mono); padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: #fff; }
-.changes-bar button { padding: 3px 8px; border-radius: 5px; background: rgba(23,22,20,.06); white-space: nowrap; }
-.changes-bar button:hover { background: rgba(46,125,79,.14); }
-#changes-totals { padding: 0 6px 6px; font: 11px var(--mono); }
-#changes-list .row { display: flex; align-items: center; gap: 4px; width: 100%; padding: 2px 6px 2px 0; border-radius: 5px; white-space: nowrap; }
+#side { flex: 0 0 var(--side-width, 260px); width: var(--side-width, 260px); min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--side); font-size: 13px; }
+#side-resize { flex: 0 0 5px; margin-left: -3px; z-index: 5; cursor: col-resize; border-right: 1px solid var(--border); }
+#side-resize:hover, body.resizing #side-resize { border-right-color: #2f5fa8; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.no-tree #side-resize { display: none; }
+
+/* The sidebar's bar: files (the project's folder) or changes. */
+.side-bar { display: flex; align-items: center; gap: 2px; padding: 8px 8px 6px 10px; }
+.side-mode { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 7px; border-radius: 6px; color: var(--faint); }
+.side-mode:hover { background: rgba(23,22,20,.05); color: var(--fg); }
+.side-mode[aria-selected="true"] { color: var(--fg); }
+#side-files { flex: 0 1 auto; }
+#side-name { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-mode svg { flex: none; }
+
+#tree { flex: 1; min-height: 0; overflow: auto; padding: 0 0 10px; }
+#changes { flex: 1; min-height: 0; overflow: auto; padding: 0 0 10px; }
+
+/* Changes, like Clance's: since which ref, totals, then a row per file
+   (status, folder dimmed, name, counts) dropping down into its symbols. */
+.changes-bar { display: flex; align-items: center; gap: 6px; padding: 0 8px 4px 12px; }
+.changes-bar label { font-size: 11px; }
+.changes-bar input { flex: 1; min-width: 0; font: 11px var(--mono); padding: 2px 6px; border: 1px solid transparent; border-radius: 5px; background: rgba(23,22,20,.05); color: var(--fg); }
+.changes-bar input:hover { border-color: var(--border); }
+.changes-bar input:focus { background: #fff; border-color: #2f5fa8; outline: none; }
+.changes-bar button { flex: none; padding: 2px 6px; border-radius: 5px; font-size: 11px; color: var(--faint); white-space: nowrap; }
+.changes-bar button:hover { background: rgba(23,22,20,.06); color: var(--fg); }
+#changes-totals { padding: 0 12px 6px; font: 11px var(--mono); color: var(--faint); }
+#changes-list .row { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 26px; padding: 0 8px 0 6px; white-space: nowrap; }
 #changes-list .row:hover { background: rgba(23,22,20,.05); }
-#changes-list .chev { flex: none; width: 16px; text-align: center; color: var(--faint); }
+#changes-list .chev { flex: none; display: flex; justify-content: center; width: 12px; color: var(--faint); }
+#changes-list .chev svg { transition: transform 90ms ease; }
+#changes-list .chev.open svg { transform: rotate(90deg); }
+#changes-list .st { flex: none; width: 1ch; font: 11px var(--mono); color: var(--faint); }
+#changes-list .st.A, #changes-list .st.U { color: #2f7d4f; }
+#changes-list .st.D { color: #b3362b; }
+#changes-list .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; font: 11.5px var(--mono); }
+#changes-list .path > span { direction: ltr; unicode-bidi: embed; }
+#changes-list .dir { color: var(--faint); }
+#changes-list .base { color: var(--fg); }
 #changes-list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
-#changes-list .file .name { font-family: var(--mono); font-size: 12px; }
 #changes-list .kind { color: var(--faint); font-size: 10.5px; }
-#changes-list .st { flex: none; width: 14px; font: 10.5px var(--mono); color: var(--faint); text-align: center; }
-#changes-list .st.A, #changes-list .st.U { color: #2e7d4f; } #changes-list .st.D { color: #b3402a; }
-#changes-list .n { flex: none; font: 10.5px var(--mono); }
-#changes-list .add { color: #2e7d4f; } #changes-list .del { color: #b3402a; }
-#changes-list .gone .name { color: var(--faint); text-decoration: line-through; }
+#changes-list .n { flex: none; display: flex; gap: 4px; font: 11px var(--mono); }
+#changes-list .add { color: #2f7d4f; }
+#changes-list .del { color: #b3362b; }
+#changes-list .gone .path { text-decoration: line-through; }
+#changes-list .gone .base { color: var(--faint); }
+#changes-list .faint { padding: 4px 12px; }
+
+/* The file tree: a chevron, the file type's icon (Material Icon Theme), the name. */
+#tree .row { display: flex; align-items: center; gap: 4px; width: 100%; min-height: 24px; padding: 0 8px 0 6px; white-space: nowrap; }
+#tree .row:hover { background: rgba(23,22,20,.05); }
+#tree .row[aria-current="true"] { background: rgba(23,22,20,.09); }
+#tree .twist { flex: none; display: flex; justify-content: center; width: 12px; color: var(--faint); }
+#tree .twist svg { transition: transform 90ms ease; }
+#tree .row[aria-expanded="true"] .twist svg { transform: rotate(90deg); }
+#tree .icon { flex: none; display: flex; margin-right: 2px; }
+#tree .icon img { width: 16px; height: 16px; }
+#tree .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#tree .row.text .name { color: var(--muted); }
+#changes-count { font: 11px var(--mono); color: #2e7d4f; }
 .rt-main { background: #8a3b6b; } .rt-preload { background: #e2632f; } .rt-renderer { background: #2f5fa8; } .rt-shared { background: #75726b; }
 
 body.no-tree #side { display: none; }
@@ -71,3 +105,4 @@ body.no-tree #side { display: none; }
 .tab.new { padding: 8px 12px; border-right: 0; }
 .tab.new:hover { color: var(--fg); }
 #search.asking { font-family: var(--mono); border-color: #2f5fa8; box-shadow: 0 0 0 2px rgba(47,95,168,.15); }
+

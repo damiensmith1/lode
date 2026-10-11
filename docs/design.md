@@ -411,6 +411,15 @@ GraphStore ─▶ Queries (src/query) ─▶ server (src/server) ══ JSON-RPC
   files and changes: changed files that drop down into the changed
   declarations as a hierarchy (a class over its methods), with the
   "since" ref and "open all" at the top and a count on the toggle.
+- **The standalone app's sidebar** looks like Clance's Files pane:
+  chevrons, Material Icon Theme icons (`hosts/app/file-icons`, MIT, the
+  subset Clance ships), a header that switches between files (the project's
+  folder) and changes (a branch icon with the count), and a width you set by
+  dragging its edge (kept per browser). Changes rows read like Clance's:
+  status letter, the folder dimmed, the file name, and +/− counts. Creating,
+  renaming and importing files is the host's job (Clance's Files tree);
+  lode re-indexes what appears and opens a file as an editable card on
+  request (`flow.show(path)`, then `flow.run("edit")`).
 - **Keyboard.** Outside code the flow is navigable: a line cursor in the
   selected card (outlined; clicks and Esc-from-code set it) that moves by
   line, follows a line's chip (Tab chooses) or fold, goes back along the

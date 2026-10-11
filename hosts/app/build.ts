@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -18,6 +18,8 @@ export async function buildApp(outDir: string): Promise<void> {
     logLevel: "warning",
   });
   for (const file of ["index.html", "app.css"]) copyFileSync(path.join(here, file), path.join(outDir, file));
+  // The tree's file and folder icons (Material Icon Theme, MIT; see its LICENSE).
+  cpSync(path.join(here, "file-icons"), path.join(outDir, "file-icons"), { recursive: true });
 }
 
 // `npm run build:web` → dist/app
