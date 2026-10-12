@@ -20,6 +20,7 @@ const GROUP_GAP = 40; // between cards in a group
 const GROUP_PAD = 20; // a group's frame around its cards
 const GROUP_HEAD = 34; // its title, above them
 const ARRANGE_GAP = 72; // between groups arranged in rows
+const TIDY_GAP = 120; // the most empty space tidy leaves between things
 const ZOOM = { min: 0.2, max: 2 };
 
 interface Camera {
@@ -1069,6 +1070,34 @@ export class LodeFlow extends HTMLElement {
     this.changed();
   }
 
+  // Close up empty space: wherever no card or group spans a band of the
+  // canvas wider than TIDY_GAP (across its whole width, or height), what's
+  // past it moves back by the difference. Nothing that sat apart overlaps
+  // after, and what sat together stays together.
+  private tidy() {
+    const units = [...this.groupMap.values()].map((g) => g.cards);
+    const grouped = new Set(units.flat());
+    for (const k of this.cardMap.keys()) if (!grouped.has(k)) units.push([k]);
+    const boxes = units.map((keys) => ({ keys, box: this.membersBox(keys, grouped.has(keys[0]))! })).filter((u) => u.box);
+    const close = (lo: "minX" | "minY", hi: "maxX" | "maxY", axis: "x" | "y") => {
+      let shift = 0;
+      let edge = -Infinity;
+      for (const u of [...boxes].sort((a, b) => a.box[lo] - b.box[lo])) {
+        const start = u.box[lo] - shift;
+        if (edge > -Infinity && start - edge > TIDY_GAP) shift += start - edge - TIDY_GAP;
+        if (shift) {
+          for (const k of u.keys) this.cardMap.get(k)![axis] -= shift;
+          u.box = { ...u.box, [lo]: u.box[lo] - shift, [hi]: u.box[hi] - shift };
+        }
+        edge = Math.max(edge, u.box[hi]);
+      }
+    };
+    close("minY", "maxY", "y");
+    close("minX", "maxX", "x");
+    this.position();
+    this.changed();
+  }
+
   private async act(a: CanvasAction, group: string | null) {
     // Cards by key, or as a model names them (a symbol's name or id, a
     // note's title): what's not on the canvas is skipped.
@@ -1140,6 +1169,8 @@ export class LodeFlow extends HTMLElement {
           return this.ungroup(a.id);
         case "arrange":
           return this.arrangeRows(a.rows);
+        case "tidy":
+          return this.tidy();
       }
     } finally {
       this.holdUndo = false;

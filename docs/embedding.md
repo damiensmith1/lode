@@ -374,7 +374,8 @@ toolkit for letting an agent see and draw on your canvases: `lode_canvases`,
 (with `mode`), `lode_note`, `lode_link`, `lode_diagram` (notes and labelled
 arrows, laid out along them: a system design next to the real code),
 `lode_group` / `lode_ungroup` (titled frames around cards, laid out as a
-row, column or grid) and `lode_arrange` (groups and cards in rows), so an
+row, column or grid), `lode_arrange` (groups and cards in rows) and
+`lode_tidy` (close up empty space), so an
 agent can organise what it shows, `lode_expand`, `lode_close`,
 `lode_select`, `lode_focus`, `lode_changes_shown`, and the graph tools,
 each on a canvas's project. Tools that find or add code take a `folder`
@@ -402,7 +403,8 @@ canvas's own path, so adding from it by path adds plain cards.
 frames cards (`layout`: row, column or grid; `add: true` adds to an
 existing group), `{ kind: "ungroup", id }` removes the frame, and
 `{ kind: "arrange", rows: [["web", "api"], ["db"]] }` lays groups and
-cards out in rows. `flow.groups()` lists them; `CardInfo.group` says a
+cards out in rows; `{ kind: "tidy" }` closes up empty space (left by
+closed cards). `flow.groups()` lists them; `CardInfo.group` says a
 card's. Users drag a group by its title. Style them with
 `::part(group)`, `::part(group-head)`, `::part(group-title)`.
 

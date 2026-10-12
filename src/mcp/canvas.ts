@@ -208,6 +208,12 @@ export function canvasTools(host: CanvasHost): Tool[] {
       },
     },
     {
+      name: "lode_tidy",
+      description: "Close up empty space on a lode canvas (after closing cards, say): groups and cards move up and left over the gaps, keeping how they sit together.",
+      inputSchema: { type: "object", properties: { canvas: canvasProp } },
+      run: async (args) => apply(args.canvas, [{ kind: "tidy" }]),
+    },
+    {
       name: "lode_changes_shown",
       description: "Show or hide git changes on a lode canvas's cards: added and changed lines marked, removed ones struck through.",
       inputSchema: { type: "object", properties: { canvas: canvasProp, base: { type: ["string", "null"], description: "A git ref (HEAD: uncommitted changes), or null to hide them" } } },

@@ -72,6 +72,8 @@ describe("canvas tools", () => {
     await expect(tools.lode_arrange.run({ rows: [] })).rejects.toThrow(/needs rows/);
     await tools.lode_ungroup.run({ id: "web" });
     expect(applied[3].actions).toEqual([{ kind: "ungroup", id: "web" }]);
+    await tools.lode_tidy.run({});
+    expect(applied[4].actions).toEqual([{ kind: "tidy" }]);
   });
 
   it("code from another folder: found in its lode, added with its folder", async () => {

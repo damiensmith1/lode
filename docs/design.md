@@ -694,7 +694,11 @@ them was; whatever else would overlap moves below, keeping its own
 layout. Relative, not coordinates, because models are bad at pixels and
 coordinates go stale as cards grow. Groups are saved with the canvas,
 undone like anything else, and pruned as their cards go
-(`flow.groups()`, `CardInfo.group`).
+(`flow.groups()`, `CardInfo.group`). `tidy` closes up empty space (left by
+closed cards, say): wherever no group or card spans a band of the canvas
+wider than 120px, across its whole width (or height), what's past it moves
+back, so nothing that sat apart overlaps and what sat together stays
+together.
 
 **More than one folder.** A canvas reads one project (its connection), and
 can hold code from others too: a worktree of it, another repo. Each extra
@@ -720,7 +724,7 @@ agent needs to see and draw on a host's canvases, defined and checked in
 lode, with the canvases reached through the host (`CanvasHost`: list,
 read, apply, and a canvas's project's service, or another folder's).
 Besides cards and notes, an agent can organise what it shows: `lode_group`,
-`lode_ungroup`, `lode_arrange`; and the tools that find or add code take
+`lode_ungroup`, `lode_arrange`, `lode_tidy`; and the tools that find or add code take
 a `folder`. Clance mounts them for its Claude sessions.
 
 Every card is a real graph node that code chose, scores are data (so

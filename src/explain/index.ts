@@ -64,7 +64,10 @@ export type CanvasAction =
   // Lay groups (by id) and cards (by name) out in rows: each row left to
   // right, the rows top to bottom, where the first of them was. Whatever
   // else is in the way moves below.
-  | { kind: "arrange"; rows: string[][] };
+  | { kind: "arrange"; rows: string[][] }
+  // Close up empty space (left by closed cards, say): groups and cards
+  // move up and left over the gaps, keeping how they sit together.
+  | { kind: "tidy" };
 
 export type GroupLayout = "row" | "column" | "grid";
 
