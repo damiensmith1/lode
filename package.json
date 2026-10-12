@@ -1,6 +1,6 @@
 {
   "name": "lode-graph",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Read a codebase as a flow of real code: a code graph, embeddable views any editor or app can host, git changes, and questions answered as flows.",
   "keywords": [
     "code-graph",
