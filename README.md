@@ -113,6 +113,13 @@ Go and Java are next, on the same tree-sitter base.
   tab keeps its canvas across reloads.
 - **Any file:** README, docs, JSON and other project files open as text
   cards too (Markdown headings fold into sections).
+- **Groups:** frame cards under a title, laid out as a row, a column or a
+  grid; drag the title to move them together. Groups and cards can be
+  **arranged** in rows (`apply({ kind: "arrange", rows })`), so an agent
+  can lay out what it shows: inputs left, outputs right, details below.
+- **More than one folder:** a canvas can hold code from other folders
+  beside its own project (a worktree, a frontend and its API), each read
+  by its own lode, its cards marked with the folder's name.
 
 ### Ask for a flow (/)
 Type **/** in the top box (or press **/** on a flow) and ask in plain words:
@@ -405,6 +412,8 @@ What a host can plug in or take over:
 | **Interaction** | events for every action (cancelable, so you can take any over: open chips in your editor), selection, open, close, edits, saves |
 | **Keys** | every key is a command; remap, disable, or drive `flow.run(command)` from your own keybindings |
 | **Editing** | read-only, per card, or yours: `host.saveEdits` lets the editor apply saves with its own undo |
+| **Folders** | `host.folder(path)` gives a canvas another folder's lode, so it can hold code from a worktree or another repo (`flow.addFolder` to add one yourself) |
+| **Layout** | `flow.apply()` groups cards (`group`, `ungroup`) and arranges groups and cards in rows (`arrange`); `flow.groups()` lists them |
 | **Your own UI** | `lodeApi(connection)`: files, `buildFileTree`, search, entries, changes, symbol at cursor, ask |
 | **Asking** | `flow.ask(question)`, `flow.loadPlan(plan)`, or your own model behind the `Judge` interface |
 | **Explaining** | the service's `explain` (streams `explain` events on the connection) with the flow's `scope()` / `apply()` / `highlight()` for your own UI; `explain()` in Node; your own model behind `ChatModel` |
