@@ -373,15 +373,38 @@ toolkit for letting an agent see and draw on your canvases: `lode_canvases`,
 `lode_canvas` (one's cards as context), `lode_show`, `lode_build_flow`
 (with `mode`), `lode_note`, `lode_link`, `lode_diagram` (notes and labelled
 arrows, laid out along them: a system design next to the real code),
-`lode_expand`, `lode_close`, `lode_select`, `lode_focus`,
-`lode_changes_shown`, and the graph tools, each on a canvas's project.
+`lode_group` / `lode_ungroup` (titled frames around cards, laid out as a
+row, column or grid) and `lode_arrange` (groups and cards in rows), so an
+agent can organise what it shows, `lode_expand`, `lode_close`,
+`lode_select`, `lode_focus`, `lode_changes_shown`, and the graph tools,
+each on a canvas's project. Tools that find or add code take a `folder`
+for code from another folder on the same canvas.
 lode defines them and checks what's asked (names resolved to real symbols,
 at most 12 cards a call); the canvases are yours, through a `CanvasHost`:
 `list()` (id, label, folder, cards, question, which is in front), `read(id,
 budget)` (`flow.context`, the cards), `apply(id, actions)` (`flow.apply`)
-and `service(id)` (that project's service). Each tool is `{ name,
+and `service(id, folder?)` (that project's service, or another folder's). Each tool is `{ name,
 description, inputSchema (JSON Schema), run(args) → text }`. Clance mounts
 it on its local tools server for its Claude sessions.
+
+**More than one folder on a canvas.** A canvas can hold code from other
+folders besides its own (a worktree, another repo). Give the host a
+`folder(path)` hook returning a connection to that folder's lode (null if
+there's none); then an `add` (or `plan`) action with `folder: path` adds
+that folder's code, and a saved canvas with it reconnects on restore.
+Or add one yourself: `await flow.addFolder(path, connection)`. Its cards'
+keys are `label//id` (the label is its folder name), `CardInfo.folder`
+says where a card's code is from, and `openSource`, `saveEdits` and
+`highlight` get a `folder` for those. Set `ViewRequest.folder` to the
+canvas's own path, so adding from it by path adds plain cards.
+
+**Groups.** `flow.apply({ kind: "group", id, title, cards, layout })`
+frames cards (`layout`: row, column or grid; `add: true` adds to an
+existing group), `{ kind: "ungroup", id }` removes the frame, and
+`{ kind: "arrange", rows: [["web", "api"], ["db"]] }` lays groups and
+cards out in rows. `flow.groups()` lists them; `CardInfo.group` says a
+card's. Users drag a group by its title. Style them with
+`::part(group)`, `::part(group-head)`, `::part(group-title)`.
 
 ## 11. Explaining
 

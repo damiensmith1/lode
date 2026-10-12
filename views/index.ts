@@ -35,7 +35,7 @@ export {
 } from "./host.js";
 export { buildFileTree, lodeApi, type FileTreeNode, type LodeApi } from "./api.js";
 export { LodeFlow } from "./flow.js";
-export type { CanvasAction, ExplainEvent } from "../src/explain/index.js";
+export type { CanvasAction, ExplainEvent, GroupLayout } from "../src/explain/index.js";
 export type * from "../src/query/types.js";
 
 import type { LodeConnection } from "./connection.js";
@@ -57,6 +57,7 @@ export function createView(view: ViewRequest, client: LodeConnection, host: Lode
   flow.host = host;
   if (view.id) flow.setAttribute("node", view.id);
   if (view.state) flow.stateKey = view.state;
+  if (view.folder) flow.folder = view.folder;
   if (view.diff) flow.setDiffOnConnect(view.diff);
   if (view.ids?.length) flow.pendingIds = [...view.ids];
   if (view.ask) flow.pendingAsk = view.ask;

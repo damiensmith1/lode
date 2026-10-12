@@ -1,4 +1,5 @@
 import type { BlockLink, NodeRef } from "../src/query/types.js";
+import type { LodeConnection } from "./connection.js";
 import type { LodeStorage } from "./storage.js";
 
 // What a host (an IDE, Clance, the standalone app) provides to lode views.
@@ -6,7 +7,9 @@ import type { LodeStorage } from "./storage.js";
 export interface LodeHost {
   // Optional: show a source location in the host's editor. Without one
   // (no editor, as in the standalone app), the flow opens the file as a card.
-  openSource?(file: string, line?: number): void;
+  // `folder`: the folder the file is in, when it isn't the canvas's own
+  // (a card from another folder, see `folder` below).
+  openSource?(file: string, line?: number, folder?: string): void;
   // Open another lode view, usually as a new tab.
   openView(view: ViewRequest): void;
   // Optional: mark source lines in the host's editor for what the view
@@ -32,7 +35,13 @@ export interface LodeHost {
   // the file. Edits are line spans as the card showed them (`expected`)
   // and what they became (`lines`); refuse with ok:false if they don't
   // match the file any more.
-  saveEdits?(request: { file: string; edits: LineEdit[] }): Promise<EditResult>;
+  saveEdits?(request: { file: string; edits: LineEdit[]; folder?: string }): Promise<EditResult>;
+  // Optional: a lode for another folder (its path), so a canvas can hold
+  // code from more than its own (a worktree, another repo): asked when
+  // cards from that folder are added (an "add" action's `folder`) and when
+  // a saved canvas with them comes back. Null: there isn't one. Without
+  // it, only flow.addFolder(path, connection) adds folders.
+  folder?(path: string): LodeConnection | null | Promise<LodeConnection | null>;
   // Optional: a note card's text as HTML (note cards, made by apply: a
   // title and text, e.g. Markdown a model wrote). Sanitize it: it's shown
   // as is. Default: escaped plain paragraphs.
@@ -54,6 +63,7 @@ export interface SourceHighlight {
   file: string;
   range?: [number, number]; // its first and last line (not for whole files)
   marks: number[]; // lines of its steps (calls, members)
+  folder?: string; // the folder `file` is in, when it isn't the canvas's own
   hover?: number; // the line under the pointer, if in this file
 }
 
@@ -64,8 +74,9 @@ export interface SourceHighlight {
 // Defaults to "flow". `ask` builds the flow for a question ("how do we
 // create tabs?"). `diff` shows git changes on a flow's cards, against that
 // ref ("HEAD": uncommitted changes); `ids` opens several at once; `newTab`
-// asks the host for a fresh flow rather than the current one.
-export type ViewRequest = { kind: "flow"; id?: string; ids?: string[]; state?: string; diff?: string; newTab?: boolean; ask?: string };
+// asks the host for a fresh flow rather than the current one; `folder` is
+// the path of the folder its connection reads (see LodeHost.folder).
+export type ViewRequest = { kind: "flow"; id?: string; ids?: string[]; state?: string; diff?: string; newTab?: boolean; ask?: string; folder?: string };
 
 // What a flow can be asked to do, by a key (LodeHost.keys) or by the host
 // calling flow.run(command).
@@ -141,6 +152,8 @@ export interface CardInfo {
   x: number;
   y: number;
   selected: boolean;
+  group?: string; // the group it's in, if any (flow.groups())
+  folder?: string; // the folder its code is from, when it isn't the canvas's own
 }
 
 // Hooks that add the host's own markup to cards. Each returns HTML (the

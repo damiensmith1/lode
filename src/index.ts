@@ -15,7 +15,7 @@ export { Queries } from "./query/index.js";
 export { createService, serveMessages, type LodeService, type ServiceOptions } from "./service/index.js";
 export { askFlow, lexicalCandidates, type AskMode, type AskOptions } from "./ask/index.js";
 export { contextFor, type ContextItem, type ContextRequest, type ContextResult } from "./context/index.js";
-export { explain, type ExplainEvent, type ExplainRequest, type ExplainResult } from "./explain/index.js";
+export { explain, type CanvasAction, type ExplainEvent, type ExplainRequest, type ExplainResult, type GroupLayout } from "./explain/index.js";
 export { openaiModel, type OpenAIOptions } from "./explain/openai.js";
 export { chooseModel, parseModelList, providersFromEnv, type ExplainProvider, type ExplainProviders, type ModelChoice } from "./explain/providers.js";
 export { anthropicModel, type AnthropicOptions, type ChatBlock, type ChatMessage, type ChatModel, type ChatTool, type ChatTurn } from "./explain/model.js";

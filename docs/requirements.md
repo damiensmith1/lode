@@ -22,6 +22,12 @@ later.
 - **Traversal**: from any focus, walk up (what feeds it) and down (what it
   feeds) one hop at a time, with no built-in stopping point.
 
+- **Canvases an agent can organise**: titled groups of cards (a row, a
+  column or a grid) that move together, and groups arranged in rows, so
+  what an agent shows reads as it means it to.
+- **More than one folder on a canvas**: code from a worktree or another
+  repo beside the project's own, each folder read by its own lode.
+
 ## Non-functional
 
 - **Deterministic.** Same code in, same graph out. No models in the core.

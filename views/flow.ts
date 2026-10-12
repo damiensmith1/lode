@@ -4,8 +4,9 @@ import type { LodeStorage } from "./storage.js";
 import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, CLOSE_EVENT, CURSOR_EVENT, DEFAULT_KEYS, DIRTY_EVENT, OPEN_EVENT, SAVE_EVENT, SELECT_EVENT, type AskState, type CardInfo, type EditResult, type FlowCommand, type FlowEventMap, type LodeHost } from "./host.js";
 import { ARROW_DEFS, escape, viewCss, wire } from "./theme.js";
 import { Editing } from "./editing.js";
+import { FOLDER_SEP, folderLabel, inFolder, splitFolder } from "./folders.js";
 import type { ContextResult } from "../src/context/index.js";
-import type { CanvasAction } from "../src/explain/index.js";
+import type { CanvasAction, GroupLayout } from "../src/explain/index.js";
 
 const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
@@ -15,6 +16,10 @@ const SUPPORTING_LINES = 6; // a flow's supporting cards open this short
 const GAP = 72; // space between a card and one opened from it
 const PAD = 32; // board padding
 const UNDO_LIMIT = 100;
+const GROUP_GAP = 40; // between cards in a group
+const GROUP_PAD = 20; // a group's frame around its cards
+const GROUP_HEAD = 34; // its title, above them
+const ARRANGE_GAP = 72; // between groups arranged in rows
 const ZOOM = { min: 0.2, max: 2 };
 
 interface Camera {
@@ -52,10 +57,19 @@ interface Arrow {
   label?: string;
 }
 
+// A titled frame around some cards, laid out inside it (see group()).
+interface Group {
+  id: string;
+  title: string;
+  layout: GroupLayout;
+  cards: string[]; // card keys, in order
+}
+
 interface Snapshot {
   cards: Card[];
   arrows: Arrow[];
   selected: string | null;
+  groups: Group[];
 }
 
 // What's saved with the project (blocks are refetched on load).
@@ -66,6 +80,8 @@ interface SavedLayout {
   banner?: string; // (older saves) the same, as one line: "/ question · how"
   arrows: Arrow[];
   selected: string | null;
+  groups?: Group[];
+  folders?: { label: string; path: string }[]; // other folders its cards come from
   camera?: Camera; // x, y: where the canvas origin (0, 0) sits on screen
   diff?: string | null; // showing git changes against this ref
 }
@@ -161,6 +177,13 @@ const CSS = `
 .chip.k-state { color: var(--lode-state); background: color-mix(in srgb, var(--lode-state) 7%, transparent); }
 .chip.k-imports { color: var(--lode-muted); background: var(--lode-sunken); }
 .arrows { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 2; }
+.group { position: absolute; z-index: 0; border: 1px dashed var(--lode-outline); border-radius: 14px; background: color-mix(in srgb, var(--lode-local) 3%, transparent); pointer-events: none; }
+.group-head { position: absolute; left: 14px; top: 7px; right: 14px; display: flex; align-items: center; gap: 8px; pointer-events: auto; cursor: grab; user-select: none; -webkit-user-select: none; }
+.group-title { font: 600 13px var(--lode-font); color: var(--lode-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-folder { font: 11px var(--lode-mono); color: var(--lode-muted); white-space: nowrap; }
+.group-head .ungroup { margin-left: auto; width: 22px; height: 22px; border-radius: 5px; color: var(--lode-faint); text-align: center; line-height: 22px; }
+.group-head .ungroup:hover { background: var(--lode-sunken); color: var(--lode-fg); }
+.canvas.moving .group-head { cursor: grabbing; }
 .hint { padding: 32px; color: var(--lode-muted); }
 `;
 
@@ -180,12 +203,18 @@ export class LodeFlow extends HTMLElement {
   // Nodes to open once connected (ViewRequest.ids).
   pendingIds: string[] = [];
   host?: LodeHost;
+  // The folder `client` reads (ViewRequest.folder), so adding cards from it
+  // by path adds them as the canvas's own.
+  folder?: string;
+  // Other folders cards come from, by label (see folders.ts).
+  private folders = new Map<string, { path: string; client: LodeConnection; unsubscribe?: () => void }>();
 
   private readonly root = this.attachShadow({ mode: "open" });
   private cardMap = new Map<string, Card>();
   private arrows: Arrow[] = [];
   private selected: string | null = null; // the primary card (highlighted in the host)
   private group = new Set<string>(); // every selected card, ⌘-click adds
+  private groupMap = new Map<string, Group>(); // frames around cards (see group())
   private dragged = false; // the click ending a drag isn't a click
   // Editing: cards with unsaved edits, and what each card showed (to save
   // against and to tell edited from not).
@@ -209,6 +238,7 @@ export class LodeFlow extends HTMLElement {
   connectedCallback() {
     document.addEventListener("keydown", this.onKey);
     this.unsubscribe = this.client?.onChanged(() => void this.reload());
+    for (const f of this.folders.values()) f.unsubscribe ??= f.client.onChanged(() => void this.reload());
     // Hosts move views around (switching tabs reattaches them): build and
     // wire up once, or every reattach adds another set of listeners and a
     // click acts twice.
@@ -264,6 +294,7 @@ export class LodeFlow extends HTMLElement {
 
   disconnectedCallback() {
     this.unsubscribe?.();
+    for (const f of this.folders.values()) (f.unsubscribe?.(), (f.unsubscribe = undefined));
     document.removeEventListener("keydown", this.onKey);
   }
 
@@ -663,15 +694,19 @@ export class LodeFlow extends HTMLElement {
     const c = this.cardMap.get(key);
     if (!c) return undefined;
     const n = c.block.node;
+    // As its folder knows it; `folder` says which, when it isn't the canvas's own.
+    const own = n.file ? this.ownFile(n.file) : { file: undefined, folder: this.splitId(n.id).label ? this.folders.get(this.splitId(n.id).label!)?.path : undefined };
     return {
       key,
-      node: { id: n.id, name: n.name, kind: n.kind, file: n.file, line: n.line, ...(n.runtime && { runtime: n.runtime }) } as CardInfo["node"],
+      node: { id: this.splitId(n.id).id, name: n.name, kind: n.kind, file: own.file, line: n.line, ...(n.runtime && { runtime: n.runtime }) } as CardInfo["node"],
+      ...(own.folder && { folder: own.folder }),
       ...(c.text && { text: c.text }),
       range: c.range,
       ...(c.fragment && { fragment: c.fragment }),
       x: Math.round(c.x),
       y: Math.round(c.y),
       selected: this.group.has(key),
+      ...(this.groupOf(key) && { group: this.groupOf(key)!.id }),
     };
   }
 
@@ -698,19 +733,35 @@ export class LodeFlow extends HTMLElement {
     const all = this.group.size > 1 ? [...this.group] : this.readingOrder();
     const notes = all.filter((k) => this.cardMap.get(k)?.text);
     const keys = all.filter((k) => !this.cardMap.get(k)?.text);
-    const chosen = new Set(keys);
-    const code = keys.length
-      ? await this.client.call<ContextResult>("context", {
+    // Each folder's cards from its own lode, the budget shared by how many.
+    const byFolder = new Map<string | null, string[]>();
+    for (const k of keys) {
+      const label = this.splitId(k).label;
+      byFolder.set(label, [...(byFolder.get(label) ?? []), k]);
+    }
+    const parts = await Promise.all(
+      [...byFolder].map(async ([label, ks]) => {
+        const chosen = new Set(ks);
+        const own = (k: string) => this.splitId(k).id;
+        const result = await this.clientOf(label)!.call<ContextResult>("context", {
           canvas: {
-            cards: keys.map((k) => {
+            cards: ks.map((k) => {
               const c = this.cardMap.get(k)!;
-              return { id: k, ...(c.note && { note: c.note }), ...(c.fragment && { range: c.range }) };
+              return { id: own(k), ...(c.note && { note: c.note }), ...(c.fragment && { range: c.range }) };
             }),
-            arrows: this.arrows.filter((a) => a.kind !== "note" && chosen.has(a.from) && chosen.has(a.to)),
+            arrows: this.arrows.filter((a) => a.kind !== "note" && chosen.has(a.from) && chosen.has(a.to)).map((a) => ({ ...a, from: own(a.from), to: own(a.to) })),
           },
           ...(this.diffBase !== null && { changes: this.diffBase }),
-          budget,
-        })
+          budget: Math.round((budget * ks.length) / keys.length),
+        });
+        if (!label) return result;
+        const r = inFolder(result, label);
+        const pre = (id: string) => `${label}${FOLDER_SEP}${id}`;
+        return { ...r, markdown: `# ${label} (${this.folders.get(label)!.path})\n\n${r.markdown}`, edges: r.edges.map((e) => ({ ...e, from: pre(e.from), to: pre(e.to) })) };
+      }),
+    );
+    const code: ContextResult = parts.length
+      ? parts.reduce((all, p) => ({ ...all, markdown: [all.markdown, p.markdown].filter(Boolean).join("\n\n"), items: [...all.items, ...p.items], edges: [...all.edges, ...p.edges], tokens: all.tokens + p.tokens, dropped: all.dropped + p.dropped }))
       : ({ title: "notes on a lode canvas", markdown: "", tokens: 0, items: [], edges: [], dropped: 0 } as unknown as ContextResult);
     if (!notes.length) return code;
     const named = (k: string) => this.cardMap.get(k)?.text?.title ?? this.cardMap.get(k)?.block.node.name ?? k;
@@ -738,8 +789,10 @@ export class LodeFlow extends HTMLElement {
   // (and `model`): the cards and arrows to explain, the cards it may act
   // on, the git changes shown, the question the flow was built for.
   scope(selection = false): { label: string; focus: string[]; request: { canvas: { cards: { id: string; note?: string; range?: [number, number] }[]; arrows: { from: string; line: number; to: string; kind: LinkKind }[] }; cards: string[]; changes?: string; focus?: string[]; question?: string } } {
-    const all = this.readingOrder().filter((k) => !this.cardMap.get(k)?.text);
-    const picked = this.group.size > 1 || (selection && this.group.size) ? [...this.group].filter((k) => !this.cardMap.get(k)?.text) : [];
+    // Code cards from the canvas's own folder: explaining runs on its lode.
+    const ownCode = (k: string) => !this.cardMap.get(k)?.text && !this.splitId(k).label;
+    const all = this.readingOrder().filter(ownCode);
+    const picked = this.group.size > 1 || (selection && this.group.size) ? [...this.group].filter(ownCode) : [];
     const keys = picked.length ? picked : all;
     const n = keys.length;
     const inScope = new Set(keys);
@@ -752,7 +805,7 @@ export class LodeFlow extends HTMLElement {
       focus: picked,
       request: {
         canvas: { cards: keys.map(card), arrows: this.arrows.filter((a): a is Arrow & { kind: LinkKind } => a.kind !== "note" && inScope.has(a.from) && inScope.has(a.to)) },
-        cards: [...this.cardMap.keys()].filter((k) => !this.cardMap.get(k)?.text),
+        cards: [...this.cardMap.keys()].filter(ownCode),
         ...(this.diffBase !== null && { changes: this.diffBase }),
         ...(picked.length && { focus: picked }),
         ...(this.asked && { question: this.asked.question }),
@@ -857,6 +910,165 @@ export class LodeFlow extends HTMLElement {
     if (id) this.cardEl(id)?.classList.add("hl");
   }
 
+  // --- groups: frames around cards -------------------------------------------------
+  //
+  // A group is a titled frame around some cards, which it lays out inside
+  // it (a row, a column or a grid). Dragging its title moves them all;
+  // arrange() puts groups (and loose cards) in rows. A card is in one group
+  // at most. Made by apply() (group, ungroup, arrange); saved with the
+  // canvas and undone like anything else.
+
+  // The groups on the canvas, in the order they were made.
+  groups(): { id: string; title: string; layout: GroupLayout; cards: string[] }[] {
+    return [...this.groupMap.values()].map((g) => ({ ...g, cards: [...g.cards] }));
+  }
+
+  private groupOf(key: string): Group | undefined {
+    for (const g of this.groupMap.values()) if (g.cards.includes(key)) return g;
+    return undefined;
+  }
+
+  // Cards gone (closed, cleared, vanished from the code): out of their
+  // groups, and empty groups go.
+  private pruneGroups() {
+    for (const [id, g] of this.groupMap) {
+      g.cards = g.cards.filter((k) => this.cardMap.has(k));
+      if (!g.cards.length) this.groupMap.delete(id);
+    }
+  }
+
+  private putGroup(a: Extract<CanvasAction, { kind: "group" }>) {
+    const id = String(a.id || "group");
+    const keys = [...new Set((a.cards ?? []).map((k) => this.cardRef(k)).filter((k): k is string => !!k))];
+    let g = this.groupMap.get(id);
+    const before = g ? this.membersBox(g.cards) : null;
+    if (!g) {
+      if (!keys.length) return;
+      g = { id, title: a.title || id, layout: a.layout ?? "row", cards: [] };
+      this.groupMap.set(id, g);
+    }
+    if (a.title) g.title = a.title;
+    if (a.layout) g.layout = a.layout;
+    if (a.cards) {
+      for (const other of this.groupMap.values()) if (other !== g) other.cards = other.cards.filter((k) => !keys.includes(k));
+      g.cards = a.add ? [...g.cards, ...keys.filter((k) => !g!.cards.includes(k))] : keys;
+    }
+    this.pruneGroups();
+    if (!this.groupMap.has(id)) return void (this.render(), this.changed());
+    this.render();
+    // Where it was; a new one below everything else.
+    let origin = before ? { x: before.minX, y: before.minY } : null;
+    if (!origin) {
+      const others = [...this.cardMap.values()].filter((c) => !g!.cards.includes(c.key));
+      const box = this.membersBox(others.map((c) => c.key), true);
+      origin = box ? { x: box.minX + GROUP_PAD, y: box.maxY + 96 + GROUP_HEAD } : { x: 0, y: 0 };
+    }
+    this.layoutGroup(g, origin);
+    this.position();
+    this.fit(g.cards);
+    this.changed();
+  }
+
+  private ungroup(id: string) {
+    if (!this.groupMap.delete(id)) return;
+    this.render();
+    this.changed();
+  }
+
+  // A group's cards laid out from `origin` (their top-left).
+  private layoutGroup(g: Group, origin: { x: number; y: number }) {
+    const size = (k: string) => ({ w: this.cardEl(k)?.offsetWidth ?? 480, h: this.cardEl(k)?.offsetHeight ?? 200 });
+    const cols = g.layout === "row" ? g.cards.length : g.layout === "column" ? 1 : Math.ceil(Math.sqrt(g.cards.length));
+    const widths: number[] = [];
+    const heights: number[] = [];
+    g.cards.forEach((k, i) => {
+      const { w, h } = size(k);
+      widths[i % cols] = Math.max(widths[i % cols] ?? 0, w);
+      heights[Math.floor(i / cols)] = Math.max(heights[Math.floor(i / cols)] ?? 0, h);
+    });
+    g.cards.forEach((k, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = origin.x + widths.slice(0, col).reduce((n, w) => n + w + GROUP_GAP, 0);
+      const y = origin.y + heights.slice(0, row).reduce((n, h) => n + h + GROUP_GAP, 0);
+      Object.assign(this.cardMap.get(k)!, { x, y });
+    });
+  }
+
+  // The board box around some cards (card coordinates), or with `framed`
+  // around their groups' frames too.
+  private membersBox(keys: string[], framed = false) {
+    let box: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
+    for (const k of keys) {
+      const c = this.cardMap.get(k);
+      if (!c) continue;
+      const el = this.cardEl(k);
+      const b = { minX: c.x, minY: c.y, maxX: c.x + (el?.offsetWidth ?? 480), maxY: c.y + (el?.offsetHeight ?? 200) };
+      box = box ? { minX: Math.min(box.minX, b.minX), minY: Math.min(box.minY, b.minY), maxX: Math.max(box.maxX, b.maxX), maxY: Math.max(box.maxY, b.maxY) } : b;
+    }
+    if (box && framed && keys.some((k) => this.groupOf(k))) box = { minX: box.minX - GROUP_PAD, minY: box.minY - GROUP_PAD - GROUP_HEAD, maxX: box.maxX + GROUP_PAD, maxY: box.maxY + GROUP_PAD };
+    return box;
+  }
+
+  // A group's frame (card coordinates).
+  private frameOf(g: Group) {
+    const b = this.membersBox(g.cards);
+    return b && { x: b.minX - GROUP_PAD, y: b.minY - GROUP_PAD - GROUP_HEAD, w: b.maxX - b.minX + GROUP_PAD * 2, h: b.maxY - b.minY + GROUP_PAD * 2 + GROUP_HEAD };
+  }
+
+  // Groups (by id) and loose cards in rows: each row left to right, rows
+  // top to bottom, starting where the first of them was. Anything else
+  // that would overlap moves below, keeping its own layout.
+  private arrangeRows(rows: string[][]) {
+    // An item: a group's cards, or one card (a card in a group moves its group).
+    const items = rows.map((row) =>
+      row.flatMap((ref) => {
+        const g = this.groupMap.get(ref);
+        if (g) return [{ keys: g.cards, framed: true }];
+        const k = this.cardRef(ref);
+        if (!k) return [];
+        const owner = this.groupOf(k);
+        return [owner ? { keys: owner.cards, framed: true } : { keys: [k], framed: false }];
+      }),
+    );
+    const seen = new Set<string>();
+    const unique = items.map((row) => row.filter((it) => !seen.has(it.keys[0]) && (it.keys.forEach((k) => seen.add(k)), true))).filter((row) => row.length);
+    if (!unique.length) return;
+    const boxOf = (it: { keys: string[]; framed: boolean }) => this.membersBox(it.keys, it.framed)!;
+    const all = unique.flat().map(boxOf);
+    const start = { x: Math.min(...all.map((b) => b.minX)), y: Math.min(...all.map((b) => b.minY)) };
+    const move = (keys: string[], dx: number, dy: number) => {
+      for (const k of keys) {
+        const c = this.cardMap.get(k)!;
+        c.x += dx;
+        c.y += dy;
+      }
+    };
+    let y = start.y;
+    let right = start.x;
+    for (const row of unique) {
+      let x = start.x;
+      let height = 0;
+      for (const it of row) {
+        const b = boxOf(it);
+        move(it.keys, x - b.minX, y - b.minY);
+        x += b.maxX - b.minX + ARRANGE_GAP;
+        height = Math.max(height, b.maxY - b.minY);
+      }
+      right = Math.max(right, x - ARRANGE_GAP);
+      y += height + ARRANGE_GAP;
+    }
+    // The rest: below, if any of it is in the way.
+    const rest = [...this.cardMap.keys()].filter((k) => !seen.has(k));
+    const area = { minX: start.x, minY: start.y, maxX: right, maxY: y - ARRANGE_GAP };
+    const hit = (b: { minX: number; minY: number; maxX: number; maxY: number }) => b.minX < area.maxX && b.maxX > area.minX && b.minY < area.maxY && b.maxY > area.minY;
+    const restBox = this.membersBox(rest, true);
+    if (restBox && rest.some((k) => hit(this.membersBox([k], !!this.groupOf(k))!))) move(rest, 0, area.maxY + 120 - restBox.minY);
+    this.position();
+    this.fit([...seen]);
+    this.changed();
+  }
+
   private async act(a: CanvasAction, group: string | null) {
     // Cards by key, or as a model names them (a symbol's name or id, a
     // note's title): what's not on the canvas is skipped.
@@ -871,9 +1083,12 @@ export class LodeFlow extends HTMLElement {
       switch (a.kind) {
         case "add":
         case "plan": {
-          const ids = a.kind === "add" ? a.ids : a.plan.cards.map((c) => c.id);
+          // From another folder: its ids, as this canvas keys them.
+          const ids = await this.idsIn(a.folder, a.kind === "add" ? a.ids : a.plan.cards.map((c) => c.id));
+          if (!ids) return;
           for (const id of ids) this.freshCards.set(id, Date.now());
-          return void (await (a.kind === "add" ? this.showAll(ids) : this.loadPlan(a.plan)));
+          if (a.kind === "add") return void (await this.showAll(ids));
+          return void (await this.loadPlan({ ...a.plan, cards: a.plan.cards.map((c, i) => ({ ...c, id: ids[i] })) }));
         }
         case "expand": {
           const card = this.cardMap.get(this.cardRef(a.card) ?? "");
@@ -919,6 +1134,12 @@ export class LodeFlow extends HTMLElement {
         }
         case "diagram":
           return this.drawDiagram(a.notes, a.links);
+        case "group":
+          return this.putGroup(a);
+        case "ungroup":
+          return this.ungroup(a.id);
+        case "arrange":
+          return this.arrangeRows(a.rows);
       }
     } finally {
       this.holdUndo = false;
@@ -1142,7 +1363,59 @@ export class LodeFlow extends HTMLElement {
   }
 
   private async fetch(id: string) {
-    return (await this.client?.call<CodeBlock | null>("block", { id })) ?? null;
+    const { label, id: own } = this.splitId(id);
+    const block = await this.clientOf(label)?.call<CodeBlock | null>("block", { id: own });
+    return block ? (label ? inFolder(block, label) : block) : null;
+  }
+
+  // --- folders: code from more than the canvas's own -------------------------------
+
+  // The folders the canvas's cards come from besides its own: label and path.
+  folderList(): { label: string; path: string }[] {
+    return [...this.folders].map(([label, f]) => ({ label, path: f.path }));
+  }
+
+  // Read code from another folder too (a worktree, another repo): its lode
+  // is the connection given, or the host's (LodeHost.folder). Its label
+  // (what its cards' ids start with), "" for the canvas's own folder, or
+  // null if there's no lode for it.
+  async addFolder(path: string, client?: LodeConnection, label?: string): Promise<string | null> {
+    const clean = path.replace(/[\\/]+$/, "");
+    if (this.folder && clean === this.folder.replace(/[\\/]+$/, "")) return "";
+    for (const [l, f] of this.folders) if (f.path === clean) return l;
+    const conn = client ?? (await this.host?.folder?.(clean)) ?? null;
+    if (!conn) return null;
+    const name = label && !this.folders.has(label) && !label.includes("/") ? label : folderLabel(clean, new Set(this.folders.keys()));
+    this.folders.set(name, { path: clean, client: conn, ...(this.isConnected && { unsubscribe: conn.onChanged(() => void this.reload()) }) });
+    return name;
+  }
+
+  private splitId(id: string) {
+    return splitFolder(id, (label) => this.folders.has(label));
+  }
+
+  private clientOf(label: string | null): LodeConnection | undefined {
+    return label ? this.folders.get(label)?.client : this.client;
+  }
+
+  // Folders no card comes from any more are let go.
+  private pruneFolders() {
+    const used = new Set([...this.cardMap.keys()].map((k) => this.splitId(k).label));
+    for (const [label, f] of this.folders) if (!used.has(label)) (f.unsubscribe?.(), this.folders.delete(label));
+  }
+
+  // A file as its folder knows it, and the folder's path (none: the canvas's own).
+  private ownFile(file: string): { file: string; folder?: string } {
+    const { label, id } = this.splitId(file);
+    return label ? { file: id, folder: this.folders.get(label)!.path } : { file };
+  }
+
+  // Ids from a folder (by path), as card keys here; null if it has no lode.
+  private async idsIn(folder: string | undefined, ids: string[]): Promise<string[] | null> {
+    if (!folder) return ids;
+    const label = await this.addFolder(folder);
+    if (label === null) return null;
+    return label ? ids.map((id) => `${label}${FOLDER_SEP}${id}`) : ids;
   }
 
   // --- actions -------------------------------------------------------------
@@ -1177,6 +1450,10 @@ export class LodeFlow extends HTMLElement {
     const detail = { action, via: "click" as const, data, ...(here && { card: this.info(key) }), ...(id && { target: id }), ...(line && { line: Number(line) }) };
     if (!this.emit(ACTION_EVENT, detail, true) || action.startsWith("host:")) return;
 
+    if (action === "ungroup" && el.dataset.group) {
+      this.remember();
+      return this.ungroup(el.dataset.group);
+    }
     if (!here) return;
     if (action === "open" && id) return this.openFrom(key, Number(line), id, (el.className.match(/k-(\w+)/)?.[1] ?? "calls") as LinkKind);
     if (action === "fold") return this.fold(here, Number(start), Number(end));
@@ -1204,7 +1481,10 @@ export class LodeFlow extends HTMLElement {
     if (action === "source") {
       const n = here.block.node;
       if (!n.file) return;
-      if (this.host?.openSource) return this.host.openSource(n.file, here.range[0]);
+      if (this.host?.openSource) {
+        const own = this.ownFile(n.file);
+        return this.host.openSource(own.file, here.range[0], own.folder);
+      }
       // No editor: the file goes on the canvas, left of the card like a
       // caller, with an arrow from where the card's code starts in it.
       if (n.id !== n.file) return this.openCaller(key, n.file, here.range[0], "local");
@@ -1260,10 +1540,13 @@ export class LodeFlow extends HTMLElement {
     const edits = this.editsOf(key);
     if (!base || !edits.length) return true;
     if (!this.emit(ACTION_EVENT, { action: "save", card: this.info(key), via, data: {} }, true)) return false;
-    const request = { file: base.file, edits };
+    const own = this.ownFile(base.file);
+    const request = { file: own.file, edits };
     let result: EditResult;
     try {
-      result = this.host?.saveEdits ? await this.host.saveEdits(request) : await this.client!.call<EditResult>("editFile", request);
+      result = this.host?.saveEdits
+        ? await this.host.saveEdits({ ...request, ...(own.folder && { folder: own.folder }) })
+        : await this.clientOf(this.splitId(base.file).label)!.call<EditResult>("editFile", request);
     } catch (error) {
       result = { ok: false, reason: "conflict", message: error instanceof Error ? error.message : String(error) };
     }
@@ -1389,6 +1672,8 @@ export class LodeFlow extends HTMLElement {
     this.remember();
     const gone = [...this.cardMap.keys()];
     this.cardMap.clear();
+    this.groupMap.clear();
+    this.pruneFolders();
     this.arrows = [];
     this.selected = null;
     this.group.clear();
@@ -1475,6 +1760,8 @@ export class LodeFlow extends HTMLElement {
     this.arrows = this.arrows.filter((a) => !gone.has(a.from) && !gone.has(a.to));
     if (this.selected && gone.has(this.selected)) this.selected = null;
     for (const k of gone) (this.group.delete(k), this.bases.delete(k), this.held.delete(k), this.editing?.forget(k));
+    this.pruneGroups();
+    this.pruneFolders();
     this.render();
     this.emit(CLOSE_EVENT, { cards: [...gone] });
     this.changed();
@@ -1531,6 +1818,7 @@ export class LodeFlow extends HTMLElement {
       cards: [...this.cardMap.values()].map((c) => ({ ...c, expanded: new Set(c.expanded) })),
       arrows: this.arrows.map((a) => ({ ...a })),
       selected: this.selected,
+      groups: [...this.groupMap.values()].map((g) => ({ ...g, cards: [...g.cards] })),
     };
   }
 
@@ -1539,6 +1827,7 @@ export class LodeFlow extends HTMLElement {
     if (!s) return;
     this.cardMap = new Map(s.cards.map((c) => [c.key, c]));
     this.arrows = s.arrows;
+    this.groupMap = new Map(s.groups.map((g) => [g.id, g]));
     this.selected = s.selected && this.cardMap.has(s.selected) ? s.selected : null;
     this.group = new Set(this.selected ? [this.selected] : []);
     this.render();
@@ -1578,7 +1867,8 @@ export class LodeFlow extends HTMLElement {
     const c = this.selected ? this.cardMap.get(this.selected) : undefined;
     const n = c?.block.node;
     if (!c || !n?.file) return void this.host?.highlight?.(null);
-    this.host?.highlight?.({ node: n.id, file: n.file, range: c.range, marks: [...new Set(c.block.links.map((l) => l.line))] });
+    const own = this.ownFile(n.file);
+    this.host?.highlight?.({ node: this.splitId(n.id).id, file: own.file, ...(own.folder && { folder: own.folder }), range: c.range, marks: [...new Set(c.block.links.map((l) => l.line))] });
   }
 
   // --- camera ------------------------------------------------------------------
@@ -1700,6 +1990,8 @@ export class LodeFlow extends HTMLElement {
       })),
       arrows: this.arrows,
       selected: this.selected,
+      ...(this.groupMap.size && { groups: [...this.groupMap.values()] }),
+      ...(this.folders.size && { folders: this.folderList() }),
       diff: this.diffBase,
       ...(this.askState && { ask: this.askState }),
       // Saved in canvas coordinates, independent of the board's padding origin.
@@ -1726,6 +2018,9 @@ export class LodeFlow extends HTMLElement {
     if (saved?.diff !== undefined && this.diffBase === null) this.diffBase = saved.diff;
     await this.loadDiff();
     if (!saved || saved.v !== 1) return;
+    // Other folders first, under the labels their cards were saved with.
+    for (const f of saved.folders ?? []) await this.addFolder(f.path, undefined, f.label).catch(() => null);
+    if (this.folders.size) await this.loadDiff();
     const ids = [...new Set(saved.cards.filter((c) => !c.text).map((c) => c.node))];
     const blocks = new Map((await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const))).filter(([, b]) => b));
     for (const c of saved.cards) {
@@ -1749,6 +2044,8 @@ export class LodeFlow extends HTMLElement {
       });
     }
     this.arrows = saved.arrows.filter((a) => this.cardMap.has(a.from) && this.cardMap.has(a.to));
+    this.groupMap = new Map((saved.groups ?? []).map((g) => [g.id, { ...g, cards: [...g.cards] }]));
+    this.pruneGroups();
     this.selected = saved.selected && this.cardMap.has(saved.selected) ? saved.selected : null;
     this.group = new Set(this.selected ? [this.selected] : []);
     this.render();
@@ -1776,6 +2073,8 @@ export class LodeFlow extends HTMLElement {
       else Object.assign(c, { block, ...(c.fragment ? {} : { range: fullRange(block) }) });
     }
     this.arrows = this.arrows.filter((a) => this.cardMap.has(a.from) && this.cardMap.has(a.to));
+    this.pruneGroups();
+    this.pruneFolders();
     await this.loadDiff();
     this.render();
   }
@@ -1800,11 +2099,18 @@ export class LodeFlow extends HTMLElement {
     this.hunks = new Map();
     this.changedIds = new Set();
     if (this.diffBase === null || !this.client) return;
-    const result = await this.client.call<ChangesResult>("changes", { base: this.diffBase }).catch(() => null);
-    for (const f of result?.files ?? []) {
-      this.hunks.set(f.file, f.hunks);
-      for (const sym of f.symbols) this.changedIds.add(sym.node.id);
-    }
+    const base = this.diffBase;
+    const results = await Promise.all(
+      [null, ...this.folders.keys()].map(async (label) => {
+        const r = await this.clientOf(label)?.call<ChangesResult>("changes", { base }).catch(() => null);
+        return r && label ? inFolder(r, label) : r;
+      }),
+    );
+    for (const result of results)
+      for (const f of result?.files ?? []) {
+        this.hunks.set(f.file, f.hunks);
+        for (const sym of f.symbols) this.changedIds.add(sym.node.id);
+      }
   }
 
   // What a card leads to, one level: its chips (calls, IPC, state) on its
@@ -1993,6 +2299,14 @@ export class LodeFlow extends HTMLElement {
       maxX = Math.max(maxX, c.x + el.offsetWidth);
       maxY = Math.max(maxY, c.y + el.offsetHeight);
     }
+    for (const g of this.groupMap.values()) {
+      const f = this.frameOf(g);
+      if (!f) continue;
+      minX = Math.min(minX, f.x);
+      minY = Math.min(minY, f.y);
+      maxX = Math.max(maxX, f.x + f.w);
+      maxY = Math.max(maxY, f.y + f.h);
+    }
     // When the board's origin shifts (a card went further left or up), move
     // the camera the other way so nothing jumps on screen.
     const next = { x: PAD - minX, y: PAD - minY };
@@ -2005,6 +2319,7 @@ export class LodeFlow extends HTMLElement {
       el.style.left = `${c.x + this.offset.x}px`;
       el.style.top = `${c.y + this.offset.y}px`;
     }
+    this.positionGroups();
     const board = this.board();
     board.style.width = `${maxX - minX + PAD * 2 + 200}px`;
     board.style.height = `${maxY - minY + PAD * 2 + 200}px`;
@@ -2048,13 +2363,30 @@ export class LodeFlow extends HTMLElement {
       const target = e.target as Element;
       this.dragged = false;
       // Empty canvas: drag to move around.
-      if (!target.closest(".card") && target.closest(".canvas")) {
+      if (!target.closest(".card, .group-head") && target.closest(".canvas")) {
         e.preventDefault(); // no text selection while panning
         this.leaveCode(); // a click on the canvas leaves the code too
         window.getSelection()?.removeAllRanges();
         pan = { x: e.clientX, y: e.clientY, cam: { ...this.camera } };
         canvas.setPointerCapture(e.pointerId);
         canvas.classList.add("panning");
+        return;
+      }
+      // A group's title: drag the group (all its cards).
+      const head = target.closest<HTMLElement>(".group-head");
+      if (head && !target.closest("button")) {
+        e.preventDefault();
+        this.leaveCode();
+        const g = this.groupMap.get(head.closest<HTMLElement>(".group")!.dataset.group!);
+        if (!g) return;
+        const starts = g.cards.flatMap((k) => {
+          const c = this.cardMap.get(k);
+          const cel = this.cardEl(k);
+          return c && cel ? [{ c, el: cel, x: c.x, y: c.y }] : [];
+        });
+        canvas.classList.add("moving");
+        drag = { key: g.cards[0], x: e.clientX, y: e.clientY, starts, before: this.snapshot(), moved: false };
+        head.setPointerCapture(e.pointerId);
         return;
       }
       const header = target.closest("header");
@@ -2092,6 +2424,7 @@ export class LodeFlow extends HTMLElement {
         s.el.style.left = `${s.c.x + this.offset.x}px`;
         s.el.style.top = `${s.c.y + this.offset.y}px`;
       }
+      this.positionGroups();
       this.drawArrows();
     });
     const end = () => {
@@ -2153,7 +2486,7 @@ export class LodeFlow extends HTMLElement {
     const kept = new Map([...this.dirty, ...this.held, ...(this.editingKey ? [this.editingKey] : [])].flatMap((k) => (this.cardEl(k) ? [[k, this.cardEl(k)!] as const] : [])));
     const focused = [...kept].find(([, el]) => el.contains(this.root.activeElement));
     const caret = focused && this.editing?.selection(focused[1].querySelector<HTMLElement>(".code")!);
-    board.innerHTML = [...this.cardMap.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
+    board.innerHTML = this.groupsHtml() + [...this.cardMap.values()].map((c) => this.cardHtml(c)).join("") + `<svg class="arrows" part="arrows" aria-hidden="true">${ARROW_DEFS}</svg>`;
     for (const [k, el] of kept) {
       const fresh = this.cardEl(k);
       if (!fresh) continue;
@@ -2166,6 +2499,35 @@ export class LodeFlow extends HTMLElement {
     }
     this.position();
     this.paintCursor();
+  }
+
+  private groupsHtml(): string {
+    // A group all from another folder says which.
+    const folderOf = (g: Group) => {
+      const labels = new Set(g.cards.map((k) => this.splitId(k).label));
+      const only = labels.size === 1 ? [...labels][0] : null;
+      return only ? `<span class="group-folder" part="group-folder" title="${escape(this.folders.get(only)?.path ?? "")}">${escape(only)}</span>` : "";
+    };
+    return [...this.groupMap.values()]
+      .map(
+        (g) => `<div class="group" part="group" data-group="${escape(g.id)}">
+      <div class="group-head" part="group-head" title="Drag to move the group">
+        <span class="group-title" part="group-title">${escape(g.title)}</span>${folderOf(g)}
+        <button class="ungroup" part="group-ungroup" data-action="ungroup" data-group="${escape(g.id)}" aria-label="Remove this group's frame" title="Remove the frame (the cards stay)">×</button>
+      </div>
+    </div>`,
+      )
+      .join("");
+  }
+
+  // Frames follow their cards.
+  private positionGroups() {
+    for (const el of this.root.querySelectorAll<HTMLElement>(".group")) {
+      const g = this.groupMap.get(el.dataset.group!);
+      const f = g && this.frameOf(g);
+      if (!f) continue;
+      Object.assign(el.style, { left: `${f.x + this.offset.x}px`, top: `${f.y + this.offset.y}px`, width: `${f.w}px`, height: `${f.h}px` });
+    }
   }
 
   private rerender() {
@@ -2295,7 +2657,7 @@ export class LodeFlow extends HTMLElement {
         <button class="close" part="card-close" data-action="close" aria-label="Close this card" title="Close this card">×</button>
         ${header}
         <button class="title" part="card-title" data-action="source" title="Open the source">${titleHtml(c)}</button>
-        <span class="meta" part="card-meta">${escape(n.file ?? "")}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
+        <span class="meta" part="card-meta">${escape((n.file ?? "").replace(FOLDER_SEP, " › "))}:${c.range[0]}${n.runtime ? ` · ${escape(n.runtime)}` : ""} · ${span} line${span === 1 ? "" : "s"}</span>
         ${c.note ? `<div class="note" part="note">${escape(c.note)}</div>` : ""}
         <div class="card-actions">${expandable ? `<button class="expand" part="expand" data-action="expand" title="Show all its lines and open everything it leads to (one level)">${expandable > 0 ? `expand · ${expandable} →` : "expand"}</button>` : ""}
         ${changedFolds.length ? `<button class="open-changes" part="open-changes" data-action="open-changes" title="Open every folded part with changes as a card">open ${changedFolds.length} change${changedFolds.length === 1 ? "" : "s"} →</button>` : ""}</div>

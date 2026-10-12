@@ -211,7 +211,10 @@ the connections spelled out, sized to a token budget.
   (`lode-graph/mcp`) is a toolkit a host mounts on its MCP server: read a
   canvas, add code cards, build a flow, and draw **note cards** (a title
   and Markdown) with labelled arrows, like a system design laid out next to
-  the real code. Clance gives its Claude sessions these.
+  the real code. They can **organise** it too: titled **groups** of cards
+  (a row, a column or a grid) and **arrange** groups in rows. And a canvas
+  can hold code from **more than one folder** (a worktree next to its
+  project, a frontend and its API). Clance gives its Claude sessions these.
 - **`lode mcp`** serves it to any agent over MCP (Claude Code, Cursor,
   Clance…): `lode_read` (a symbol and its surroundings), `lode_context` (a
   question or symbols), `lode_impact` (what your changes touch),

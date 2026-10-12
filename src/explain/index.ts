@@ -32,7 +32,9 @@ export interface ExplainRequest {
 // Something for the view to do to the canvas. Cards are card keys (node
 // ids, or node@start-end for part of one).
 export type CanvasAction =
-  | { kind: "add"; ids: string[] }
+  // `folder`: the ids are another folder's (its path), for a canvas that
+  // holds code from more than its own (LodeHost.folder).
+  | { kind: "add"; ids: string[]; folder?: string }
   | { kind: "expand"; card: string }
   | { kind: "fold"; card: string; start: number; end: number; open: boolean }
   | { kind: "close"; cards: string[] }
@@ -40,7 +42,7 @@ export type CanvasAction =
   | { kind: "focus"; cards: string[] }
   | { kind: "fit" }
   | { kind: "changes"; base: string | null }
-  | { kind: "plan"; plan: FlowPlan }
+  | { kind: "plan"; plan: FlowPlan; folder?: string }
   | { kind: "tab"; question?: string }
   // Cards that aren't code: a title and text (Markdown; the host renders
   // it), e.g. a box in a system design. `id` names it for links and for
@@ -51,7 +53,20 @@ export type CanvasAction =
   | { kind: "link"; from: string; to: string; label?: string }
   // Notes and links at once, laid out left to right along the links (a
   // diagram): links may also name cards already on the canvas.
-  | { kind: "diagram"; notes: { id: string; title: string; text: string }[]; links: { from: string; to: string; label?: string }[] };
+  | { kind: "diagram"; notes: { id: string; title: string; text: string }[]; links: { from: string; to: string; label?: string }[] }
+  // A group: a titled frame around cards (code or notes), laid out inside
+  // it as a row, a column or a grid. `id` names it (for arrange, and to
+  // change it later); `cards` replaces its cards, or with `add` joins them
+  // (a card is in one group at most). A new group goes below everything.
+  | { kind: "group"; id: string; title?: string; cards?: string[]; layout?: GroupLayout; add?: boolean }
+  // Take a group's frame away; its cards stay where they are.
+  | { kind: "ungroup"; id: string }
+  // Lay groups (by id) and cards (by name) out in rows: each row left to
+  // right, the rows top to bottom, where the first of them was. Whatever
+  // else is in the way moves below.
+  | { kind: "arrange"; rows: string[][] };
+
+export type GroupLayout = "row" | "column" | "grid";
 
 export type ExplainEvent =
   | { type: "text"; text: string } // a piece of the answer

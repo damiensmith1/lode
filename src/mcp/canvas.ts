@@ -10,6 +10,12 @@ import { lodeTools, type Tool } from "./index.js";
 // default (the one in front, say). The graph tools (lodeTools) come along,
 // each on the project of the canvas it's given.
 //
+// A canvas can hold code from more than its own folder (a worktree, another
+// repo): tools that find or add code take a `folder` (a path), and the host
+// gives that folder's lode (CanvasHost.service's folder). Cards can be
+// grouped into titled frames and laid out in rows (lode_group,
+// lode_arrange), so an agent can organise what it shows.
+//
 //   const tools = canvasTools(host);
 //   for (const t of tools) server.registerTool(t.name, { description: t.description, inputSchema: t.inputSchema }, (args) => t.run(args));
 
@@ -21,6 +27,7 @@ export interface CanvasInfo {
   question?: string; // the question it was built for
   showing: boolean; // visible
   focused: boolean; // the one in front
+  folders?: string[]; // other folders its cards come from (paths)
 }
 
 export interface CanvasHost {
@@ -29,15 +36,21 @@ export interface CanvasHost {
   // The default when a tool isn't given one (the one in front, say).
   default?(all: CanvasInfo[]): CanvasInfo | undefined;
   // One canvas's cards, as context (flow.context) and as a list.
-  read(canvas: string, budget: number): Promise<{ markdown: string; cards: { name: string; selected: boolean; note?: boolean }[]; question?: string }>;
+  read(
+    canvas: string,
+    budget: number,
+  ): Promise<{ markdown: string; cards: { name: string; selected: boolean; note?: boolean; folder?: string; group?: string }[]; question?: string; groups?: { id: string; title: string; cards: string[] }[] }>;
   // Do these to it (flow.apply, one undo step), and say what's on it now.
   apply(canvas: string, actions: CanvasAction[]): Promise<{ cards: string[] }>;
-  // The project's lode for a canvas (the service, or anything with call).
-  service(canvas: string): { call(method: string, params?: Record<string, unknown>): Promise<unknown> };
+  // The project's lode for a canvas (the service, or anything with call),
+  // or, given a folder (a path), that folder's: for code from another
+  // folder on the canvas. Throw if there's none for it.
+  service(canvas: string, folder?: string): { call(method: string, params?: Record<string, unknown>): Promise<unknown> };
 }
 
 const canvasProp = { type: "string", description: "A canvas id, from lode_canvases (default: the one in front)" };
 const cardsProp = { type: "array", items: { type: "string" }, description: "Cards on the canvas, by name (Journal.post, a note's title) or id" };
+const folderProp = { type: "string", description: "Another folder's path (a worktree, another repo), for code from there; default the canvas's own project" };
 const MAX_ADD = 12; // cards one call may add
 
 export function canvasTools(host: CanvasHost): Tool[] {
@@ -57,14 +70,15 @@ export function canvasTools(host: CanvasHost): Tool[] {
     return `${c.canvas} now has ${r.cards.length} card${r.cards.length === 1 ? "" : "s"}: ${r.cards.join(", ")}`;
   };
   // A symbol by id ("src/a.ts#run", a file) or by name ("run").
-  const resolve = async (canvas: string, symbol: string): Promise<string | null> => {
+  const resolve = async (canvas: string, symbol: string, folder?: string): Promise<string | null> => {
     const s = symbol.trim();
     if (!s) return null;
     if (s.includes("#") || /\.[a-z]+$/i.test(s)) return s;
-    const found = (await host.service(canvas).call("search", { query: s })) as { id: string; name: string }[];
+    const found = (await host.service(canvas, folder).call("search", { query: s })) as { id: string; name: string }[];
     return (found.find((n) => n.name === s) ?? found[0])?.id ?? null;
   };
   const strings = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+  const folderOf = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
   const tools: Tool[] = [
     {
@@ -74,7 +88,7 @@ export function canvasTools(host: CanvasHost): Tool[] {
       run: async () => {
         const all = await host.list();
         if (!all.length) return "No lode canvases are open.";
-        return all.map((c) => `${c.canvas} — ${c.label} · ${c.cards} card${c.cards === 1 ? "" : "s"} · ${c.folder}${c.question ? ` · built for "${c.question}"` : ""}${c.focused ? " · in front" : c.showing ? " · showing" : ""}`).join("\n");
+        return all.map((c) => `${c.canvas} — ${c.label} · ${c.cards} card${c.cards === 1 ? "" : "s"} · ${c.folder}${c.folders?.length ? ` (+ ${c.folders.join(", ")})` : ""}${c.question ? ` · built for "${c.question}"` : ""}${c.focused ? " · in front" : c.showing ? " · showing" : ""}`).join("\n");
       },
     },
     {
@@ -85,31 +99,37 @@ export function canvasTools(host: CanvasHost): Tool[] {
         const c = await pick(args.canvas);
         const r = await host.read(c.canvas, Number(args.budget) > 0 ? Number(args.budget) : 12_000);
         if (!r.cards.length) return `${c.canvas} (${c.label}) is empty: lode_show, lode_build_flow or lode_diagram put cards on it.`;
-        const header = [`Canvas ${c.canvas} — ${c.label}, in ${c.folder}${r.question ? `, built for "${r.question}"` : ""}.`, `Cards: ${r.cards.map((k) => `${k.name}${k.note ? " (note)" : ""}${k.selected ? " (selected)" : ""}`).join(", ")}`].join("\n");
+        const header = [
+          `Canvas ${c.canvas} — ${c.label}, in ${c.folder}${r.question ? `, built for "${r.question}"` : ""}.`,
+          `Cards: ${r.cards.map((k) => `${k.name}${k.note ? " (note)" : ""}${k.folder ? ` (from ${k.folder})` : ""}${k.selected ? " (selected)" : ""}`).join(", ")}`,
+          ...(r.groups?.length ? [`Groups: ${r.groups.map((g) => `${g.id} "${g.title}": ${g.cards.join(", ")}`).join("; ")}`] : []),
+        ].join("\n");
         return `${header}\n\n${r.markdown}`;
       },
     },
     {
       name: "lode_show",
-      description: "Put code on a lode canvas as cards (functions, classes, files), beside what's there, linked where they call each other. By id or name; lode_search finds them.",
-      inputSchema: { type: "object", properties: { canvas: canvasProp, symbols: { type: "array", items: { type: "string" }, description: "Symbol ids (src/a.ts#run) or names (run)" } }, required: ["symbols"] },
+      description: "Put code on a lode canvas as cards (functions, classes, files), beside what's there, linked where they call each other. By id or name; lode_search finds them. `folder` adds code from another folder (a worktree, another repo) to the same canvas.",
+      inputSchema: { type: "object", properties: { canvas: canvasProp, symbols: { type: "array", items: { type: "string" }, description: "Symbol ids (src/a.ts#run) or names (run)" }, folder: folderProp }, required: ["symbols"] },
       run: async (args) => {
         const c = await pick(args.canvas);
+        const folder = folderOf(args.folder);
         const asked = strings(args.symbols).slice(0, MAX_ADD);
-        const ids = (await Promise.all(asked.map((s) => resolve(c.canvas, s)))).filter((id): id is string => !!id);
-        if (!ids.length) throw new Error(`None of ${asked.join(", ")} is a symbol in ${c.folder}; try lode_search.`);
-        return apply(c.canvas, [{ kind: "add", ids }]);
+        const ids = (await Promise.all(asked.map((s) => resolve(c.canvas, s, folder)))).filter((id): id is string => !!id);
+        if (!ids.length) throw new Error(`None of ${asked.join(", ")} is a symbol in ${folder ?? c.folder}; try lode_search.`);
+        return apply(c.canvas, [{ kind: "add", ids, ...(folder && { folder }) }]);
       },
     },
     {
       name: "lode_build_flow",
       description: 'Build the flow that answers a question ("how is a transfer posted?") and lay it out on a lode canvas: where to start and each step after, as linked cards with a note on why each is there. mode "pass" (default: quick) or "crawl" (reads more of the project; slower).',
-      inputSchema: { type: "object", properties: { canvas: canvasProp, question: { type: "string", description: "What the flow should show" }, mode: { type: "string", enum: ["pass", "crawl"], description: "How lode finds it" } }, required: ["question"] },
+      inputSchema: { type: "object", properties: { canvas: canvasProp, question: { type: "string", description: "What the flow should show" }, mode: { type: "string", enum: ["pass", "crawl"], description: "How lode finds it" }, folder: folderProp }, required: ["question"] },
       run: async (args) => {
         const c = await pick(args.canvas);
-        const plan = (await host.service(c.canvas).call("ask", { question: String(args.question ?? ""), ...(args.mode === "pass" || args.mode === "crawl" ? { mode: args.mode } : {}) })) as FlowPlan;
+        const folder = folderOf(args.folder);
+        const plan = (await host.service(c.canvas, folder).call("ask", { question: String(args.question ?? ""), ...(args.mode === "pass" || args.mode === "crawl" ? { mode: args.mode } : {}) })) as FlowPlan;
         if (!plan.answered || !plan.cards.length) throw new Error(`lode couldn't build a flow for that: ${plan.message ?? "nothing found"}`);
-        return apply(c.canvas, [{ kind: "plan", plan }]);
+        return apply(c.canvas, [{ kind: "plan", plan, ...(folder && { folder }) }]);
       },
     },
     {
@@ -159,6 +179,35 @@ export function canvasTools(host: CanvasHost): Tool[] {
       },
     })),
     {
+      name: "lode_group",
+      description:
+        'Group cards on a lode canvas in a titled frame ("API layer", "worktree: fix-login"), laid out inside it as a row, a column or a grid; dragging the title moves them together. Give it an id to change it later or arrange it; calling again with the same id replaces its cards (or, with add, adds to them). A card is in one group at most.',
+      inputSchema: {
+        type: "object",
+        properties: { canvas: canvasProp, id: { type: "string", description: "Names the group" }, title: { type: "string" }, cards: cardsProp, layout: { type: "string", enum: ["row", "column", "grid"], description: "Default row" }, add: { type: "boolean", description: "Add these cards rather than replace" } },
+        required: ["id", "cards"],
+      },
+      run: async (args) =>
+        apply(args.canvas, [{ kind: "group", id: String(args.id ?? ""), cards: strings(args.cards), ...(args.title ? { title: String(args.title) } : {}), ...(["row", "column", "grid"].includes(String(args.layout)) ? { layout: args.layout as "row" } : {}), ...(args.add ? { add: true } : {}) }]),
+    },
+    {
+      name: "lode_ungroup",
+      description: "Remove a group's frame on a lode canvas; its cards stay where they are.",
+      inputSchema: { type: "object", properties: { canvas: canvasProp, id: { type: "string" } }, required: ["id"] },
+      run: async (args) => apply(args.canvas, [{ kind: "ungroup", id: String(args.id ?? "") }]),
+    },
+    {
+      name: "lode_arrange",
+      description:
+        "Lay a lode canvas out: rows of groups (by id) and loose cards (by name), each row left to right, the rows top to bottom, e.g. [[\"web\", \"api\"], [\"db\"]]. Use it to present what you built: inputs left, outputs right, details below. Anything else in the way moves below.",
+      inputSchema: { type: "object", properties: { canvas: canvasProp, rows: { type: "array", items: { type: "array", items: { type: "string" } }, description: "Group ids or card names, a row each" } }, required: ["rows"] },
+      run: async (args) => {
+        const rows = (Array.isArray(args.rows) ? args.rows : []).map(strings).filter((r) => r.length);
+        if (!rows.length) throw new Error("lode_arrange needs rows: [[group or card, …], …]");
+        return apply(args.canvas, [{ kind: "arrange", rows }]);
+      },
+    },
+    {
       name: "lode_changes_shown",
       description: "Show or hide git changes on a lode canvas's cards: added and changed lines marked, removed ones struck through.",
       inputSchema: { type: "object", properties: { canvas: canvasProp, base: { type: ["string", "null"], description: "A git ref (HEAD: uncommitted changes), or null to hide them" } } },
@@ -171,11 +220,11 @@ export function canvasTools(host: CanvasHost): Tool[] {
   for (const t of describing) {
     tools.push({
       name: t.name,
-      description: `${t.description} On the project of a lode canvas (\`canvas\`, default the one in front).`,
-      inputSchema: { ...t.inputSchema, properties: { ...((t.inputSchema.properties as Record<string, unknown>) ?? {}), canvas: canvasProp } },
+      description: `${t.description} On the project of a lode canvas (\`canvas\`, default the one in front), or another folder's (\`folder\`).`,
+      inputSchema: { ...t.inputSchema, properties: { ...((t.inputSchema.properties as Record<string, unknown>) ?? {}), canvas: canvasProp, folder: folderProp } },
       run: async (args) => {
         const c = await pick(args.canvas);
-        return lodeTools(host.service(c.canvas) as never).find((x) => x.name === t.name)!.run(args);
+        return lodeTools(host.service(c.canvas, folderOf(args.folder)) as never).find((x) => x.name === t.name)!.run(args);
       },
     });
   }

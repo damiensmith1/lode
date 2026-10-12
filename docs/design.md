@@ -682,11 +682,46 @@ and appended to `flow.context()` as text with its links. Cards in canvas
 actions can be named, not just keyed (a symbol's name or id, a note's
 title or id).
 
+**Groups.** Cards can be framed: a group is a title and an ordered list of
+cards, laid out inside its frame as a row, a column or a grid
+(`group`, `ungroup`, `arrange` canvas actions). A card is in one group at
+most; the frame is derived from its cards (their box plus padding and the
+title), so it follows them, and dragging the title moves them all. A new
+group goes below everything; changing one keeps it where it was.
+`arrange` takes rows of groups (by id) and loose cards (by name) and lays
+them out left to right, rows top to bottom, starting where the first of
+them was; whatever else would overlap moves below, keeping its own
+layout. Relative, not coordinates, because models are bad at pixels and
+coordinates go stale as cards grow. Groups are saved with the canvas,
+undone like anything else, and pruned as their cards go
+(`flow.groups()`, `CardInfo.group`).
+
+**More than one folder.** A canvas reads one project (its connection), and
+can hold code from others too: a worktree of it, another repo. Each extra
+folder has its own connection (`LodeHost.folder(path)`, or
+`flow.addFolder(path, connection)`), a label (its folder name, made
+unique), and its cards' ids are its node ids under the label,
+`label//id` (`views/folders.ts`). Results from a folder's lode are
+rewritten that way as they arrive (node refs and changed files), so the
+rest of the view, arrows, diffs, groups, treats them like any other id,
+and calls go back to the right lode with the label taken off: `block`,
+`editFile`, `changes` (each folder's, merged), `context` (each folder's
+cards from its own lode, the budget shared, concatenated). Hosts see
+cards as their folder knows them, with `CardInfo.folder` (and `folder` on
+`openSource`, `saveEdits`, `highlight`). Labels contain no `/` and real
+ids never start `x//`, so a prefix is unambiguous (`::` would clash with
+Ruby). A folder's lode is let go when its last card closes; the folders
+are saved with the canvas (label and path) and reconnected through the
+host first on restore. Asking and explaining stay on the canvas's own
+project. Canvas actions `add` and `plan` take a `folder` (a path).
+
 **Canvas tools** (`canvasTools(host)`, `lode-graph/mcp`): the tools an
 agent needs to see and draw on a host's canvases, defined and checked in
 lode, with the canvases reached through the host (`CanvasHost`: list,
-read, apply, and a canvas's project's service). Clance mounts them for its
-Claude sessions.
+read, apply, and a canvas's project's service, or another folder's).
+Besides cards and notes, an agent can organise what it shows: `lode_group`,
+`lode_ungroup`, `lode_arrange`; and the tools that find or add code take
+a `folder`. Clance mounts them for its Claude sessions.
 
 Every card is a real graph node that code chose, scores are data (so
 thresholds, budgets and "show more" are settings), and judgments run in
