@@ -11,6 +11,7 @@ const MAX_CALLERS = 4;
 const MAX_ROLLED = 3; // chips carried up from inside a fold before "+N inside"
 const SMALL = 3; // regions hiding this many lines or fewer never fold
 const PAGE = 25; // lines a card shows before "show 25 more"
+const SUPPORTING_LINES = 6; // a flow's supporting cards open this short
 const GAP = 72; // space between a card and one opened from it
 const PAD = 32; // board padding
 const UNDO_LIMIT = 100;
@@ -36,16 +37,19 @@ interface Card {
   limit: number; // lines shown before "show more"
   allCallers?: boolean;
   note?: string; // why it's here (a flow built for a question)
+  text?: { title: string; body: string }; // a note card: not code (its block is a stand-in)
   x: number;
   y: number;
 }
 
-// An arrow from a line in one card to another card.
+// An arrow from a line in one card to another card. A link drawn between
+// notes (or a note and code) is kind "note", from no line, with a label.
 interface Arrow {
   from: string;
   line: number;
   to: string;
-  kind: LinkKind;
+  kind: LinkKind | "note";
+  label?: string;
 }
 
 interface Snapshot {
@@ -57,7 +61,7 @@ interface Snapshot {
 // What's saved with the project (blocks are refetched on load).
 interface SavedLayout {
   v: 1;
-  cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; note?: string; x: number; y: number }[];
+  cards: { key: string; node: string; range: [number, number]; fragment?: string; expanded: number[]; limit: number; allCallers?: boolean; note?: string; text?: { title: string; body: string }; x: number; y: number }[];
   ask?: AskState; // the question this flow answers, and how it went
   banner?: string; // (older saves) the same, as one line: "/ question · how"
   arrows: Arrow[];
@@ -70,6 +74,17 @@ const CSS = `
 :host { display: flex; flex-direction: column; overflow: hidden; }
 .stage { flex: 1; min-height: 0; display: flex; }
 .canvas { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; cursor: grab; touch-action: none; }
+.card.note { min-width: 240px; max-width: 420px; }
+.card.note header { padding-bottom: 6px; }
+.note-title { font-weight: 600; font-size: 14px; color: var(--lode-fg); text-align: left; }
+.note-body { padding: 10px 14px 12px; font-size: 13px; line-height: 1.5; color: var(--lode-fg); overflow-wrap: anywhere; }
+.note-body > :first-child { margin-top: 0; }
+.note-body > :last-child { margin-bottom: 0; }
+.note-body p, .note-body ul, .note-body ol { margin: 0 0 8px; }
+.note-body ul, .note-body ol { padding-left: 18px; }
+.note-body code { font: 12px var(--lode-mono); padding: 0 3px; border-radius: 3px; background: var(--lode-sunken); }
+.note-body pre { margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; background: var(--lode-sunken); font: 12px/1.5 var(--lode-mono); white-space: pre-wrap; }
+.arrow-label { font: 11px var(--lode-font); fill: var(--lode-muted); paint-order: stroke; stroke: var(--lode-bg); stroke-width: 4px; }
 .card.hl { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lode-local) 45%, transparent), 0 4px 14px color-mix(in srgb, var(--lode-shadow) 8%, transparent); }
 .card.fresh { animation: fresh 2.4s ease-out; }
 @keyframes fresh { 0% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--lode-added) 55%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -651,6 +666,7 @@ export class LodeFlow extends HTMLElement {
     return {
       key,
       node: { id: n.id, name: n.name, kind: n.kind, file: n.file, line: n.line, ...(n.runtime && { runtime: n.runtime }) } as CardInfo["node"],
+      ...(c.text && { text: c.text }),
       range: c.range,
       ...(c.fragment && { fragment: c.fragment }),
       x: Math.round(c.x),
@@ -675,21 +691,33 @@ export class LodeFlow extends HTMLElement {
   // These cards (the selection, if two or more are selected) as context for
   // a language model: their code, how they connect, their notes and any
   // changes, sized to `budget` tokens (see src/context).
+  // Note cards aren't code: they go after the code, as text, with the links
+  // drawn between cards.
   async context(budget = 12_000): Promise<ContextResult | null> {
     if (!this.client || !this.cardMap.size) return null;
-    const keys = this.group.size > 1 ? [...this.group] : this.readingOrder();
+    const all = this.group.size > 1 ? [...this.group] : this.readingOrder();
+    const notes = all.filter((k) => this.cardMap.get(k)?.text);
+    const keys = all.filter((k) => !this.cardMap.get(k)?.text);
     const chosen = new Set(keys);
-    return this.client.call<ContextResult>("context", {
-      canvas: {
-        cards: keys.map((k) => {
-          const c = this.cardMap.get(k)!;
-          return { id: k, ...(c.note && { note: c.note }), ...(c.fragment && { range: c.range }) };
-        }),
-        arrows: this.arrows.filter((a) => chosen.has(a.from) && chosen.has(a.to)),
-      },
-      ...(this.diffBase !== null && { changes: this.diffBase }),
-      budget,
-    });
+    const code = keys.length
+      ? await this.client.call<ContextResult>("context", {
+          canvas: {
+            cards: keys.map((k) => {
+              const c = this.cardMap.get(k)!;
+              return { id: k, ...(c.note && { note: c.note }), ...(c.fragment && { range: c.range }) };
+            }),
+            arrows: this.arrows.filter((a) => a.kind !== "note" && chosen.has(a.from) && chosen.has(a.to)),
+          },
+          ...(this.diffBase !== null && { changes: this.diffBase }),
+          budget,
+        })
+      : ({ title: "notes on a lode canvas", markdown: "", tokens: 0, items: [], edges: [], dropped: 0 } as unknown as ContextResult);
+    if (!notes.length) return code;
+    const named = (k: string) => this.cardMap.get(k)?.text?.title ?? this.cardMap.get(k)?.block.node.name ?? k;
+    const linked = new Set(all);
+    const links = this.arrows.filter((a) => a.kind === "note" && linked.has(a.from) && linked.has(a.to)).map((a) => `- ${named(a.from)} → ${named(a.to)}${a.label ? ` (${a.label})` : ""}`);
+    const text = ["## Notes", ...notes.map((k) => `### ${named(k)}\n${this.cardMap.get(k)!.text!.body}`), ...(links.length ? ["", "Linked:", ...links] : [])].join("\n\n");
+    return { ...code, markdown: code.markdown ? `${code.markdown}\n\n${text}` : text };
   }
 
   // --- building on the canvas ------------------------------------------------------
@@ -710,8 +738,8 @@ export class LodeFlow extends HTMLElement {
   // (and `model`): the cards and arrows to explain, the cards it may act
   // on, the git changes shown, the question the flow was built for.
   scope(selection = false): { label: string; focus: string[]; request: { canvas: { cards: { id: string; note?: string; range?: [number, number] }[]; arrows: { from: string; line: number; to: string; kind: LinkKind }[] }; cards: string[]; changes?: string; focus?: string[]; question?: string } } {
-    const all = this.readingOrder();
-    const picked = this.group.size > 1 || (selection && this.group.size) ? [...this.group] : [];
+    const all = this.readingOrder().filter((k) => !this.cardMap.get(k)?.text);
+    const picked = this.group.size > 1 || (selection && this.group.size) ? [...this.group].filter((k) => !this.cardMap.get(k)?.text) : [];
     const keys = picked.length ? picked : all;
     const n = keys.length;
     const inScope = new Set(keys);
@@ -723,8 +751,8 @@ export class LodeFlow extends HTMLElement {
       label: picked.length ? `${n} selected card${n === 1 ? "" : "s"}` : `all ${n} card${n === 1 ? "" : "s"}`,
       focus: picked,
       request: {
-        canvas: { cards: keys.map(card), arrows: this.arrows.filter((a) => inScope.has(a.from) && inScope.has(a.to)) },
-        cards: [...this.cardMap.keys()],
+        canvas: { cards: keys.map(card), arrows: this.arrows.filter((a): a is Arrow & { kind: LinkKind } => a.kind !== "note" && inScope.has(a.from) && inScope.has(a.to)) },
+        cards: [...this.cardMap.keys()].filter((k) => !this.cardMap.get(k)?.text),
         ...(this.diffBase !== null && { changes: this.diffBase }),
         ...(picked.length && { focus: picked }),
         ...(this.asked && { question: this.asked.question }),
@@ -743,6 +771,86 @@ export class LodeFlow extends HTMLElement {
     return this.applying;
   }
 
+  // --- notes: cards that aren't code ---------------------------------------------
+  //
+  // A title and text, for what code can't show: a box in a system design, a
+  // step in an explanation. The host renders the text (host.renderNote,
+  // e.g. Markdown); without it, plain paragraphs. Links between any cards
+  // are arrows of their own (kind "note", with a label). Made by apply()
+  // (note, link, diagram); saved with the canvas like any card.
+
+  // Add a note, or replace the text of the one with this id. Its key.
+  private putNote(id: string | undefined, title: string, body: string): string {
+    const key = id?.startsWith("note:") ? id : `note:${id ?? Math.random().toString(36).slice(2, 10)}`;
+    const existing = this.cardMap.get(key);
+    if (existing) Object.assign(existing, { text: { title, body }, block: noteBlock(key, title) });
+    else {
+      this.cardMap.set(key, noteCard(key, title, body));
+      this.freshCards.set(key, Date.now());
+    }
+    return key;
+  }
+
+  // A card a model names: its key, a note's id or title, or a symbol's
+  // id or name.
+  private cardRef(ref: string): string | undefined {
+    const r = String(ref).trim();
+    if (this.cardMap.has(r)) return r;
+    if (this.cardMap.has(`note:${r}`)) return `note:${r}`;
+    const cards = [...this.cardMap.values()];
+    return (cards.find((c) => c.text?.title === r || c.block.node.id === r || c.block.node.name === r) ?? cards.find((c) => (c.text?.title ?? c.block.node.name).toLowerCase() === r.toLowerCase()))?.key;
+  }
+
+  // Notes and links laid out as a diagram: columns along the links (what
+  // nothing points to first), below what's on the canvas, then in view.
+  private drawDiagram(notes: { id: string; title: string; text: string }[], links: { from: string; to: string; label?: string }[]) {
+    const keys = notes.map((n) => this.putNote(n.id, n.title, n.text));
+    const ids = new Map(notes.map((n, i) => [n.id, keys[i]]));
+    const key = (ref: string) => ids.get(ref) ?? this.cardRef(ref);
+    const resolved = links.flatMap((l) => {
+      const from = key(l.from);
+      const to = key(l.to);
+      return from && to && from !== to ? [{ from, to, label: l.label }] : [];
+    });
+    for (const l of resolved) this.addArrow({ from: l.from, line: 0, to: l.to, kind: "note", ...(l.label && { label: l.label }) });
+    this.render();
+    // Columns: each note one right of the furthest note pointing to it.
+    const column = new Map(keys.map((k) => [k, 0]));
+    for (let pass = 0; pass < keys.length; pass++)
+      for (const l of resolved) if (column.has(l.from) && column.has(l.to)) column.set(l.to, Math.max(column.get(l.to)!, column.get(l.from)! + 1));
+    const others = [...this.cardMap.values()].filter((c) => !keys.includes(c.key));
+    const top = others.length ? Math.max(...others.map((c) => c.y + (this.cardEl(c.key)?.offsetHeight ?? 0))) + 120 : 0;
+    const left = others.length ? Math.min(...others.map((c) => c.x)) : 0;
+    const columns: string[][] = [];
+    for (const k of keys) (columns[column.get(k)!] ??= []).push(k);
+    let x = left;
+    for (const col of columns.filter(Boolean)) {
+      let y = top;
+      for (const k of col) {
+        Object.assign(this.cardMap.get(k)!, { x, y });
+        y += (this.cardEl(k)?.offsetHeight ?? 160) + 40;
+      }
+      x += Math.max(...col.map((k) => this.cardEl(k)?.offsetWidth ?? 320)) + GAP + 40;
+    }
+    this.position();
+    this.fit(keys);
+    this.changed();
+  }
+
+  private noteHtml(c: Card): string {
+    const t = c.text!;
+    const selected = this.group.has(c.key);
+    const fresh = Date.now() - (this.freshCards.get(c.key) ?? 0) < 2500;
+    const body = this.host?.renderNote?.(t.body) ?? plainParagraphs(t.body);
+    return `<section part="card card-note${selected ? " card-selected" : ""}" class="card note${selected ? " selected" : ""}${fresh ? " fresh" : ""}" data-key="${escape(c.key)}" aria-label="${escape(t.title)}">
+      <header part="card-header">
+        <button class="close" part="card-close" data-action="close" aria-label="Close this card" title="Close this card">×</button>
+        <span class="title note-title" part="card-title">${escape(t.title)}</span>
+      </header>
+      <div class="note-body" part="note-body">${body}</div>
+    </section>`;
+  }
+
   // Light up a card (a name hovered in an answer, say); null clears it.
   highlight(id: string | null) {
     this.root.querySelectorAll(".card.hl").forEach((c) => c.classList.remove("hl"));
@@ -750,7 +858,9 @@ export class LodeFlow extends HTMLElement {
   }
 
   private async act(a: CanvasAction, group: string | null) {
-    const has = (keys: string[]) => keys.filter((k) => this.cardMap.has(k));
+    // Cards by key, or as a model names them (a symbol's name or id, a
+    // note's title): what's not on the canvas is skipped.
+    const has = (keys: string[]) => keys.map((k) => this.cardRef(k)).filter((k): k is string => !!k);
     if (a.kind === "tab") return void this.host?.openView({ kind: "flow", newTab: true, ...(a.question && { ask: a.question }) });
     if (a.kind !== "focus" && a.kind !== "fit" && a.kind !== "changes" && (group === null || group !== this.undoGroup)) {
       this.remember();
@@ -766,7 +876,7 @@ export class LodeFlow extends HTMLElement {
           return void (await (a.kind === "add" ? this.showAll(ids) : this.loadPlan(a.plan)));
         }
         case "expand": {
-          const card = this.cardMap.get(a.card);
+          const card = this.cardMap.get(this.cardRef(a.card) ?? "");
           return void (card && (await this.expand(card)));
         }
         case "fold": {
@@ -790,6 +900,25 @@ export class LodeFlow extends HTMLElement {
           return this.fit([...this.cardMap.keys()]);
         case "changes":
           return void (await this.setDiff(a.base));
+        case "note": {
+          const key = this.putNote(a.id, a.title, a.text);
+          const near = a.near ? this.cardRef(a.near) : undefined;
+          this.render();
+          if (near && near !== key) this.placeBeside(key, near, 0);
+          else this.placeRoot(key);
+          this.goTo(key);
+          return this.changed();
+        }
+        case "link": {
+          const from = this.cardRef(a.from);
+          const to = this.cardRef(a.to);
+          if (!from || !to) return;
+          this.addArrow({ from, line: 0, to, kind: "note", ...(a.label && { label: a.label }) });
+          this.render();
+          return this.changed();
+        }
+        case "diagram":
+          return this.drawDiagram(a.notes, a.links);
       }
     } finally {
       this.holdUndo = false;
@@ -815,13 +944,14 @@ export class LodeFlow extends HTMLElement {
 
   // Ask a question and lay out the flow that answers it here (the server
   // builds it: see src/ask). Its cards come with a note on why each is in.
-  async ask(question: string) {
+  // `mode`: "pass" or "crawl" (see lodeApi's ask); default the service's.
+  async ask(question: string, options: { mode?: "pass" | "crawl" } = {}) {
     await this.ready;
     if (!this.client) return;
     this.setAsked({ question, status: "asking" });
     let plan: FlowPlan;
     try {
-      plan = await this.client.call<FlowPlan>("ask", { question });
+      plan = await this.client.call<FlowPlan>("ask", { question, ...(options.mode && { mode: options.mode }) });
     } catch (error) {
       this.setAsked({ question, status: "error", detail: error instanceof Error ? error.message : String(error) });
       return this.changed();
@@ -840,6 +970,8 @@ export class LodeFlow extends HTMLElement {
     for (const c of plan.cards) {
       const card = this.cardMap.get(c.id);
       if (card) card.note = c.note;
+      // Supporting cards open short; "show more" is there.
+      if (card && c.importance === "supporting") card.limit = Math.min(card.limit, SUPPORTING_LINES);
     }
     this.render();
     // Laid out by the plan's steps: where to start in the first column,
@@ -1562,6 +1694,7 @@ export class LodeFlow extends HTMLElement {
         limit: c.limit,
         ...(c.allCallers && { allCallers: true }),
         ...(c.note && { note: c.note }),
+        ...(c.text && { text: c.text }),
         x: Math.round(c.x),
         y: Math.round(c.y),
       })),
@@ -1593,9 +1726,13 @@ export class LodeFlow extends HTMLElement {
     if (saved?.diff !== undefined && this.diffBase === null) this.diffBase = saved.diff;
     await this.loadDiff();
     if (!saved || saved.v !== 1) return;
-    const ids = [...new Set(saved.cards.map((c) => c.node))];
+    const ids = [...new Set(saved.cards.filter((c) => !c.text).map((c) => c.node))];
     const blocks = new Map((await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const))).filter(([, b]) => b));
     for (const c of saved.cards) {
+      if (c.text) {
+        this.cardMap.set(c.key, { ...noteCard(c.key, c.text.title, c.text.body), x: c.x, y: c.y });
+        continue;
+      }
       const block = blocks.get(c.node);
       if (!block) continue; // gone since: renamed or deleted
       this.cardMap.set(c.key, {
@@ -1630,9 +1767,10 @@ export class LodeFlow extends HTMLElement {
 
   // After re-indexing, refetch every card (lines may have moved).
   private async reload() {
-    const ids = [...new Set([...this.cardMap.values()].map((c) => c.block.node.id))];
+    const ids = [...new Set([...this.cardMap.values()].filter((c) => !c.text).map((c) => c.block.node.id))];
     const blocks = new Map(await Promise.all(ids.map(async (id) => [id, await this.fetch(id)] as const)));
     for (const [key, c] of this.cardMap) {
+      if (c.text) continue; // a note: nothing to refetch
       const block = blocks.get(c.block.node.id);
       if (!block) this.cardMap.delete(key);
       else Object.assign(c, { block, ...(c.fragment ? {} : { range: fullRange(block) }) });
@@ -1894,6 +2032,7 @@ export class LodeFlow extends HTMLElement {
       const x1 = rightward ? toEl.offsetLeft - 3 : toEl.offsetLeft + toEl.offsetWidth + 3;
       const bend = Math.max(40, Math.abs(x1 - x0) / 2) * (rightward ? 1 : -1);
       paths.push(wire(`M ${x0} ${y0} C ${x0 + bend} ${y0}, ${x1 - bend} ${y1}, ${x1} ${y1}`, a.kind));
+      if (a.label) paths.push(`<text class="arrow-label" x="${(x0 + x1) / 2}" y="${(y0 + y1) / 2 - 6}" text-anchor="middle">${escape(a.label)}</text>`);
     }
     svg.innerHTML = ARROW_DEFS + paths.join("");
   }
@@ -2036,6 +2175,7 @@ export class LodeFlow extends HTMLElement {
   }
 
   private cardHtml(c: Card): string {
+    if (c.text) return this.noteHtml(c);
     const b = c.block;
     const n = b.node;
     const out = this.arrows.filter((a) => a.from === c.key);
@@ -2194,6 +2334,24 @@ export class LodeFlow extends HTMLElement {
       )
       .join("")}${b.callers.length > shown.length ? `<button class="caller more" data-action="callers">+${b.callers.length - shown.length} more</button>` : ""}</div>`;
   }
+}
+
+// A note's stand-in block: no lines, links or callers, so everything that
+// reads a card's code passes it by.
+function noteBlock(key: string, title: string): CodeBlock {
+  return { node: { id: key, name: title, kind: "note" as never, external: false }, outline: false, lines: [], links: [], callers: [], regions: [] };
+}
+
+function noteCard(key: string, title: string, body: string): Card {
+  return { ...newCard(key, noteBlock(key, title)), text: { title, body } };
+}
+
+// A note's text without a host renderer: escaped, a paragraph a blank line.
+function plainParagraphs(text: string): string {
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => `<p>${escape(p.trim()).replace(/\n/g, "<br>")}</p>`)
+    .join("");
 }
 
 function newCard(key: string, block: CodeBlock): Card {

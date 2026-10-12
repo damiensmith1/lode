@@ -41,7 +41,17 @@ export type CanvasAction =
   | { kind: "fit" }
   | { kind: "changes"; base: string | null }
   | { kind: "plan"; plan: FlowPlan }
-  | { kind: "tab"; question?: string };
+  | { kind: "tab"; question?: string }
+  // Cards that aren't code: a title and text (Markdown; the host renders
+  // it), e.g. a box in a system design. `id` names it for links and for
+  // updating it (a note with that id is replaced); `near`: a card to put it
+  // beside.
+  | { kind: "note"; id?: string; title: string; text: string; near?: string }
+  // An arrow between any two cards (notes or code), with a label.
+  | { kind: "link"; from: string; to: string; label?: string }
+  // Notes and links at once, laid out left to right along the links (a
+  // diagram): links may also name cards already on the canvas.
+  | { kind: "diagram"; notes: { id: string; title: string; text: string }[]; links: { from: string; to: string; label?: string }[] };
 
 export type ExplainEvent =
   | { type: "text"; text: string } // a piece of the answer

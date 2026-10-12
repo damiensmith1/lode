@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GraphStore } from "../graph/store.js";
 import { Queries } from "../query/index.js";
-import { askFlow } from "../ask/index.js";
+import { askFlow, type AskMode } from "../ask/index.js";
 import { jevJudge, type Judge } from "../ask/judge.js";
 import { contextFor, type ContextRequest } from "../context/index.js";
 import { explain, type ExplainRequest } from "../explain/index.js";
@@ -38,6 +38,9 @@ export interface ServiceOptions {
   // Which models a request may ask for ("provider:model"); unset: any the
   // providers offer, or name.
   models?: string[];
+  // How "/" questions find their flow when a request doesn't say (`ask`'s
+  // `mode`): "pass" (default) or "crawl". See src/ask.
+  askMode?: AskMode;
   // Where views' saved state goes when they use the service for it (the
   // default storage). Defaults to the store's cache directory.
   stateDir?: string;
@@ -256,7 +259,8 @@ export function createService(store: GraphStore, options: ServiceOptions = {}): 
       if (!question) throw new Error("ask: no question");
       const judge = judgeOf();
       if (!judge) throw new Error("Asking needs a model: set TYPESAFE_API_KEY (Jev) in the environment or lode's .env");
-      return askFlow(question, queries, judge, { base: typeof p.base === "string" && p.base ? p.base : "HEAD" });
+      const mode = p.mode === "crawl" || p.mode === "pass" ? p.mode : (options.askMode ?? "pass");
+      return askFlow(question, queries, judge, { base: typeof p.base === "string" && p.base ? p.base : "HEAD", mode });
     },
     symbolAt: (p) => queries.symbolAt(String(p.file), Number(p.line)),
   };

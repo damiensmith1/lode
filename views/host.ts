@@ -33,6 +33,10 @@ export interface LodeHost {
   // and what they became (`lines`); refuse with ok:false if they don't
   // match the file any more.
   saveEdits?(request: { file: string; edits: LineEdit[] }): Promise<EditResult>;
+  // Optional: a note card's text as HTML (note cards, made by apply: a
+  // title and text, e.g. Markdown a model wrote). Sanitize it: it's shown
+  // as is. Default: escaped plain paragraphs.
+  renderNote?(text: string): string;
   // Optional: text an empty canvas shows ("Pick a file to start reading").
   // Default: nothing.
   empty?: string;
@@ -133,6 +137,7 @@ export interface CardInfo {
   node: NodeRef;
   range: [number, number];
   fragment?: string; // for part of a block: its header line
+  text?: { title: string; body: string }; // a note card (not code): its title and text
   x: number;
   y: number;
   selected: boolean;

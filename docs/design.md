@@ -656,6 +656,38 @@ workflow; the graph supplies candidates; Jev judges them:
    and scores: "reads the changed `ViewRequest` · risk high") opens in a
    new tab with the "open all" layout; cards stay live.
 
+**Two modes** (`AskOptions.mode`; a host picks per question or sets the
+service's `askMode`): **pass**, the pipeline below (the question's words
+over every symbol, one Jev pass, the graph followed), and **crawl**: from
+the top of the project and the best word matches, rounds that open the
+most promising few (a folder, a class, what a function calls) with Jev
+judging what's inside, then a pass that picks the start and marks each
+card core or supporting (supporting cards open short), and one hop of
+callers shows what triggers it. On the eval (51 questions, three suites):
+pass 84% start / 88% coverage, noise 0.1, 0.6 s, 2.3 requests; crawl 80% /
+87%, noise 0.3, 1.0 s, 5.5 requests. Crawl reads more and is slower, and
+wins where the question's words aren't the code's (vocab: 82% coverage
+against 68%), so it's an option, not the default.
+
+**Note cards.** Not everything worth showing is code: a model drawing a
+system design, a step in an explanation, a caveat. A note is a card with a
+title and text (the host renders it: `host.renderNote`, Markdown in the
+app and Clance; plain paragraphs by default), made by the canvas actions
+`note`, `link` (a labelled arrow between any two cards, kind "note") and
+`diagram` (notes and links at once, in columns along the links, below
+what's there, then fitted). A note's block is an empty stand-in, so
+everything that reads a card's code passes it by; it's saved with the
+canvas (its `text`), skipped by re-indexing, left out of explain's canvas
+and appended to `flow.context()` as text with its links. Cards in canvas
+actions can be named, not just keyed (a symbol's name or id, a note's
+title or id).
+
+**Canvas tools** (`canvasTools(host)`, `lode-graph/mcp`): the tools an
+agent needs to see and draw on a host's canvases, defined and checked in
+lode, with the canvases reached through the host (`CanvasHost`: list,
+read, apply, and a canvas's project's service). Clance mounts them for its
+Claude sessions.
+
 Every card is a real graph node that code chose, scores are data (so
 thresholds, budgets and "show more" are settings), and judgments run in
 parallel, so it's fast. **An LLM is optional** and only writes a short

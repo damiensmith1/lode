@@ -24,8 +24,9 @@ function fakeJudge(route: string, topic: RegExp): Judge & { calls: number } {
     calls: 0,
     async ask(state: unknown, questions: Record<string, JudgeQuestion>) {
       judge.calls++;
-      const s = state as { candidates?: string[]; next?: string[]; dependents?: string[] };
-      const items = s.candidates ?? s.next ?? s.dependents ?? [];
+      // pass: candidates, next; crawl: items, callers; impact: dependents.
+      const s = state as { candidates?: string[]; next?: string[]; items?: string[]; callers?: string[]; dependents?: string[] };
+      const items = s.candidates ?? s.next ?? s.items ?? s.callers ?? s.dependents ?? [];
       const answers: Record<string, JudgeAnswer> = {};
       for (const [key, q] of Object.entries(questions)) {
         const index = Number(/\[(\d+)\]/.exec(JSON.stringify(q.instructions))?.[1] ?? -1);
@@ -59,6 +60,21 @@ describe("finding candidates", () => {
   it("forgives typos: a word the code never uses matches the code's words it's a slip of", () => {
     expect(ids("how are notes svaed")).toContain("src/main.ts#saveNote");
     expect(ids("where is saveNote")).toEqual(ids("where is saveNote")); // real words are left alone
+  });
+});
+
+describe("asking for a flow, as a crawl (mode: crawl)", () => {
+  it("crawls to the start, marks core and supporting cards, and shows what triggers it first", async () => {
+    const judge = fakeJudge("how", /saveNote|writeNote|Note/);
+    const plan = await askFlow("how is a note saved", queries, judge, { mode: "crawl" });
+    expect(plan.route).toBe("how");
+    expect(plan.answered).toBe(true);
+    expect(plan.cards[0]).toMatchObject({ step: 0 });
+    expect(plan.cards[0].note).toMatch(/^triggers it: calls saveNote/); // the IPC handler that calls it
+    expect(plan.cards[1]).toMatchObject({ id: "src/main.ts#saveNote", step: 1 });
+    expect(plan.cards[1].note).toMatch(/^start here/);
+    expect(plan.cards.every((c) => c.importance === "core" || c.importance === "supporting")).toBe(true);
+    expect(plan.requests).toBe(judge.calls);
   });
 });
 

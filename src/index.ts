@@ -13,7 +13,7 @@ export { tsPlugin } from "./ingest/ts/index.js";
 export { pluginFor, combinePlugins, rubyPlugin, railsPack, treeSitterPlugin, loadParser, type RubyPack, type RubyProject, type TreeSitterLanguage } from "../plugins/index.js";
 export { Queries } from "./query/index.js";
 export { createService, serveMessages, type LodeService, type ServiceOptions } from "./service/index.js";
-export { askFlow, lexicalCandidates, type AskOptions } from "./ask/index.js";
+export { askFlow, lexicalCandidates, type AskMode, type AskOptions } from "./ask/index.js";
 export { contextFor, type ContextItem, type ContextRequest, type ContextResult } from "./context/index.js";
 export { explain, type ExplainEvent, type ExplainRequest, type ExplainResult } from "./explain/index.js";
 export { openaiModel, type OpenAIOptions } from "./explain/openai.js";

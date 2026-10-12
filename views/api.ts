@@ -32,7 +32,9 @@ export function lodeApi(connection: LodeConnection) {
     resolve: (names: string[], prefer: string[] = []) => connection.call<Record<string, string>>("resolve", { names, prefer }),
     // A flow built for a question ("how do we create tabs?"); needs a judge
     // (Jev) on the server.
-    ask: (question: string) => connection.call<FlowPlan>("ask", { question }),
+    // mode: how it's found, "pass" (word matches + one Jev pass) or "crawl"
+    // (Jev crawling the project); default the service's (askMode).
+    ask: (question: string, options: { mode?: "pass" | "crawl" } = {}) => connection.call<FlowPlan>("ask", { question, ...(options.mode && { mode: options.mode }) }),
     // What changed since `base` (git; default HEAD), by file and symbol.
     changes: (base?: string) => connection.call<ChangesResult>("changes", base ? { base } : {}),
     block: (id: string) => connection.call<CodeBlock | null>("block", { id }),

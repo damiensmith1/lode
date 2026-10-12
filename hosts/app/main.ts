@@ -9,6 +9,7 @@ import { highlightJs } from "./highlight.js";
 import type { ChangesResult } from "../../src/query/types.js";
 import { ExplainPanel } from "./explain.js";
 import { entriesView } from "./entries.js";
+import { renderMarkdown } from "./markdown.js";
 import { ACTION_EVENT, ASK_EVENT, CHANGE_EVENT, COMMAND_HELP, DEFAULT_KEYS, DIRTY_EVENT, SELECT_EVENT, buildFileTree, createView, lodeApi, LodeClient, serviceStorage, CLOSE_EVENT, OPEN_EVENT, type FileTreeNode, type FlowCommand, type LodeFlow, type LodeHost, type ViewRequest } from "../../views/index.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -51,6 +52,8 @@ const host: LodeHost = {
   openView: (r) => void openView(r),
   storage,
   empty: "Pick an entry point, a file or a symbol to start reading from it.",
+  // Note cards' text is Markdown (escaped first: renderMarkdown is safe).
+  renderNote: (text) => renderMarkdown(text),
   ...highlightJs,
 };
 

@@ -3,7 +3,7 @@
 // against many repos, languages and kinds of question, not the one in
 // front of us.
 //
-//   npx tsx eval/run.ts eval/example.json [more suites…] [--repeat 3] [--only id] [--json out.json]
+//   npx tsx eval/run.ts eval/example.json [more suites…] [--repeat 3] [--only id] [--json out.json] [--mode crawl]
 //   npx tsx eval/run.ts eval/example.json --check   (every start and include pattern names a real symbol; no judge)
 //
 // Needs TYPESAFE_API_KEY (lode's .env). Suites in eval/local/ are yours and
@@ -79,9 +79,10 @@ const flag = (name: string) => {
 const repeat = Number(flag("repeat") ?? 1);
 const only = flag("only");
 const jsonOut = flag("json");
+const mode = flag("mode") === "crawl" ? "crawl" : "pass"; // how "/" finds the flow (src/ask)
 const check = args.includes("--check") && args.splice(args.indexOf("--check"), 1).length > 0;
 if (!args.length) {
-  console.error("usage: npx tsx eval/run.ts <suite.json…> [--repeat n] [--only id] [--json out.json]");
+  console.error("usage: npx tsx eval/run.ts <suite.json…> [--repeat n] [--only id] [--json out.json] [--mode pass|crawl]");
   process.exit(1);
 }
 if (!check && !process.env.TYPESAFE_API_KEY) {
@@ -151,7 +152,7 @@ for (const file of args) {
       continue;
     }
     for (let r = 0; r < repeat; r++) {
-      const plan = await askFlow(q.question, queries, judge);
+      const plan = await askFlow(q.question, queries, judge, { mode });
       const result: Result = { id: q.id, type: q.type, repo: q.repo, ms: plan.ms, requests: plan.requests, ...score(q, plan) };
       results.push(result);
       const short = (id?: string) => id?.replace(/^.*\//, "") ?? "–";

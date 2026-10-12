@@ -157,9 +157,17 @@ so a host draws its own toolbar, menus and keybindings:
   `collapseFold`, `edit`; `search` and `help` only send `lode-action`
   (the host's search box, the host's key list).
 - the canvas: `apply(CanvasAction)` (add, expand, fold, close, select,
-  focus, fit, changes: what a model asks for, and a host can too),
+  focus, fit, changes: what a model asks for, and a host can too; cards
+  by key or by name),
   `cards()`, `selection()`, `setSelection(keys)`, `readingOrder()`,
   `highlight(key)`
+- note cards, which aren't code: `apply({ kind: "note", title, text, id?,
+  near? })` (a title and text; `host.renderNote(text)` renders the text,
+  e.g. Markdown, sanitized by the host; default plain paragraphs), `{
+  kind: "link", from, to, label? }` (a labelled arrow between any cards)
+  and `{ kind: "diagram", notes, links }` (notes and links laid out left
+  to right along the links, below what's there). Saved with the canvas;
+  `cards()` gives a note's `text` ({ title, body }).
 - the view: `zoom` and `setZoom(k)`, `cursorAt` and `moveCursor(key,
   line)`, `diff` and `setDiff(base | null)`, `unsaved()`, `asked` (the
   question it answers), `context(budget)`, `scope(selection)`
@@ -325,6 +333,19 @@ the environment or lode's `.env`), or pass `createService(store, { judge
 e.g. an LLM. `lodeApi(connection).ask(question)` returns the `FlowPlan`
 for a host's own UI, and `flow.loadPlan(plan)` lays one out.
 
+**Two ways to find it**, the host's choice per question (`flow.ask(q, {
+mode })`, `lodeApi.ask(q, { mode })`, the service's `ask` `mode`) or as
+the default (`createService(store, { askMode })`):
+
+- `"pass"` (default): the question's words matched over every symbol
+  (BM25, forgiving typos), one Jev request to pick where to start and
+  what matters, then the graph followed from there. Quick.
+- `"crawl"`: Jev crawls the project from its top and the best matches,
+  opening the most promising few each round, then picks the start and
+  marks cards core or supporting (supporting cards open short). Slower,
+  reads more of the project; better when the question's words aren't the
+  code's.
+
 ## 10. Context for LLMs
 
 `contextFor(request, queries, judge?)` (service method `context`) returns
@@ -341,9 +362,26 @@ puts at risk.
 
 `serveMcp(service, { input, output })` (or `lode mcp <project>`) serves
 it to agents over MCP: `lode_search`, `lode_read`, `lode_context`,
-`lode_impact`, `lode_changes`, `lode_entries`. `flow.context(budget)`
-builds it from the canvas (or the selection) for a host to copy or send
-to its own agent.
+`lode_impact`, `lode_changes`, `lode_entries` (`lodeTools(service)` from
+`lode-graph/mcp` gives the same tools to mount on a server of your own).
+`flow.context(budget)` builds it from the canvas (or the selection; note
+cards come after the code, as text) for a host to copy or send to its own
+agent.
+
+**Canvas tools for an agent.** `canvasTools(host)` (`lode-graph/mcp`) is a
+toolkit for letting an agent see and draw on your canvases: `lode_canvases`,
+`lode_canvas` (one's cards as context), `lode_show`, `lode_build_flow`
+(with `mode`), `lode_note`, `lode_link`, `lode_diagram` (notes and labelled
+arrows, laid out along them: a system design next to the real code),
+`lode_expand`, `lode_close`, `lode_select`, `lode_focus`,
+`lode_changes_shown`, and the graph tools, each on a canvas's project.
+lode defines them and checks what's asked (names resolved to real symbols,
+at most 12 cards a call); the canvases are yours, through a `CanvasHost`:
+`list()` (id, label, folder, cards, question, which is in front), `read(id,
+budget)` (`flow.context`, the cards), `apply(id, actions)` (`flow.apply`)
+and `service(id)` (that project's service). Each tool is `{ name,
+description, inputSchema (JSON Schema), run(args) → text }`. Clance mounts
+it on its local tools server for its Claude sessions.
 
 ## 11. Explaining
 
@@ -376,7 +414,7 @@ canvas: `add_cards`, `build_flow` (a whole flow for a question, with Jev:
 pass `explain(…, { judge })`; the service uses `TYPESAFE_API_KEY`),
 `expand`, `open_fold` / `close_fold`, `close_cards`, `select`, `focus`,
 `fit`, `show_changes` and `open_tab`. Canvas tools change nothing on the
-server: each becomes a `CanvasAction` (`add`, `plan`, `expand`, `fold`,
+server: each becomes a `CanvasAction` (`add`, `plan`, `expand`, `fold`, `note`, `link`, `diagram`,
 `close`, `select`, `focus`, `fit`, `changes`, `tab`), checked against the
 graph and the cards it was sent (`ExplainRequest.cards`: every card's
 key), which the host hands to `flow.apply` as they arrive (one undo

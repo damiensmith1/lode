@@ -143,6 +143,10 @@ own terms work when they share words with the code (or a typo of them);
 pure synonyms the code never uses ("ledger" for code that says journal)
 are the known limit. `eval/` measures it against real repos.
 
+Flows can be found two ways, the host's choice: **pass** (quick: word
+matches, one Jev pass, the graph followed) or **crawl** (Jev crawling the
+project; slower, reads more).
+
 ### Explain with an LLM, and let it work the canvas
 lode explains a canvas with an LLM; the UI is the host's. The standalone
 app has an **explain** panel (press **i**, or "explain" in the header): a
@@ -203,6 +207,11 @@ of whole files: full code at the centre (unrelated folds collapsed),
 signatures and the connecting line one hop out, names further out, and
 the connections spelled out, sized to a token budget.
 
+- **Agents can see and draw on your canvases** too: `canvasTools(host)`
+  (`lode-graph/mcp`) is a toolkit a host mounts on its MCP server: read a
+  canvas, add code cards, build a flow, and draw **note cards** (a title
+  and Markdown) with labelled arrows, like a system design laid out next to
+  the real code. Clance gives its Claude sessions these.
 - **`lode mcp`** serves it to any agent over MCP (Claude Code, Cursor,
   Clance…): `lode_read` (a symbol and its surroundings), `lode_context` (a
   question or symbols), `lode_impact` (what your changes touch),

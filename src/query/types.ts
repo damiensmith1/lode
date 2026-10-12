@@ -183,7 +183,10 @@ export interface FlowPlan {
   route: FlowRoute;
   answered: boolean; // false: nothing in the code seems to answer it (see message)
   message?: string;
-  cards: { id: string; note: string; score?: number; step?: number }[]; // in reading order; step: 0 for where to start, then each hop
+  // In reading order; step: 0 for where to start, then each step along the
+  // calls. importance: core cards are the heart of the answer, supporting
+  // ones help (they open shorter).
+  cards: { id: string; note: string; score?: number; step?: number; importance?: "core" | "supporting" }[];
   requests: number; // model calls it took
   ms: number;
 }

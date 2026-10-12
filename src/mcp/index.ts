@@ -12,7 +12,7 @@ import type { LodeService } from "../service/index.js";
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
-interface Tool {
+export interface Tool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
@@ -25,6 +25,9 @@ export interface McpOptions {
   version?: string;
   log?: (message: string) => void; // default: stderr (stdout is the protocol)
 }
+
+// Tools for a host's canvases (its flow views), to mount on its own server.
+export { canvasTools, type CanvasHost, type CanvasInfo } from "./canvas.js";
 
 export function serveMcp(service: LodeService, options: McpOptions = {}): { close(): void } {
   const input = options.input ?? process.stdin;
